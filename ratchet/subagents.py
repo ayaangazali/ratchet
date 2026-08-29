@@ -48,6 +48,7 @@ class Roles:
 
     cartographer: str = "openai/gpt-5-mini"
     reviewer: str = "openai/gpt-5-mini"
+    researcher: str = "openai/gpt-5-mini"
     generators: list[str] = field(
         default_factory=lambda: [
             "anthropic/claude-sonnet-4-6",

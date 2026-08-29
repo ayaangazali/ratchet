@@ -66,6 +66,7 @@ class SearchRun:
         scheduler: Scheduler | None = None,
         bus: Bus | None = None,
         docs=None,
+        skills=None,
         parallel: bool = True,
     ) -> None:
         self.task = task
@@ -76,6 +77,7 @@ class SearchRun:
         self.scheduler = scheduler or Scheduler()
         self.bus = bus or Bus(self.repo / ".ratchet" / f"{run_id}.bus.jsonl")
         self.docs = docs
+        self.skills = skills
         self.parallel = parallel
 
         self.git = GitState.start(self.repo, run_id)
@@ -175,6 +177,28 @@ class SearchRun:
 
         return self._finish(self.tree.best(), stopped or "budget exhausted")
 
+    def _skills_for(self, node: Node, *, stalled: bool) -> list[str]:
+        """Which distilled techniques belong in this particular prompt.
+
+        The trigger is read off the state the search is actually in, because a
+        technique about escaping a stall is noise on the first expansion and the
+        whole point on the ninth.
+        """
+        if self.skills is None:
+            return []
+        trigger = "stall" if stalled else (
+            "cheat" if node.findings else
+            "regression" if node.outcome == "regressed" else
+            "start" if node.depth == 0 else "always"
+        )
+        chosen = self.skills.select(
+            framework=self.task.framework, trigger=trigger, task_text=self.task.statement
+        )
+        if chosen:
+            self.bus.emit("skill.applied", node=node.id, trigger=trigger,
+                          skills=[s.name for s in chosen], sources=[s.source for s in chosen])
+        return [s.render() for s in chosen]
+
     # ----------------------------------------------------------------- expand --
 
     def expand(self, node: Node, *, fanout: int = 1, hint: str = "") -> list[Node]:
@@ -185,6 +209,8 @@ class SearchRun:
         if self.docs is not None and node.last_failure:
             docs_text = self.docs.hint_for_failure(node.last_failure) or ""
 
+        skill_texts = self._skills_for(node, stalled=bool(hint))
+
         ctx = ctx_mod.assemble(
             task=self.task.statement,
             node=node,
@@ -192,6 +218,7 @@ class SearchRun:
             repo_map=self.repo_map,
             diff_so_far=diff_so_far,
             docs=docs_text,
+            skills=skill_texts,
             hint=hint,
         )
         self.bus.emit("expand", node=node.id, fanout=fanout, depth=node.depth, dead_ends=len(ctx.dead_ends))

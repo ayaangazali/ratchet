@@ -6,6 +6,8 @@ Four inputs, and the fourth is the one people leave out:
   failure       the trimmed failure from the node being expanded
   diff_so_far   the accumulated change from the root to this node
   dead_ends     one line per pruned sibling -- **negative-sibling injection**
+  skills        techniques distilled from papers, and *only* the ones that have
+                won a measured trial -- see `research/skills.py`
 
 Without dead ends, parallel branches rediscover the same wrong idea and you have
 paid N times for a best-of-1. One line each is enough: the point is to rule a path
@@ -17,7 +19,7 @@ is how a search run dies of its own logs.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .node import Node, Tree
@@ -53,6 +55,7 @@ def tree_listing(repo: Path, f2p_hidden: Iterable[str]) -> str:
 MAX_DIFF = 6000
 MAX_MAP = 3000
 MAX_DEAD_ENDS = 6
+MAX_SKILLS = 3
 
 
 @dataclass
@@ -63,6 +66,7 @@ class Context:
     diff_so_far: str
     dead_ends: list[str]
     docs: str = ""
+    skills: list[str] = field(default_factory=list)
     depth: int = 0
     hint: str = ""
 
@@ -79,6 +83,16 @@ class Context:
                 "# Already tried from this state, and pruned\n"
                 + "\n".join(f"- {d}" for d in self.dead_ends[:MAX_DEAD_ENDS])
                 + "\n\nDo not repeat these. If your idea resembles one of them, pick a different one."
+            )
+        if self.skills:
+            # Placed after the failure and before the instruction: a technique is
+            # advice about how to attack *this* failure, and advice read before the
+            # problem is advice that gets ignored.
+            parts.append(
+                "# Techniques that measurably helped on tasks like this\n"
+                + "\n\n".join(self.skills[:MAX_SKILLS])
+                + "\n\nEach was distilled from a cited paper and kept only because an A/B trial "
+                  "showed it improved the outcome. Apply one if it fits; ignore them if it does not."
             )
         if self.docs:
             parts.append(f"# Current upstream documentation\n{self.docs[:MAX_DIFF]}")
@@ -102,6 +116,7 @@ def assemble(
     repo_map: str,
     diff_so_far: str,
     docs: str = "",
+    skills: list[str] | None = None,
     hint: str = "",
 ) -> Context:
     parent = tree.nodes.get(node.parent_id) if node.parent_id else None
@@ -114,6 +129,7 @@ def assemble(
         diff_so_far=diff_so_far,
         dead_ends=[d.one_line() for d in dead],
         docs=docs,
+        skills=list(skills or []),
         depth=node.depth,
         hint=hint,
     )
