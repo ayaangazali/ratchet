@@ -125,6 +125,9 @@ DEFAULT_PARSE: dict[str, Any] = {
         r"^(?:[a-z-]+\.[A-Z]{2}[\s;,]*)+$",
         r"^[\[\],;:]+$",
         r"^(Submitted|Comments|Journal ref|doi|Report number|MSC class|ACM class)\b",
+        # A bare DOI on its own line. arXiv prints the value without its label, and
+        # it is long enough to beat the real title to the "first substantial line".
+        r"^(https?://(dx\.)?doi\.org/)?10\.\d{4,9}/\S+$",
         r"^▽?\s*(More|Less)$",
         r"^\d+$",
         r"^…$",
@@ -229,7 +232,10 @@ class PaperScraper:
     def __init__(self, settings: Any, bus: Any = None, *, config_path: Path | None = None) -> None:
         self.s = settings
         self.bus = bus
-        self.config_path = Path(config_path or getattr(settings, "scrapers_path", None) or "ratchet/scrapers.yaml")
+        from ..config import resolve_data_path
+
+        self.config_path = (Path(config_path) if config_path
+                            else resolve_data_path(getattr(settings, "scrapers_path", None) or "ratchet/scrapers.yaml"))
         self._cfg: dict | None = None
 
     # ------------------------------------------------------------- config --

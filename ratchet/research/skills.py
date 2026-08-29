@@ -154,7 +154,16 @@ class SkillLibrary:
             return lib
         for path in sorted(lib.root.glob("*.md")):
             try:
-                lib.skills.append(Skill.from_markdown(path.read_text(), name_hint=path.stem))
+                text = path.read_text()
+            except OSError:
+                continue
+            # Front matter is what makes a file a skill. Without this the directory's
+            # own README is loaded as one, and `research list` reports a skill called
+            # "README" with no source and no verdict.
+            if not _FRONT.match(text):
+                continue
+            try:
+                lib.skills.append(Skill.from_markdown(text, name_hint=path.stem))
             except Exception:
                 continue  # a malformed skill file must not take a run down with it
         return lib
