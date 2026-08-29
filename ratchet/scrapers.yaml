@@ -78,3 +78,57 @@ sources:
   #     section: "{version}"
   #   expect:
   #     min_chars: 400
+
+# --------------------------------------------------------------------------- #
+# Research mode: papers.
+#
+# Same pipeline as the docs sources above, pointed at a different corner of the
+# web. Extraction is by the `arXiv:<id>` marker rather than by a CSS selector,
+# because arXiv can restyle its search page whenever it likes -- the day it stops
+# printing an id beside each result is the day it stops being arXiv.
+#
+# `history` below is written by the scraper itself when it repairs an extractor.
+# Do not hand-edit it: it is the audit trail, and it is the evidence.
+# --------------------------------------------------------------------------- #
+
+papers:
+  sources:
+    arxiv:
+      url: "https://arxiv.org/search/?searchtype=all&query={query}&size=50"
+      # The unblocker zone refuses arxiv.org without KYC; an ISP zone serves it.
+      # Access policy is per-host, so the zone belongs next to the host.
+      zones: [isp_proxy1, isp_proxy2, mcp_unlocker]
+      parse:
+        id_pattern: '(?:arXiv:|/abs/)(\d{4}\.\d{4,5})'
+        authors_label: '^Authors?\s*:?\s*$|^Authors?\s*:'
+        abstract_label: '^Abstract\s*:?\s*$|^Abstract\s*:'
+        max_authors: 12
+      expect:
+        min_entries: 3
+        min_chars: 800
+        must_contain: ["arXiv"]
+
+    huggingface:
+      # Note: `?q=` is applied client-side, so this returns the trending list rather
+      # than a filtered search. That is still the signal we want from Hugging Face --
+      # what practitioners are reading now -- and it is relevance-filtered locally.
+      url: "https://huggingface.co/papers?q={query}"
+      zones: [mcp_unlocker, isp_proxy1]
+      parse:
+        id_pattern: '/papers/(\d{4}\.\d{4,5})'
+        authors_label: '^(Authors?|By)\b\s*:?'
+        abstract_label: '^(Abstract|Summary)\b\s*:?'
+        max_authors: 8
+      expect:
+        min_entries: 1
+        min_chars: 400
+        must_contain: ["papers"]
+
+    arxiv_abs:
+      # One paper, by id. Used to fill in an abstract for a Hugging Face listing
+      # entry that only carried a title -- on demand, never for the whole page.
+      url: "https://arxiv.org/abs/{id}"
+      zones: [isp_proxy1, isp_proxy2, mcp_unlocker]
+      expect:
+        min_chars: 400
+        must_contain: ["Abstract"]
