@@ -206,6 +206,52 @@ def test_dead_ends_reach_the_next_prompt(repo):
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git required")
+def test_held_out_names_never_reach_a_prompt(repo):
+    """CLAUDE.md invariant 5, end to end. The first patch passes the visible tests by
+    hardcoding them, so the held-out tests are the only failures -- exactly the state
+    in which their names used to flow through last_failure into the next context."""
+    from ratchet import context as ctx_mod
+
+    task = load_task(TASK)
+    task.repo_path = str(repo)
+    hardcoded = SLUGIFY_BUGGY.replace(
+        "    lowered = text.lower()",
+        '    if text == "Caf\u00e9 Life":\n        return "cafe-life"\n'
+        '    if text == "the quick brown fox jumps" and max_length == 17:\n'
+        '        return "the-quick-brown"\n'
+        "    lowered = text.lower()",
+    )
+    backend = ScriptedBackend([
+        "map",
+        _reply(_patch(SLUGIFY_BUGGY, hardcoded), "hardcode the visible cases"),
+        _reply(_patch(SLUGIFY_BUGGY, SLUGIFY_FIXED), "the real fix"),
+    ])
+    run = SearchRun(
+        task=task, repo=repo, provider=WorktreeProvider(repo, "t-leak"),
+        subagents=Subagents(backend), run_id="t-leak",
+        scheduler=Scheduler(Budget(max_nodes=6, max_seconds=300, max_usd=1)), parallel=False,
+    )
+    result = run.run()
+
+    forbidden = set()
+    for t in task.f2p_hidden:
+        path, _, name = t.partition("::")
+        forbidden.update((t, path, name))
+
+    assert result.green  # the run itself still works
+    for node in result.tree:
+        for tok in forbidden:
+            assert tok not in node.last_failure, f"{tok!r} leaked via node {node.id}"
+        ctx = ctx_mod.assemble(
+            task=task.statement, node=node, tree=result.tree,
+            repo_map=run.repo_map, diff_so_far="",
+        )
+        rendered = ctx.render()
+        for tok in forbidden:
+            assert tok not in rendered, f"{tok!r} leaked via the rendered context"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git required")
 def test_receipts_cover_every_graded_node(repo):
     task = load_task(TASK)
     task.repo_path = str(repo)

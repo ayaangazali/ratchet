@@ -14,6 +14,7 @@ from ratchet.verifier.parsers import (
     RESET_FAILED,
     START,
     exit_code_consistent,
+    failure_excerpt,
     parse,
     parse_exit_code,
     reset_ok,
@@ -149,3 +150,26 @@ def test_a_failed_protected_path_reset_is_not_ok():
 
 def test_a_clean_log_passes_the_reset_guard():
     assert reset_ok(GOOD)
+
+
+# ------------------------------------------------------------------ redaction --
+
+
+def test_failure_excerpt_never_names_a_held_out_test():
+    """CLAUDE.md invariant 5: this string flows into the next prompt."""
+    out = failure_excerpt(OVERFIT, parse(OVERFIT), redact=HIDDEN)
+    for test_id in HIDDEN:
+        assert test_id not in out
+        path, _, name = test_id.partition("::")
+        assert path not in out
+        assert name not in out
+    assert "held-out" in out  # the count survives; the names do not
+
+
+def test_failure_excerpt_still_names_visible_failures():
+    """The must-not-trip half: redaction must not eat the agent's real feedback."""
+    log = OVERFIT.replace(
+        "PASSED tests/test_v.py::test_a", "FAILED tests/test_v.py::test_a"
+    )
+    out = failure_excerpt(log, parse(log), redact=HIDDEN)
+    assert "tests/test_v.py::test_a" in out

@@ -18,7 +18,7 @@ Two guards apply to every framework, and both exist because agents lie:
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from ..models import TestStatus
 
@@ -153,12 +153,40 @@ def exit_code_consistent(log: str, status_map: dict[str, TestStatus]) -> bool:
     return any(s in (TestStatus.FAILED, TestStatus.ERROR) for s in status_map.values())
 
 
-def failure_excerpt(log: str, status_map: dict[str, TestStatus], limit: int = 40) -> str:
+def failure_excerpt(
+    log: str,
+    status_map: dict[str, TestStatus],
+    limit: int = 40,
+    *,
+    redact: Iterable[str] = (),
+) -> str:
     """The most useful `limit` lines for the model: the failing names, then the tail.
 
-    This is the agent's whole view of what went wrong, so it is worth being picky.
+    This is the agent's whole view of what went wrong, so it is worth being picky --
+    and it is the one string that flows from the grader into the next prompt, so it
+    is also where held-out test names would leak. `redact` takes the task's
+    `f2p_hidden` ids: they are dropped from the failing header, and every appearance
+    of an id, its file path or its bare function name in the log body is replaced.
+    The *count* of held-out failures is kept -- the agent may know it is failing
+    hidden tests (the f2p stage already says so); it may never learn which.
     """
-    failing = [t for t, s in status_map.items() if s in (TestStatus.FAILED, TestStatus.ERROR)]
-    body = slice_output(log).strip().splitlines()
-    head = [f"failing: {', '.join(failing[:8])}"] if failing else []
-    return "\n".join(head + body[-limit:])
+    hidden = set(redact)
+    is_red = lambda s: s in (TestStatus.FAILED, TestStatus.ERROR)  # noqa: E731
+    failing = [t for t, s in status_map.items() if is_red(s) and t not in hidden]
+    n_hidden_red = sum(1 for t, s in status_map.items() if is_red(s) and t in hidden)
+
+    body = slice_output(log).strip()
+    tokens: set[str] = set()
+    for t in hidden:
+        path, _, name = t.partition("::")
+        tokens.update(x for x in (t, path, name) if x)
+    # longest first, so a full id is consumed before its own substrings are
+    for tok in sorted(tokens, key=len, reverse=True):
+        body = body.replace(tok, "<held-out test>")
+
+    head = []
+    if failing or n_hidden_red:
+        shown = ", ".join(failing[:8])
+        extra = f" (+{n_hidden_red} held-out)" if n_hidden_red else ""
+        head = [f"failing: {shown}{extra}" if shown else f"failing: {n_hidden_red} held-out test(s)"]
+    return "\n".join(head + body.splitlines()[-limit:])
