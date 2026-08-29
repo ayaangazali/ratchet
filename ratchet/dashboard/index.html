@@ -37,6 +37,14 @@
     .grow { flex: 1; min-width: 0; }
     .budget { color: var(--dim); white-space: nowrap; }
     .budget b { color: var(--blue); font-weight: 600; }
+
+    /* the "how far along is she" bar — big, obvious, always current */
+    .runprog { flex: none; width: 190px; }
+    .runprog .lbl { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--dim); letter-spacing: .08em; text-transform: uppercase; }
+    .runprog .lbl b { color: var(--green); font-size: 12px; }
+    .runprog .bar { height: 10px; border-radius: 5px; background: var(--border); overflow: hidden; margin-top: 3px; }
+    .runprog .bar > span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--green)); transition: width .5s; }
+
     .pill {
       flex: none; display: flex; align-items: center; gap: 8px;
       padding: 5px 12px; border-radius: 999px;
@@ -51,13 +59,13 @@
     .pill[data-state="offline"] { border-color: var(--red); color: var(--red); }
 
     /* ------------------------------------------------------------------ gate -- */
-    /* The centerpiece promise: Ratchet asks BEFORE the irreversible step. */
     .gate-strip {
       flex: none; display: flex; gap: 10px; align-items: center;
       border: 1px dashed var(--border); border-radius: 8px;
       padding: 7px 14px; color: var(--dim); background: var(--panel);
     }
     .gate-strip .dot { color: var(--green); }
+    .gate-strip .prlink { margin-left: auto; white-space: nowrap; }
     .gate-live {
       flex: none; border: 2px solid var(--amber); border-radius: 8px;
       background: var(--panelWarm); padding: 14px 16px;
@@ -90,17 +98,15 @@
     .hint { color: var(--dim); }
 
     /* ---------------------------------------------------------------- office -- */
-    main { display: flex; gap: 10px; flex: none; height: 470px; }
+    main { display: flex; gap: 10px; flex: none; height: 440px; }
     .office {
       position: relative; flex: 1; min-width: 0; overflow: hidden;
       border: 2px solid #0c1117; border-radius: 8px;
-      /* the Pixel Agents floor tile, warmed by a multiply blend */
       background-color: #b08a62;
       background-blend-mode: multiply;
       background-size: 48px 48px;
       image-rendering: pixelated;
     }
-    /* wall along the top */
     .office::before {
       content: ""; position: absolute; left: 0; right: 0; top: 0; height: 66px; z-index: 1;
       background: #2c3140; border-bottom: 6px solid #1d212c;
@@ -157,7 +163,6 @@
     .agent.bubble-flip .bubble { left: auto; right: 22px; }
     .agent.bubble-flip .bubble::after { left: auto; right: 8px; }
 
-    /* pixel torii gate (box-shadow art, matches the amber palette) */
     .torii-label {
       position: absolute; text-align: center; color: var(--amber); z-index: 40;
       font-size: 10px; letter-spacing: .05em; text-transform: uppercase; line-height: 1.5;
@@ -191,6 +196,8 @@
     .roster .who { min-width: 0; }
     .roster .who .nm { color: var(--text); font-weight: 600; font-size: 13px; }
     .roster .who .brief { color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .roster .who .mini { height: 3px; border-radius: 2px; background: var(--border); margin-top: 4px; overflow: hidden; }
+    .roster .who .mini > span { display: block; height: 100%; background: var(--accent); }
     .roster .st { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
     .st.working { color: var(--blue); } .st.waiting { color: var(--amber); }
     .st.green { color: var(--green); } .st.pruned { color: var(--red); }
@@ -198,29 +205,56 @@
     .roster .foot { flex: none; padding: 8px 12px; color: var(--dim); font-size: 11px; border-top: 1px solid var(--border); }
 
     /* ---------------------------------------------------------------- detail -- */
-    /* The must-have: DOING / WAITING ON / DID, big enough to read across a desk. */
+    /* Click anyone: a plain-English card, everything visible, nothing to scroll. */
     .detail { flex: none; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
     .detail .head {
-      display: flex; gap: 12px; align-items: baseline; padding: 8px 14px;
+      display: flex; gap: 12px; align-items: center; padding: 8px 14px;
       border-bottom: 1px solid var(--border);
     }
     .detail .head .nm { font-weight: 700; font-size: 15px; }
     .detail .head .sub { color: var(--dim); font-size: 12px; }
+    .detail .head .stagedots { margin-left: auto; display: flex; gap: 5px; align-items: center; }
+    .stagedots .dot {
+      width: 13px; height: 13px; border-radius: 3px; background: var(--border);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 9px; color: #0c1117; font-weight: 700;
+    }
+    .stagedots .dot.pass { background: var(--green); }
+    .stagedots .dot.fail { background: var(--red); color: #fff; }
+    .stagedots .dot.skip { background: var(--dim); }
+    .stagedots .lbl { font-size: 10px; color: var(--dim); letter-spacing: .08em; text-transform: uppercase; margin-right: 3px; }
     .trip { display: grid; grid-template-columns: 1fr 1fr 1fr; }
     @media (max-width: 800px) { .trip { grid-template-columns: 1fr; } }
-    .trip > div { padding: 10px 14px; min-width: 0; border-right: 1px solid var(--panelWarm); }
+    .trip > div { padding: 9px 14px 7px; min-width: 0; border-right: 1px solid var(--panelWarm); }
     .trip > div:last-child { border-right: none; }
     .trip .k { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); display: block; margin-bottom: 2px; }
-    .trip .v { color: var(--text); display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .trip .v { color: var(--text); display: block; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .trip .doing .k { color: var(--blue); }
     .trip .waitk .k { color: var(--amber); }
     .trip .didk .k { color: var(--green); }
-    .detail .log {
-      max-height: 150px; overflow-y: auto; padding: 8px 14px 10px;
-      border-top: 1px solid var(--panelWarm); color: var(--muted); font-size: 12.5px; line-height: 1.7;
+
+    .summary {
+      padding: 10px 14px 12px; border-top: 1px solid var(--panelWarm);
+      font-size: 14px; line-height: 1.7; color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     }
-    .detail .log .ok { color: var(--green); } .detail .log .bad { color: var(--red); }
-    .detail .log .warn { color: var(--amber); } .detail .log .faint { color: var(--dim); }
+    .summary b { color: var(--green); }
+    .summary .warn { color: var(--amber); font-weight: 600; }
+    .summary .bad { color: var(--red); font-weight: 600; }
+
+    details.rawlog { border-top: 1px solid var(--panelWarm); }
+    details.rawlog summary {
+      cursor: pointer; padding: 6px 14px; color: var(--dim); font-size: 11px;
+      letter-spacing: .08em; text-transform: uppercase; list-style: none;
+    }
+    details.rawlog summary::before { content: "▸ "; }
+    details.rawlog[open] summary::before { content: "▾ "; }
+    details.rawlog .log {
+      max-height: 130px; overflow-y: auto; padding: 0 14px 10px;
+      color: var(--muted); font-size: 12px; line-height: 1.6;
+    }
+    .log .ok { color: var(--green); } .log .bad { color: var(--red); }
+    .log .warn { color: var(--amber); } .log .faint { color: var(--dim); }
 
     .tip {
       position: fixed; z-index: 90; pointer-events: none; display: none;
@@ -246,17 +280,19 @@
     </p>
   </div>
   <span class="budget" id="budget">budget —</span>
+  <div class="runprog"><div class="lbl"><span>progress to green</span><b id="prog-pct">0%</b></div><div class="bar"><span id="prog-fill"></span></div></div>
   <div class="pill" id="pill" data-state="idle"><span class="glyph">·</span><span id="pill-text">connecting…</span></div>
 </header>
 
 <section class="gate-strip" id="gate-armed">
   <span class="dot">●</span>
   <span>gate armed — Ratchet <b style="color:var(--text)">asks before</b> any irreversible step (push, PR). Nothing leaves this machine without a yes below.</span>
+  <span class="prlink" id="prlink"></span>
 </section>
 <section class="gate-live" id="gate" hidden>
   <h2>⏸ HOLDING — Ratchet wants to <span class="action" id="gate-action">act</span></h2>
   <p class="before">Nothing has happened yet. This is the ask <b>before</b> the irreversible step, not a report after it.</p>
-  <p class="summary" id="gate-summary"></p>
+  <p class="summary" id="gate-summary" style="padding:0;border:none"></p>
   <p class="stats" id="gate-stats"></p>
   <pre id="gate-diff"></pre>
   <div class="buttons">
@@ -283,13 +319,18 @@
     <span class="nm" id="d-name">the run</span>
     <span class="st working" id="d-state">idle</span>
     <span class="sub" id="d-sub"></span>
+    <span class="stagedots" id="d-dots"></span>
   </div>
   <div class="trip">
     <div class="doing"><span class="k">▸ doing now</span><span class="v" id="d-now">waiting for the bus…</span></div>
     <div class="waitk"><span class="k">⏸ waiting on</span><span class="v" id="d-wait">nothing — not blocked</span></div>
     <div class="didk"><span class="k">✔ did</span><span class="v" id="d-did">—</span></div>
   </div>
-  <div class="log" id="d-log"></div>
+  <div class="summary" id="d-summary">Waiting for a run to start.</div>
+  <details class="rawlog">
+    <summary>raw event log — for the curious</summary>
+    <div class="log" id="d-log"></div>
+  </details>
 </section>
 
 <div class="tip" id="tip"></div>
@@ -331,15 +372,17 @@ const el = (tag, cls, text) => {
 };
 const short = (m) => String(m || "").split("/").pop();
 const SPINNER = ["·", "✢", "✳", "∗", "✻", "✽"];
+const STAGE_ORDER = ["build", "cheat", "f2p", "p2p", "types", "lint", "hygiene"];
 const STAGES = { build: "build/install", cheat: "cheat check", f2p: "fail-to-pass",
                  p2p: "pass-to-pass", types: "types", lint: "lint", hygiene: "diff hygiene" };
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const REPO_URL = "__REPO_URL__";
 
 /* --------------------------------------------------------------- sprite kit -- */
 // Character sheets: 112x96 = 3 direction rows (down, up, right) x 7 frames of
 // 16x32. Frames 0-2 walk (cycle 0,1,2,1), 3-4 typing, 5-6 reading.
-const S = 3;                       // pixel scale
-const CW = 16 * S, CH = 32 * S;    // character frame size on screen
+const S = 3;
+const CW = 16 * S, CH = 32 * S;
 const ROW = { down: 0, up: 1, right: 2 };
 const WALK_CYCLE = [0, 1, 2, 1];
 const CHAR_KEYS = ["char0", "char1", "char2", "char3", "char4", "char5"];
@@ -360,7 +403,6 @@ function setCharFrame(a, frame, dir) {
   a.sheetEl.style.backgroundPosition = `-${frame * CW}px -${row * CH}px`;
   a.sheetEl.style.transform = flip ? "scaleX(-1)" : "";
 }
-// furniture: plain <img> at Nx natural size
 function propEl(key, x, y, scale) {
   const img = document.createElement("img");
   img.src = ASSETS[key];
@@ -379,10 +421,9 @@ const zOf = (bottomY) => 2 + Math.max(0, Math.round(bottomY / 4));
 
 const office = $("office");
 office.style.backgroundImage = `url(${ASSETS.floor})`;
-const DESKS = [];   // {x, y, pc, busyBy}
-const scene = { built: false, w: 0, h: 0, gate: { x: 0, y: 0 } };
+const DESKS = [];
+const scene = { built: false, w: 0, h: 0, gate: { x: 0, y: 0 }, post: { x: 0, y: 0 } };
 
-// pixel torii, box-shadow art in the page palette
 const TORII_MAP = [
   "aaaaaaaaaaaaaaaaaaaaaaaaaa",
   ".aaaaaaaaaaaaaaaaaaaaaaaa.",
@@ -423,22 +464,19 @@ function buildScene() {
   scene.w = w; scene.h = h;
   office.querySelectorAll(".prop, .torii, .torii-label, .desk-pc").forEach((n) => n.remove());
 
-  // wall dressing: bookshelf + whiteboard + bin
   office.append(propEl("shelf", 30, 6));
   office.append(propEl("whiteboard", w / 2 - 90, 10));
   office.append(propEl("bin", w / 2 + 90, 22));
-  // corners: plant, cactus, bench
   office.append(propEl("plant", w - 260, 44));
   office.append(propEl("cactus", 18, h - 96));
   office.append(propEl("bench", w - 210, h - 70));
 
-  // desks: two rows of three on the left ~70%, clear of the wall band
   DESKS.length = 0;
   const cols = 3, rows = 2;
   const zoneW = (w - 240);
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     const x = 44 + c * (zoneW / cols) + (r % 2 ? 26 : 0);
-    const y = 158 + r * 158;
+    const y = 152 + r * 152;
     const desk = propEl("desk", x, y);
     desk.classList.add("desk-pc");
     office.append(desk);
@@ -448,7 +486,6 @@ function buildScene() {
     office.append(pc);
     DESKS.push({ x, y, pc, busyBy: null });
   }
-  // the torii gate on the right
   const gx = w - 150, gy = h / 2 - 50;
   office.append(toriiEl(gx, gy));
   const lbl = el("div", "torii-label");
@@ -456,17 +493,18 @@ function buildScene() {
   lbl.style.transform = `translate(${gx - 8}px, ${gy + 68}px)`;
   office.append(lbl);
   scene.gate = { x: gx - 60, y: gy - 20 };
+  scene.post = { x: gx + 110, y: gy + 6 };  // the gatekeeper's standing post
   scene.built = true;
   for (const a of agents.values()) {
     const d = desk(a);
     if (d) { d.busyBy = a.id; a.tx = d.x + 12; a.ty = d.y - 44; }
+    if (a.post) { a.tx = scene.post.x; a.ty = scene.post.y; }
   }
 }
 function desk(a) { return a.deskIdx === null ? null : DESKS[a.deskIdx] || null; }
 function freeDesk() { return DESKS.find((d) => !d.busyBy) || null; }
 addEventListener("resize", () => { scene.built = false; buildScene(); });
 
-// PC screens flick between the three ON frames while their owner works
 let pcTick = 0;
 setInterval(() => {
   pcTick++;
@@ -479,13 +517,37 @@ setInterval(() => {
   }
 }, REDUCED ? 10 ** 9 : 400);
 
+// the office pet: pure charm, wanders the floor (sheet probed at runtime —
+// if the grid guess is wrong it just doesn't spawn)
+const pet = { el: null, x: 200, y: 300, tx: 260, ty: 320, frame: 0 };
+function spawnPet() {
+  if (!ASSETS.pet || pet.el || pet.loading) return;
+  pet.loading = true;
+  const img = new Image();
+  img.onload = () => {
+    if (img.naturalWidth !== 96 || img.naturalHeight !== 96) return;
+    const n = el("div", "spr");
+    const P = 2.5;
+    n.style.width = `${32 * P}px`; n.style.height = `${32 * P}px`;
+    const sheet = el("div", "sheet");
+    sheet.style.backgroundImage = `url(${ASSETS.pet})`;
+    sheet.style.backgroundSize = `${96 * P}px ${96 * P}px`;
+    n.append(sheet);
+    office.append(n);
+    pet.el = n; pet.sheet = sheet; pet.P = P;
+  };
+  img.src = ASSETS.pet;
+}
+
 /* ---------------------------------------------------------------- the model -- */
 
 const agents = new Map();
 const state = {
   selected: "run", pending: null, status: "idle", note: "waiting for a run",
   started: null, tick: 0, sandboxes: 0, subagents: 0, currentVerify: null,
-  finished: false,
+  finished: false, best: 0, green: false, kept: 0, pruned: 0,
+  asked: 0, granted: 0, denied: 0, expands: 0, stalls: 0, approvedShip: false,
+  budget: null,
 };
 let charIdx = 0;
 
@@ -503,17 +565,19 @@ function spawn(id, name, opts = {}) {
   office.append(node);
 
   const a = {
-    id, name, sheetKey, el: node, sheetEl: node.querySelector(".sheet"),
-    frame: 0, beat: 0, dir: "right",
+    id, name, role: opts.role || id, sheetKey, el: node, sheetEl: node.querySelector(".sheet"),
+    frame: 0, dir: "right",
     state: "working", mode: "wander", now: opts.now || "walking in…", waiting: "",
-    did: [], log: [], model: opts.model || "", nodeId: opts.nodeId || "",
-    x: -60, y: 120, tx: 0, ty: 0, pause: 0, deskIdx: null,
+    did: [], log: [], model: opts.model || "", nodeId: "", intent: opts.intent || "",
+    stageMarks: {}, reason: "", lines: 0, libs: [],
+    x: -60, y: 120, tx: 0, ty: 0, pause: 0, deskIdx: null, post: !!opts.post,
   };
   if (opts.desk) {
     const d = freeDesk();
     if (d) { d.busyBy = id; a.deskIdx = DESKS.indexOf(d); a.mode = "desk"; a.tx = d.x + 12; a.ty = d.y - 44; }
   }
-  if (a.deskIdx === null) pickTarget(a);
+  if (a.post) { a.mode = "post"; a.tx = scene.post.x; a.ty = scene.post.y; }
+  if (a.deskIdx === null && !a.post) pickTarget(a);
   node.addEventListener("click", () => select(id));
   node.addEventListener("mousemove", (e) => tip(e, a));
   node.addEventListener("mouseleave", hideTip);
@@ -546,7 +610,7 @@ function bubble(a, text, sticky) {
   clearTimeout(a._bt);
   if (text && !sticky) a._bt = setTimeout(() => { b.hidden = true; }, 4200);
 }
-function refresh(a) { drawRoster(); if (state.selected === a.id) drawDetail(); }
+function refresh(a) { drawRoster(); if (state.selected === a.id) drawDetail(); drawProgress(); }
 
 /* ------------------------------------------------------------------ motion -- */
 
@@ -556,7 +620,8 @@ function pickTarget(a) {
   a.pause = 900 + Math.random() * 3200;
 }
 function gateSlot(a) {
-  const idx = [...agents.values()].filter((x) => x.state === "waiting").indexOf(a);
+  const idx = [...agents.values()].filter((x) => x.state === "waiting" && !x.post).indexOf(a);
+  if (idx < 0) return;
   a.tx = scene.gate.x + (idx % 2) * 42;
   a.ty = scene.gate.y + Math.floor(idx / 2) * 40;
 }
@@ -565,7 +630,7 @@ function tickMotion(t) {
   const dt = Math.min(50, t - lastT); lastT = t;
   buildScene();
   for (const a of agents.values()) {
-    if (a.state === "waiting") gateSlot(a);
+    if (a.state === "waiting" && !a.post) gateSlot(a);
     if (REDUCED) {
       a.x = a.tx; a.y = a.ty;
       a.el.style.transform = `translate(${a.x}px, ${a.y}px)`;
@@ -576,9 +641,9 @@ function tickMotion(t) {
     const dx = a.tx - a.x, dy = a.ty - a.y;
     const dist = Math.hypot(dx, dy);
     const moving = dist > 4;
-    const beat2 = Math.floor(t / 150) % 4;   // walk cycle
-    const beat3 = Math.floor(t / 300) % 2;   // typing cycle
-    const beat4 = Math.floor(t / 450) % 2;   // reading cycle
+    const beat2 = Math.floor(t / 150) % 4;
+    const beat3 = Math.floor(t / 300) % 2;
+    const beat4 = Math.floor(t / 450) % 2;
 
     if (moving) {
       const sp = (0.1 * dt);
@@ -588,18 +653,16 @@ function tickMotion(t) {
       setCharFrame(a, WALK_CYCLE[beat2], a.dir);
     } else if (a.state === "working") {
       if (a.mode === "desk" && desk(a)) {
-        setCharFrame(a, 3 + beat3, "down");        // typing at the PC
+        setCharFrame(a, 3 + beat3, "down");
+      } else if (a.mode === "post") {
+        setCharFrame(a, 5 + beat4, "down");   // the gatekeeper reads at their post
       } else {
         a.pause -= dt;
         if (a.pause <= 0) pickTarget(a);
-        setCharFrame(a, 1, "down");                // idle
+        setCharFrame(a, 1, "down");
       }
     } else if (a.state === "waiting") {
-      setCharFrame(a, 5 + beat4, "right");         // reading while queued
-    } else if (a.state === "green") {
-      setCharFrame(a, 1, "down");                  // hop handled by CSS
-    } else if (a.state === "pruned") {
-      setCharFrame(a, 1, "down");
+      setCharFrame(a, 5 + beat4, "right");
     } else {
       setCharFrame(a, 1, "down");
     }
@@ -607,9 +670,70 @@ function tickMotion(t) {
     a.el.style.zIndex = zOf(a.y + CH);
     a.el.classList.toggle("bubble-flip", a.x > scene.w - 260);
   }
+  // pet wander
+  if (pet.el && !REDUCED) {
+    const dx = pet.tx - pet.x, dy = pet.ty - pet.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 3) {
+      pet.x += (dx / dist) * 0.03 * dt * 18;
+      pet.y += (dy / dist) * 0.03 * dt * 18;
+      const fr = [0, 1, 0, 2][Math.floor(t / 200) % 4];
+      const row = Math.abs(dx) > Math.abs(dy) ? 2 : (dy < 0 ? 1 : 0);
+      pet.sheet.style.backgroundPosition = `-${fr * 32 * pet.P}px -${row * 32 * pet.P}px`;
+      pet.sheet.style.transform = dx < 0 && row === 2 ? "scaleX(-1)" : "";
+    } else if (Math.random() < 0.005) {
+      pet.tx = 60 + Math.random() * (scene.w - 320);
+      pet.ty = 100 + Math.random() * (scene.h - 200);
+    }
+    pet.el.style.transform = `translate(${pet.x}px, ${pet.y}px)`;
+    pet.el.style.zIndex = zOf(pet.y + 32 * pet.P);
+  }
   requestAnimationFrame(tickMotion);
 }
 requestAnimationFrame(tickMotion);
+
+/* -------------------------------------------------------------- summaries -- */
+// Plain English, no jargon: what is this agent doing, in a sentence or three.
+
+function stagesPassed(a) { return Object.values(a.stageMarks).filter((m) => m === "PASS").length; }
+
+function summarize(a) {
+  const pct = state.green ? 100 : Math.round(state.best * 100);
+  switch (a.role) {
+    case "run": {
+      const bits = [`The search has tried <b>${state.kept + state.pruned}</b> candidate patch(es): ${state.kept} kept, ${state.pruned} rolled back.`];
+      if (state.green && state.pending) bits.push(`One patch passed <b>every check</b>. It is <span class="warn">waiting at the gate</span> for your yes — nothing ships until you decide.`);
+      else if (state.green && state.approvedShip) bits.push(`One patch passed <b>every check</b> and you approved it — the ship step was released.`);
+      else if (state.green) bits.push(`One patch passed <b>every check</b>.`);
+      else bits.push(`Best attempt so far is <b>${pct}%</b> of the way to green.`);
+      if (state.budget) {
+        const b = state.budget;
+        bits.push(`Budget used: ${Math.round(b.nodes_used || 0)} of ${Math.round(b.max_nodes || 0)} attempts, $${Number(b.usd_used || 0).toFixed(2)} of $${Number(b.max_usd || 0).toFixed(2)}.`);
+      }
+      return bits.join(" ");
+    }
+    case "verifier": {
+      const p = stagesPassed(a);
+      const head = a.intent ? `Testing the idea: “${a.intent}”.` : "Testing a candidate patch.";
+      if (a.state === "green") return `${head} It passed <b>all ${STAGE_ORDER.length} checks</b> — accepted with a perfect score. This is the winning patch.`;
+      if (a.state === "done") return `${head} Accepted after ${p} passing check(s).`;
+      if (a.state === "pruned") return `${head} <span class="bad">Rolled back:</span> ${a.reason || "a check failed"}. The attempt is parked, not deleted — the search moved on.`;
+      return `${head} <b>${p} of ${STAGE_ORDER.length}</b> checks passed so far.`;
+    }
+    case "cartographer":
+      return `Read the repository and handed the agent a <b>${a.lines}-line map</b> of it, so it starts knowing the territory instead of guessing.`;
+    case "oracle":
+      return a.libs.length
+        ? `Fetched fresh upstream documentation (${a.libs.join(", ")}) so the model works from real docs, not memory.`
+        : "Stands by to fetch real upstream docs when an error looks like an API mismatch.";
+    case "scheduler":
+      return `Decides where the next unit of compute goes: <b>${state.expands}</b> expansion(s) so far${state.stalls ? `, and forked ${state.stalls} stalled branch(es) into parallel attempts` : ""}.`;
+    case "gatekeeper":
+      return `Guards the gate. Every irreversible step (push, PR) stops here for a human <i>before</i> it happens — asked <b>${state.asked}</b>, granted ${state.granted}, denied ${state.denied}.`;
+    default:
+      return a.now;
+  }
+}
 
 /* ----------------------------------------------------------- roster + detail -- */
 
@@ -621,11 +745,18 @@ function drawRoster() {
     const row = el("div", `row${state.selected === a.id ? " selected" : ""}`);
     const face = el("span", "face");
     face.style.backgroundImage = `url(${ASSETS[a.sheetKey]})`;
-    face.style.backgroundPosition = "-16px 0";  // frame 1, facing down, head crop
+    face.style.backgroundPosition = "-16px 0";
     row.append(face);
     const who = el("div", "who");
     who.append(el("div", "nm", a.name));
     who.append(el("div", "brief", a.state === "waiting" ? `⏸ ${a.waiting}` : a.now));
+    if (a.role === "verifier" && a.state === "working") {
+      const mini = el("div", "mini");
+      const fill = el("span");
+      fill.style.width = `${(stagesPassed(a) / STAGE_ORDER.length) * 100}%`;
+      mini.append(fill);
+      who.append(mini);
+    }
     row.append(who, el("span", `st ${a.state}`, a.state));
     row.addEventListener("click", () => select(a.id));
     row.addEventListener("mousemove", (e) => tip(e, a));
@@ -640,6 +771,7 @@ function select(id) {
   for (const a of agents.values()) a.el.classList.toggle("selected", a.id === state.selected);
   drawRoster();
   drawDetail();
+  document.querySelector(".detail").scrollIntoView({ block: "nearest", behavior: REDUCED ? "auto" : "smooth" });
 }
 
 function drawDetail() {
@@ -653,10 +785,30 @@ function drawDetail() {
   $("d-now").textContent = ["done", "green", "pruned"].includes(a.state) ? "finished" : a.now;
   $("d-wait").textContent = a.waiting || "nothing — not blocked";
   $("d-did").textContent = a.did.length ? `${a.did[a.did.length - 1]}${a.did.length > 1 ? `  (+${a.did.length - 1} more)` : ""}` : "—";
+  $("d-summary").innerHTML = summarize(a);
+  // the seven checks, as dots — only where they mean something
+  const dots = $("d-dots");
+  dots.textContent = "";
+  if (a.role === "verifier") {
+    dots.append(el("span", "lbl", "checks"));
+    for (const key of STAGE_ORDER) {
+      const m = a.stageMarks[key];
+      const d = el("span", `dot ${m === "PASS" ? "pass" : m === "FAIL" ? "fail" : m === "skip" ? "skip" : ""}`,
+                   m === "PASS" ? "✓" : m === "FAIL" ? "✗" : m === "skip" ? "−" : "");
+      d.title = STAGES[key];
+      dots.append(d);
+    }
+  }
   const lg = $("d-log");
   lg.textContent = "";
   for (const line of a.log.slice(-60)) lg.append(el("div", line.kind || "", line.body));
   lg.scrollTop = lg.scrollHeight;
+}
+
+function drawProgress() {
+  const pct = state.green ? 100 : Math.round(state.best * 100);
+  $("prog-pct").textContent = `${pct}%`;
+  $("prog-fill").style.width = `${pct}%`;
 }
 
 const tipEl = $("tip");
@@ -687,10 +839,22 @@ setInterval(() => { state.tick++; drawPill(); }, 120);
 
 const fmtSecs = (s) => (s < 60 ? `${Math.round(s)}s` : `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, "0")}s`);
 function drawBudget(b) {
+  state.budget = b;
   $("budget").innerHTML =
     `nodes <b>${Math.round(b.nodes_used || 0)}/${Math.round(b.max_nodes || 0)}</b> · ` +
     `<b>${fmtSecs(b.elapsed || 0)}</b>/${fmtSecs(b.max_seconds || 0)} · ` +
     `<b>$${Number(b.usd_used || 0).toFixed(2)}</b>/$${Number(b.max_usd || 0).toFixed(2)}`;
+}
+
+// where the work will land, linked when the repo has a remote
+function drawPrLink() {
+  const box = $("prlink");
+  const label = state.approvedShip ? "PR approved →" : state.pending ? "PR waiting on you →" : "ships to →";
+  if (REPO_URL && !REPO_URL.startsWith("__")) {
+    box.innerHTML = `${label} <a href="${REPO_URL}/pulls" target="_blank">${REPO_URL.replace("https://", "")}</a>`;
+  } else {
+    box.textContent = `${label} local repo (no remote configured)`;
+  }
 }
 
 /* --------------------------------------------------------------------- gate -- */
@@ -716,6 +880,8 @@ function showGate(p, run) {
   run.waiting = `you — ${p.action || "approval"}`;
   setState(run, "waiting");
   bubble(run, "⏸ waiting on you", true);
+  const gk = agents.get("gatekeeper");
+  if (gk) { gk.waiting = "your decision"; setState(gk, "waiting"); bubble(gk, "someone at the gate!", true); }
 }
 async function decide(allow) {
   if (!state.pending) return;
@@ -757,14 +923,18 @@ function apply(kind, p, ts) {
       $("task").textContent = p.task ?? "—";
       $("provider").textContent = `${p.provider ?? "—"} · ${p.snapshots ? "snapshots" : "worktree fallback"}`;
       $("run").textContent = p.run_id ?? "—";
-      const a = spawn("run", "ratchet", { now: "orchestrating the search" });
+      const a = spawn("run", "ratchet", { role: "run", now: "orchestrating the search" });
       log(a, `run ${p.run_id} · task ${p.task} · provider ${p.provider}`);
+      spawn("gatekeeper", "gatekeeper", { role: "gatekeeper", now: "guarding the gate", post: true });
+      spawnPet();
+      drawPrLink();
       select("run");
       break;
     }
     case "repo.mapped": {
       state.subagents++;
-      const a = spawn("cartographer", "cartographer", { now: "mapping the repo", desk: true });
+      const a = spawn("cartographer", "cartographer", { role: "cartographer", now: "mapping the repo", desk: true });
+      a.lines = p.lines || 0;
       setDid(a, `mapped the repo — ${p.lines} lines into context`);
       setNow(a, "map delivered");
       setTimeout(() => setState(a, "done"), 4000);
@@ -776,16 +946,21 @@ function apply(kind, p, ts) {
       drawRoster();
       break;
 
-    case "expand":
-      if (run) { setNow(run, `expanding ${p.node} — fanout ${p.fanout}, depth ${p.depth}`); log(run, `expand ${p.node} · fanout ${p.fanout} · depth ${p.depth}`); }
+    case "expand": {
+      state.expands++;
+      const s = spawn("scheduler", "scheduler", { role: "scheduler", now: "choosing where compute goes" });
+      setNow(s, `expanding ${p.node} — fanout ${p.fanout}`);
+      log(s, `expand ${p.node} · fanout ${p.fanout} · depth ${p.depth}`);
+      if (run) setNow(run, `searching from ${p.node}`);
       break;
-
+    }
     case "verify.started": {
       state.subagents++;
       const id = `v:${p.label}`;
-      const a = spawn(id, `verifier·${p.label}`, { now: p.intent || "running the gauntlet", model: p.model, desk: true });
+      const a = spawn(id, `verifier·${p.label}`, { role: "verifier", now: "running the checks", model: p.model, desk: true, intent: p.intent });
       a.model = p.model || a.model;
-      setNow(a, p.intent || "running the gauntlet");
+      a.intent = p.intent || a.intent;
+      setNow(a, p.intent || "running the checks");
       log(a, `${short(p.model)}  ${p.intent || ""}`, "faint");
       state.currentVerify = id;
       if (run) setNow(run, `verifying candidate ${p.label}`);
@@ -796,7 +971,8 @@ function apply(kind, p, ts) {
       if (!a) break;
       const label = STAGES[p.stage] || p.stage;
       const mark = p.skipped ? "skip" : (p.passed ? "PASS" : "FAIL");
-      setNow(a, `gauntlet: ${label} — ${mark}`);
+      a.stageMarks[p.stage] = mark;
+      setNow(a, `check ${stagesPassed(a)}/${STAGE_ORDER.length}: ${label} — ${mark}`);
       log(a, `${mark.padEnd(4)} ${label.padEnd(14)} ${p.detail || ""}`, p.skipped ? "faint" : (p.passed ? "ok" : "bad"));
       break;
     }
@@ -806,10 +982,13 @@ function apply(kind, p, ts) {
       break;
     }
     case "node.added": {
+      state.kept++;
+      state.best = Math.max(state.best, p.score ?? 0);
+      if (p.green) state.green = true;
       const a = agents.get(state.currentVerify) || run;
       if (a && a !== run) {
         a.nodeId = p.id;
-        setDid(a, `kept node ${p.id} at ${(p.score ?? 0).toFixed(2)}${p.green ? " — every gate green" : ""}`);
+        setDid(a, `kept node ${p.id} at ${(p.score ?? 0).toFixed(2)}${p.green ? " — every check green" : ""}`);
         setState(a, p.green ? "green" : "done");
         bubble(a, p.green ? "★ green!" : `kept ${p.id}`, false);
         log(a, `kept ${p.id} at ${(p.score ?? 0).toFixed(2)}`, "ok");
@@ -818,55 +997,65 @@ function apply(kind, p, ts) {
       break;
     }
     case "node.pruned": {
+      state.pruned++;
       const a = agents.get(state.currentVerify) || run;
       if (a && a !== run) {
         a.nodeId = p.id;
-        setDid(a, `pruned: ${p.reason || p.outcome}`);
+        a.reason = p.reason || p.outcome || "";
+        setDid(a, `pruned: ${a.reason}`);
         setState(a, "pruned");
-        bubble(a, `✗ ${p.reason || p.outcome}`, false);
+        bubble(a, `✗ ${a.reason}`, false);
       }
       const findings = (p.findings || []).length ? ` [${p.findings.join(", ")}]` : "";
       if (run) log(run, `pruned ${p.id}: ${p.reason || p.outcome}${findings}`, "bad");
       break;
     }
-    case "stall":
-      if (run) { setNow(run, `stalled at ${p.node} — forking ${p.fanout} ways`); log(run, `stall at ${p.node} · forking ${p.fanout} ways from depth ${p.depth}`, "warn"); }
+    case "stall": {
+      state.stalls++;
+      const s = spawn("scheduler", "scheduler", { role: "scheduler" });
+      setNow(s, `stall at ${p.node} — forking ${p.fanout} ways`);
+      log(s, `stall at ${p.node} · forking ${p.fanout} ways from depth ${p.depth}`, "warn");
       break;
-
+    }
     case "docs.fetch": {
-      const a = spawn("oracle", "docs·oracle", { now: "fetching upstream docs", desk: true });
+      const a = spawn("oracle", "docs·oracle", { role: "oracle", now: "fetching upstream docs", desk: true });
+      a.libs.push(`${p.library} ${p.version}`);
       setNow(a, `fetching ${p.library} ${p.version} docs`);
       log(a, `BrightData: ${p.library} ${p.version}`, "faint");
       break;
     }
     case "docs.heal": {
-      const a = spawn("oracle", "docs·oracle", { desk: true });
+      const a = spawn("oracle", "docs·oracle", { role: "oracle", desk: true });
       setDid(a, `healed scraper for ${p.library}`);
       log(a, `repair: ${JSON.stringify(p.old_section)} → ${JSON.stringify(p.new_section)}`, "warn");
       break;
     }
     case "approval.required":
       state.status = "blocked";
+      state.asked++;
       if (run) { showGate(p, run); log(run, `approval required: ${p.action} — held before anything leaves this machine`, "warn"); }
+      drawPrLink();
       break;
 
-    case "approval.resolved":
-      // If the run already finished, the resolution is the epilogue, not a resume.
+    case "approval.resolved": {
       state.status = state.finished ? "done" : "working";
       state.pending = null;
+      if (p.approved) { state.granted++; state.approvedShip = true; } else { state.denied++; }
       $("gate").hidden = true;
       $("gate-armed").hidden = false;
       document.getElementById("torii")?.classList.remove("holding-glow");
+      const gk = agents.get("gatekeeper");
+      if (gk) { gk.waiting = ""; setState(gk, "working"); bubble(gk, p.approved ? "✔ let it through" : "✗ turned it back", false); }
       if (run) {
         run.waiting = "";
         setState(run, state.finished ? (state.note === "green" ? "green" : "done") : "working");
         setDid(run, `approval ${p.approved ? "granted" : "denied"} at the gate`);
         setNow(run, p.approved ? "proceeding — approved" : "rolled back — denied");
-        bubble(run, p.approved ? "✔ approved" : "✗ denied", false);
         log(run, `approval ${p.approved ? "granted" : "denied"}`, p.approved ? "ok" : "bad");
       }
+      drawPrLink();
       break;
-
+    }
     case "rewind":
       if (run) log(run, `rewind to ${p.node}`, "warn");
       break;
@@ -875,7 +1064,8 @@ function apply(kind, p, ts) {
       state.status = "done";
       state.finished = true;
       state.note = p.green ? "green" : (p.reason || "stopped");
-      for (const a of agents.values()) if (a.state === "working") setState(a, "done");
+      if (p.green) state.green = true;
+      for (const a of agents.values()) if (a.state === "working" && a.role !== "gatekeeper") setState(a, "done");
       if (run) {
         setDid(run, `${p.reason} — winner ${p.winner} at ${(p.score ?? 0).toFixed(2)}, ${p.nodes} nodes`);
         setState(run, p.green ? "green" : "done");
@@ -886,6 +1076,7 @@ function apply(kind, p, ts) {
   }
   drawPill();
   drawDetail();
+  drawProgress();
 }
 
 const source = new EventSource("/events");
@@ -904,4 +1095,5 @@ source.onerror = () => {
 buildScene();
 drawPill();
 drawDetail();
+drawPrLink();
 </script>
