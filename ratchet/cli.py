@@ -39,6 +39,29 @@ def _run_id(args) -> str:
     return getattr(args, "run_id", None) or f"run-{uuid.uuid4().hex[:6]}"
 
 
+def _resolve_task(spec: str):
+    """A task path on disk, or one of the specs shipped inside the package.
+
+    An installed `ratchet` has no repo checkout, so `tasks/demo-001-slugify/task.yaml`
+    resolves to the packaged copy when the path does not exist. Accepts the repo
+    path, a bare name (`demo-001-slugify`), or a real file.
+    """
+    from importlib import resources
+
+    if Path(spec).exists():
+        return load_task(spec)
+    name = Path(spec).parent.name if Path(spec).name == "task.yaml" else Path(spec).stem
+    packaged = resources.files("ratchet") / "tasks" / f"{name}.yaml"
+    if packaged.is_file():
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+            fh.write(packaged.read_text())
+        return load_task(fh.name)
+    have = [f.name for f in (resources.files("ratchet") / "tasks").iterdir()]
+    raise SystemExit(f"no task at {spec!r} and no packaged task named {name!r}; packaged: {have}")
+
+
 def _docs_oracle(settings, repo: Path, bus):
     """The Bright Data docs oracle, or None when no key is configured.
 
@@ -88,7 +111,7 @@ def cmd_run(args) -> int:
         s.repo = args.repo
     if args.budget:
         s.max_nodes = args.budget
-    task = load_task(s.task_path)
+    task = _resolve_task(s.task_path)
     if args.goal:
         task.statement = args.goal
     repo = Path(s.repo).resolve()
@@ -252,7 +275,7 @@ def cmd_verify(args) -> int:
     """The gauntlet, standalone. No model, no key, no network."""
     from .verifier.gauntlet import Gauntlet
 
-    task = load_task(args.task)
+    task = _resolve_task(args.task)
     repo = Path(args.repo or task.repo_path).resolve()
     patch = Path(args.diff).read_text() if args.diff else sys.stdin.read()
     run_id = f"verify-{uuid.uuid4().hex[:4]}"
@@ -346,8 +369,8 @@ def cmd_redteam(args) -> int:
     from . import redteam
 
     repo = Path(args.repo or "demo-repo").resolve()
-    demo_task = load_task(args.task or "tasks/demo-001-slugify/task.yaml")
-    canary = load_task(args.canary or "tasks/canary-impossible/task.yaml")
+    demo_task = _resolve_task(args.task or "tasks/demo-001-slugify/task.yaml")
+    canary = _resolve_task(args.canary or "tasks/canary-impossible/task.yaml")
     results = redteam.run(repo, demo_task, canary)
     print(redteam.report(results))
     return 0 if all(r.correct for r in results) else 1

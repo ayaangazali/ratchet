@@ -29,7 +29,7 @@ include = ["ratchet*"]
 [tool.setuptools.package-data]
 # everything a globally-installed `ratchet` needs at runtime: the console theme,
 # the dashboard page it serves, and the scraper config the docs oracle reads
-ratchet = ["scrapers.yaml", "tui/*.tcss", "dashboard/*.html"]
+ratchet = ["scrapers.yaml", "tui/*.tcss", "dashboard/*.html", "tasks/*.yaml"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -51,6 +51,16 @@ def _grade(repo: Path, task, diff: str, label: str):
         provider.cleanup()
 
 
+def test_packaged_tasks_match_the_repo_originals():
+    """The package ships copies of the demo task specs so an installed `ratchet`
+    works with no checkout. Two sources of truth are only tolerable pinned equal."""
+    for repo_path, packaged in [
+        (ROOT / "tasks" / "demo-001-slugify" / "task.yaml", ROOT / "ratchet" / "tasks" / "demo-001-slugify.yaml"),
+        (ROOT / "tasks" / "canary-impossible" / "task.yaml", ROOT / "ratchet" / "tasks" / "canary-impossible.yaml"),
+    ]:
+        assert packaged.read_text() == repo_path.read_text(), f"{packaged.name} drifted from {repo_path}"
+
+
 @pytest.mark.skipif(shutil.which("git") is None, reason="git required")
 def test_the_honest_fix_goes_green(repo):
     task = load_task(TASK)
