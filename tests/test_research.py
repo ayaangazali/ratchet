@@ -13,6 +13,7 @@ fails here rather than at a demo.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -317,6 +318,14 @@ def test_an_adopted_skill_reaches_the_generator_prompt_through_a_real_run(tmp_pa
     from ratchet.subagents import Subagents
 
     body = "Assume some of the tests grading you are ones you cannot see."
+
+    # SearchRun starts a scratch branch on construction, so it needs a real repo.
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "t@t"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "t"], check=True)
+    (tmp_path / "seed.txt").write_text("seed\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-qm", "seed"], check=True)
 
     def rendered(status: str, applies_to: list[str]) -> str:
         lib = SkillLibrary(tmp_path)
