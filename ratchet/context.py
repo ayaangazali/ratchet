@@ -52,10 +52,61 @@ def tree_listing(repo: Path, f2p_hidden: Iterable[str]) -> str:
             break
     return "\n".join(lines)
 
+def editable_sources(repo: Path, task, *, limit_bytes: int = 24000) -> list[tuple[str, str]]:
+    """The files a patch is allowed to touch, with their exact current contents.
+
+    Same exclusion rules as `tree_listing`, and for the same reason (invariant 5):
+    a held-out test's *contents* leak far more than its name, so protected paths and
+    hidden test files are never read here. What is left is the source the agent is
+    supposed to be fixing, which it needs to see in order to write a diff that
+    applies to it.
+
+    `allowed_paths` narrows this when a task sets it; otherwise everything outside the
+    protected paths is fair game, smallest files first so a budget spent on one huge
+    module does not crowd out the one that matters.
+    """
+    repo = Path(repo)
+    skip = {".git", ".ratchet", "__pycache__", "node_modules", ".venv", ".pytest_cache"}
+    hidden_files = {t.partition("::")[0] for t in getattr(task, "f2p_hidden", [])}
+    protected = [pp.rstrip("/") for pp in getattr(task, "protected_paths", [])]
+    allowed = [ap.rstrip("/") for ap in getattr(task, "allowed_paths", [])]
+
+    def is_under(rel: str, roots: list[str]) -> bool:
+        return any(rel == r or rel.startswith(r + "/") for r in roots)
+
+    picked: list[tuple[int, str, str]] = []
+    for f in sorted(repo.rglob("*")):
+        if any(part in skip for part in f.parts) or not f.is_file():
+            continue
+        rel = str(f.relative_to(repo))
+        if rel in hidden_files or is_under(rel, protected):
+            continue
+        if allowed and not is_under(rel, allowed):
+            continue
+        if f.suffix in {".pyc", ".so", ".png", ".jpg", ".gif", ".pdf", ".zip", ".lock"}:
+            continue
+        try:
+            body = f.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue  # a binary or unreadable file is not something to patch
+        picked.append((len(body), rel, body))
+
+    out: list[tuple[str, str]] = []
+    spent = 0
+    for size, rel, body in sorted(picked):
+        if spent + size > limit_bytes and out:
+            break
+        out.append((rel, body))
+        spent += size
+    return out
+
+
 MAX_DIFF = 6000
 MAX_MAP = 3000
 MAX_DEAD_ENDS = 6
 MAX_SKILLS = 3
+MAX_SOURCE = 24000
+MAX_SOURCE_FILE = 8000
 
 
 @dataclass
@@ -67,6 +118,13 @@ class Context:
     dead_ends: list[str]
     docs: str = ""
     skills: list[str] = field(default_factory=list)
+    #: (path, contents) for every file the patch is allowed to touch. Sending these
+    #: is not a nicety. Without them the model is asked for a unified diff against a
+    #: file it has never seen, so it invents the context lines -- plausible code,
+    #: correct intent, and a patch that cannot apply. Every node in an early live run
+    #: was pruned "patch did not apply" for exactly this reason while the model's
+    #: stated intent was right every time.
+    sources: list[tuple[str, str]] = field(default_factory=list)
     depth: int = 0
     hint: str = ""
 
@@ -96,11 +154,32 @@ class Context:
             )
         if self.docs:
             parts.append(f"# Current upstream documentation\n{self.docs[:MAX_DIFF]}")
+        if self.sources:
+            budget = MAX_SOURCE
+            blocks = []
+            for path, body in self.sources:
+                if budget <= 0:
+                    break
+                chunk = body[:min(MAX_SOURCE_FILE, budget)]
+                budget -= len(chunk)
+                truncated = "\n# ... truncated ..." if len(chunk) < len(body) else ""
+                blocks.append(f"`{path}`\n```\n{chunk}{truncated}\n```")
+            parts.append(
+                "# The files you may edit, exactly as they are on disk right now\n"
+                + "\n\n".join(blocks)
+                + "\n\nYour diff's context lines must match this text character for character."
+            )
         if self.hint:
             parts.append(f"# Note\n{self.hint}")
         parts.append(
             "# What to produce\n"
-            "A single unified diff against the current state, and one line saying what it is trying to do.\n"
+            "One line `intent: <what this is trying to do>`, then the change, in either form:\n\n"
+            "  1. a unified diff in a ```diff block, or\n"
+            "  2. the complete new contents of each file you changed, in a fenced block whose\n"
+            "     info string is `file:<path>` -- e.g. ```file:src/pkg/mod.py\n\n"
+            "Form 2 is usually the safer one: hand-counted hunk headers are the most common\n"
+            "reason a correct fix is rejected before it is ever run. The harness converts it\n"
+            "into a real diff against the text above, so both forms are graded identically.\n"
             "You cannot mark yourself finished: a verifier you do not control decides whether this sticks.\n"
             "Editing tests, skipping them, weakening assertions or special-casing on test inputs is detected "
             "statically before your patch runs, and prunes the branch."
@@ -117,6 +196,7 @@ def assemble(
     diff_so_far: str,
     docs: str = "",
     skills: list[str] | None = None,
+    sources: list[tuple[str, str]] | None = None,
     hint: str = "",
 ) -> Context:
     parent = tree.nodes.get(node.parent_id) if node.parent_id else None
@@ -130,6 +210,7 @@ def assemble(
         dead_ends=[d.one_line() for d in dead],
         docs=docs,
         skills=list(skills or []),
+        sources=list(sources or []),
         depth=node.depth,
         hint=hint,
     )

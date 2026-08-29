@@ -229,11 +229,12 @@ class SearchRun:
             diff_so_far=diff_so_far,
             docs=docs_text,
             skills=skill_texts,
+            sources=ctx_mod.editable_sources(self.repo, self.task),
             hint=hint,
         )
         self.bus.emit("expand", node=node.id, fanout=fanout, depth=node.depth, dead_ends=len(ctx.dead_ends))
 
-        candidates = self.agents.generate(ctx.render(), n=fanout)
+        candidates = self.agents.generate(ctx.render(), n=fanout, sources=ctx.sources)
         for c in candidates:
             self.scheduler.budget.spend(usd=c.cost_usd)
 
