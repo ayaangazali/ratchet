@@ -604,6 +604,14 @@ pre.audit {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+.chip.qodo-go {
+  padding: 2px 7px;
+  font-size: 11px;
+}
+.chip.qodo-go:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 .qodo-at {
   font-family: var(--mono);
   font-size: 10px;

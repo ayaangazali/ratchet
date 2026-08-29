@@ -59,8 +59,22 @@ history? Proven live, with timestamps:
    — and note the feed grew from 11 PRs/15 comments to 13/20 during the session:
    Qodo was reviewing other agents' fresh PRs while we watched.
 
-Qodo Command CLI (`@qodo/command` 0.36.0) is installed via npx but has no API key on
-this machine; per-diff CLI reviews need `qodo login` (interactive, owner-only).
+**Qodo Command CLI is discontinued upstream** (verified 2026-08-29, post-login: the
+server replies "Qodo Command has been discontinued. You can still get automated code
+reviews by connecting your Git provider"). The hosted PR bot is Qodo's only living
+review surface, so the integration targets it directly.
+
+## Scenario 12 — commanding Qodo from inside the console
+
+Each Qodo panel row has a ↻ button → `POST /api/qodo/rereview` → `gh pr comment
+<n> --body "/review"`. Browser-tested on PR #12:
+
+- console: `[qodo] fresh review commanded on PR #12:
+  https://github.com/ayaangazali/ratchet/pull/12#issuecomment-5465460574`
+- GitHub: `/review` comment at 23:19:45Z, bot ack "Qodo is busy working" at
+  **23:19:52Z** — 7 seconds from UI click to Qodo responding.
+- The gateway drops `qodo_cache.json` on trigger so the panel's next fetch shows the
+  fresh pass. **pass**
 
 ## Known limitations
 

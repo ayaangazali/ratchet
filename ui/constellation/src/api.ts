@@ -44,6 +44,17 @@ export async function getQodo(): Promise<QodoFeed> {
   return (await res.json()) as QodoFeed;
 }
 
+export async function requestQodoRereview(pr: number): Promise<string> {
+  const res = await fetch("/api/qodo/rereview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pr }),
+  });
+  if (!res.ok) throw new Error(`re-review failed (${res.status})`);
+  const data = await res.json();
+  return data.comment_url as string;
+}
+
 export type StreamHandlers = {
   onStart?: (d: {
     run_id: string;

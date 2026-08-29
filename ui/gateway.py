@@ -374,5 +374,27 @@ async def qodo():
     return await asyncio.to_thread(_qodo_cached)
 
 
+@app.post("/api/qodo/rereview")
+async def qodo_rereview(body: dict):
+    """Command the hosted Qodo bot to re-review a PR ('/review' comment).
+
+    This is Qodo's supported trigger — the Command CLI was discontinued upstream,
+    so the Git-provider bot is the one review engine there is.
+    """
+    pr = int(body.get("pr") or 0)
+    if not pr:
+        return JSONResponse({"error": "pr required"}, status_code=400)
+    try:
+        out = subprocess.run(
+            ["gh", "pr", "comment", str(pr), "--repo", GH_REPO, "--body", "/review"],
+            capture_output=True, text=True, check=True, timeout=30,
+        )
+    except subprocess.CalledProcessError as e:
+        return JSONResponse({"error": e.stderr.strip()}, status_code=502)
+    # drop the cache so the panel picks up the fresh review on its next fetch
+    QODO_CACHE.unlink(missing_ok=True)
+    return {"ok": True, "comment_url": out.stdout.strip()}
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8080)

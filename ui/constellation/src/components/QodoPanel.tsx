@@ -1,11 +1,25 @@
 import { useEffect, useState } from "react";
-import { getQodo } from "../api";
+import { getQodo, requestQodoRereview } from "../api";
 import type { QodoFeed } from "../types";
 
 /** Live findings the qodo-code-review bot left on this repo's real PRs. */
 export default function QodoPanel() {
   const [feed, setFeed] = useState<QodoFeed | null>(null);
   const [err, setErr] = useState("");
+  const [requested, setRequested] = useState("");
+
+  async function rereview(pr: number) {
+    if (requested) return;
+    try {
+      const url = await requestQodoRereview(pr);
+      console.info(`[qodo] fresh review commanded on PR #${pr}: ${url}`);
+      setRequested(
+        `review requested on #${pr} — the bot posts its pass in ~2 min`,
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "re-review failed");
+    }
+  }
 
   useEffect(() => {
     getQodo()
@@ -35,6 +49,7 @@ export default function QodoPanel() {
         external reviewer — qodo · live from {feed?.repo ?? "github"}
         {feed?.stale && " (cached)"}
       </div>
+      {requested && <div className="detail">{requested}</div>}
       {err && <div className="err">{err}</div>}
       {!feed && !err && (
         <div className="detail">
@@ -75,6 +90,15 @@ export default function QodoPanel() {
                     })}
                   </span>
                 )}
+                <button
+                  className="chip qodo-go"
+                  title="command a fresh Qodo review of this PR"
+                  disabled={!!requested}
+                  onClick={() => rereview(pr.number)}
+                  data-testid={`qodo-rereview-${pr.number}`}
+                >
+                  ↻
+                </button>
               </span>
             </div>
           );
