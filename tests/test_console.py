@@ -86,6 +86,42 @@ def test_dashboard_page_leaves_no_placeholder() -> None:
     assert "<svg" in page
 
 
+def test_bare_ratchet_opens_the_console(monkeypatch, tmp_path):
+    """`ratchet` with no arguments starts the TUI, the way `claude` starts a
+    session -- never a usage error."""
+    from ratchet import cli
+
+    calls = {}
+    monkeypatch.setattr(cli, "cmd_console", lambda args: (calls.setdefault("args", args), 0)[1])
+    assert cli.main([]) == 0
+    assert calls["args"].repo is None and calls["args"].bus is None
+
+
+def test_console_with_no_run_opens_on_an_empty_bus(monkeypatch, tmp_path):
+    """No run yet is not an error: the console opens on a fresh bus and the idle
+    splash says what to do next."""
+    from argparse import Namespace
+
+    from ratchet import cli
+
+    opened = {}
+
+    class FakeApp:
+        def __init__(self, bus_path, repo):
+            opened["bus"] = Path(bus_path)
+
+        def run(self):
+            pass
+
+    import ratchet.tui.app as app_mod
+
+    monkeypatch.setattr(app_mod, "RatchetApp", FakeApp)
+    monkeypatch.chdir(tmp_path)
+    rc = cli.cmd_console(Namespace(repo=str(tmp_path), bus=None, run=None))
+    assert rc == 0
+    assert opened["bus"].exists() and opened["bus"].stat().st_size == 0
+
+
 @pytest.mark.parametrize("bad", ["../../etc/passwd", "a1b2/../x", "", "A1B2", "a" * 33, "a1b2.json"])
 def test_approval_id_guard_rejects_anything_that_is_not_an_id(bad: str) -> None:
     """The id becomes a filename, so it does not get the benefit of the doubt."""

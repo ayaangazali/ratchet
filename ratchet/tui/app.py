@@ -514,9 +514,11 @@ class RatchetApp(App):
         log = self.query_one("#activity", RichLog)
         log.write(Text())
         log.write(m.render(m.FIN, indent=6, dim=0.55))
-        log.write(Text("   nothing on the bus yet.\n", style=m.MUTED))
-        log.write(Text("   ratchet run", style=m.DIM))
-        log.write(Text("   make fixture", style=m.DIM))
+        log.write(Text("   nothing on the bus yet. quick start:\n", style=m.MUTED))
+        log.write(Text("   ratchet demo --dir demo-repo      seed a playground repo", style=m.DIM))
+        log.write(Text("   ratchet run --repo demo-repo      search until the verifier says green", style=m.DIM))
+        log.write(Text("   ratchet redteam --repo demo-repo  score the verifier itself", style=m.DIM))
+        log.write(Text("\n   then run `ratchet` here again to watch it live.", style=m.MUTED))
 
     # -------------------------------------------------------------- animation --
 

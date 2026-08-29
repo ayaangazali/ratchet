@@ -35,6 +35,7 @@ Stopping the agent isn't a prompt asking nicely. It's a rollback it can't argue 
 
 ## Table of contents
 
+- [Install it](#install-it)
 - [Sixty seconds, no model, no key, no network](#sixty-seconds-no-model-no-key-no-network)
 - [Why this exists](#why-this-exists)
 - [The idea, in three claims](#the-idea-in-three-claims)
@@ -60,9 +61,36 @@ Stopping the agent isn't a prompt asking nicely. It's a rollback it can't argue 
 
 ---
 
+## Install it
+
+```bash
+brew install ayaangazali/ratchet/ratchet-agent      # macOS; bundles GNU timeout
+# or, anywhere with uv:
+uv tool install git+https://github.com/ayaangazali/ratchet@v0.1.3
+```
+
+Then just type:
+
+```bash
+ratchet
+```
+
+Bare `ratchet` opens the console — the way `claude` opens a session. On a fresh
+directory it starts on an empty bus with the quick-start splash; in a directory
+with runs it attaches to the latest one. Everything else is a subcommand:
+
+```bash
+ratchet demo --dir demo-repo        # seed a playground: a broken slugify, three patches
+ratchet run --repo demo-repo --scripted demo-repo/patches/scripted.json
+ratchet                             # watch it: tree, gauntlet rail, approval gate
+ratchet dashboard --repo demo-repo  # the same run, in a browser
+ratchet redteam --repo demo-repo    # score the verifier itself: 11/11, 0 false positives
+```
+
 ## Sixty seconds, no model, no key, no network
 
-Python 3.11+ and git. (Node 22.14+ only if you want the live TrueForge path.)
+Working from a checkout instead (Python 3.11+ and git; Node 22.14+ only for the
+live TrueForge path):
 
 ```bash
 git clone https://github.com/ayaangazali/ratchet && cd ratchet
@@ -694,6 +722,7 @@ verifier whose README oversells it is arguing against itself.
 
 | command | what it does |
 |---|---|
+| `ratchet` | bare: open the console on the latest run, or an empty bus with the quick-start splash |
 | `ratchet run [goal]` | search until green or the budget runs out (`--scripted` = offline, no model) |
 | `ratchet tree` | the search tree: scores, live, pruned |
 | `ratchet rewind <node>` | restore that state and branch from it — the differentiator |

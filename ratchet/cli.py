@@ -408,9 +408,17 @@ def cmd_console(args) -> int:
 
     repo = Path(args.repo or ".").resolve()
     bus_path = Path(args.bus) if args.bus else _latest(repo, "bus.jsonl", args.run)
+    if not bus_path and args.repo is None and (Path("demo-repo") / ".ratchet").exists():
+        # bare `ratchet` inside a checkout: the runs live in demo-repo/
+        repo = Path("demo-repo").resolve()
+        bus_path = _latest(repo, "bus.jsonl", args.run)
     if not bus_path:
-        print("no run found; start one with `ratchet run`, or `make fixture` for a recorded one", file=sys.stderr)
-        return 1
+        # no run yet is not an error -- open the console anyway, on an empty bus,
+        # and let the idle splash say what to do next. `claude` does not refuse to
+        # start because you have no conversation yet; neither does this.
+        bus_path = repo / ".ratchet" / "session.bus.jsonl"
+        bus_path.parent.mkdir(parents=True, exist_ok=True)
+        bus_path.touch(exist_ok=True)
     RatchetApp(bus_path, repo).run()
     return 0
 
@@ -468,8 +476,11 @@ def _latest(repo: Path, suffix: str, run: str | None = None) -> Path | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser("ratchet", description="a coding agent that cannot decide it is done")
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    ap = argparse.ArgumentParser(
+        "ratchet",
+        description="a coding agent that cannot decide it is done. Bare `ratchet` opens the console.",
+    )
+    sub = ap.add_subparsers(dest="cmd", required=False)
 
     p = sub.add_parser("run", help="search until green or the budget runs out")
     p.add_argument("goal", nargs="?", help="override the task statement")
@@ -577,6 +588,10 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(fn=cmd_demo)
 
     args = ap.parse_args(argv)
+    if args.cmd is None:
+        # bare `ratchet`: straight into the console on the latest run (or an empty
+        # bus with the quick-start splash), the way `claude` starts a session
+        return cmd_console(argparse.Namespace(repo=None, bus=None, run=None))
     return args.fn(args)
 
 
