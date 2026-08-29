@@ -1,4 +1,4 @@
-.PHONY: dev test lint fmt demo redteam evals bench serve run run-graph proof console replay audit clean image fixture
+.PHONY: dev test lint fmt demo redteam evals bench serve run run-graph proof docs console replay audit clean image fixture
 
 dev:
 	pip install -e ".[dev]"
@@ -52,6 +52,10 @@ fixture:
 
 replay:
 	python -m ratchet.cli replay --bus .ratchet/fixture.bus.jsonl
+
+# Fetch upstream docs through Bright Data (needs BRIGHTDATA_API_KEY in .env).
+docs:
+	python -m ratchet.cli docs httpx --topic changelog
 
 audit:
 	python -m ratchet.cli audit --repo demo-repo
