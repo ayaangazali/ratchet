@@ -591,3 +591,64 @@ def test_the_clock_counts_work_not_session_age():
 
     _t.sleep(0.05)
     assert s.work_seconds == banked       # idle time does not accrue
+
+
+def test_a_model_that_rejects_max_tokens_is_retried_with_the_new_name(monkeypatch):
+    """OpenAI's newer models 400 on `max_tokens` and name `max_completion_tokens`.
+    Rather than track model families, the client learns from the rejection and
+    retries once -- and remembers, so the next call gets it right first time."""
+    import ratchet.providers as prov
+
+    calls = []
+
+    class Resp:
+        def __init__(self, code, payload):
+            self.status_code, self._p = code, payload
+            self.text = str(payload)
+            self.request = type("R", (), {"url": type("U", (), {"host": "api.openai.com"})()})()
+
+        def json(self):
+            return self._p
+
+    def fake_post(url, **kw):
+        calls.append(dict(kw["json"]))  # snapshot: the retry mutates it in place
+        if "max_tokens" in kw["json"]:
+            return Resp(400, {"error": {"message": "Unsupported parameter: 'max_tokens' is not supported "
+                                                   "with this model. Use 'max_completion_tokens' instead.",
+                                        "type": "invalid_request_error"}})
+        return Resp(200, {"choices": [{"message": {"content": "done"}}]})
+
+    monkeypatch.setattr(prov.httpx, "post", fake_post)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    prov._TOKEN_PARAM.clear()
+
+    b = prov.ChatBackend("openai", "gpt-5.2")
+    assert b.complete("hi") == "done"
+    assert "max_tokens" in calls[0] and "max_completion_tokens" in calls[1]
+
+    calls.clear()
+    assert b.complete("again") == "done"
+    assert "max_completion_tokens" in calls[0]  # learned; no wasted round trip
+
+
+def test_provider_errors_read_as_sentences_not_json(monkeypatch):
+    import ratchet.providers as prov
+
+    class Resp:
+        status_code = 401
+        text = "{}"
+        request = type("R", (), {"url": type("U", (), {"host": "api.openai.com"})()})()
+
+        def json(self):
+            return {"error": {"message": "Incorrect API key provided", "code": "invalid_api_key"}}
+
+    monkeypatch.setattr(prov.httpx, "post", lambda url, **kw: Resp())
+    monkeypatch.setenv("OPENAI_API_KEY", "bad")
+    prov._TOKEN_PARAM.clear()
+    try:
+        prov.ChatBackend("openai", "gpt-4o").complete("hi")
+        raise AssertionError("should have raised")
+    except prov.ChatProviderError as e:
+        assert "Incorrect API key provided" in str(e)
+        assert "/connect" in str(e)      # tells you what to do
+        assert "{" not in str(e)         # not a JSON dump

@@ -274,15 +274,28 @@ class ChatBackend:
             if not model:
                 raise ChatProviderError(f"{self.provider} returned a model with no id")
             self.model = model  # pin it, so the activity line names something real
-        debuglog.log("info", f"POST {base}/chat/completions model={model} timeout={timeout}s")
-        r = httpx.post(
-            f"{base}/chat/completions",
-            headers={"Authorization": f"Bearer {key}"},
-            json={"model": model, "max_tokens": max_tokens,
-                  "messages": [{"role": "user", "content": prompt}]},
-            timeout=timeout,
-        )
-        debuglog.log("info", f"← {r.status_code} in {_elapsed(r):.1f}s")
+        body: dict[str, object] = {"model": model, "messages": [{"role": "user", "content": prompt}]}
+        # OpenAI renamed the cap for its newer models (gpt-5.x, o-series) and
+        # rejects the old name outright. Rather than keep a model list that rots,
+        # send what this model is known to want, and learn from a rejection.
+        body[_TOKEN_PARAM.get(model, "max_tokens")] = max_tokens
+
+        for attempt in (1, 2):
+            debuglog.log("info", f"POST {base}/chat/completions model={model} "
+                                 f"cap={next(k for k in body if k.startswith('max'))} timeout={timeout}s")
+            r = httpx.post(
+                f"{base}/chat/completions",
+                headers={"Authorization": f"Bearer {key}"},
+                json=body,
+                timeout=timeout,
+            )
+            debuglog.log("info", f"← {r.status_code} in {_elapsed(r):.1f}s")
+            swapped = _swap_token_param(r, body, model)
+            if swapped and attempt == 1:
+                debuglog.log("warn", f"{model} wants max_completion_tokens; retrying")
+                continue
+            break
+
         _raise_for(r)
         try:
             return r.json()["choices"][0]["message"]["content"] or ""
@@ -320,6 +333,33 @@ class ChatBackend:
         return text
 
 
+#: model -> which token-cap parameter it accepts. Learned at runtime from the
+#: provider's own rejection, so a new model never needs a code change.
+_TOKEN_PARAM: dict[str, str] = {}
+
+
+def _swap_token_param(r: httpx.Response, body: dict[str, object], model: str) -> bool:
+    """True when the provider rejected the token-cap parameter and `body` has been
+    rewritten to use the other spelling.
+
+    OpenAI's newer models answer `max_tokens` with a 400 naming
+    `max_completion_tokens` (and vice versa on older deployments). One retry with
+    the other name is cheaper and more durable than tracking model families.
+    """
+    if r.status_code != 400:
+        return False
+    try:
+        message = json.dumps(r.json()).lower()
+    except ValueError:
+        message = r.text.lower()
+    for wrong, right in (("max_tokens", "max_completion_tokens"), ("max_completion_tokens", "max_tokens")):
+        if wrong in body and right in message and "unsupported" in message:
+            body[right] = body.pop(wrong)
+            _TOKEN_PARAM[model] = right
+            return True
+    return False
+
+
 def _elapsed(r) -> float:
     """Response timing, defensively: the debug channel never breaks the call."""
     try:
@@ -336,12 +376,28 @@ def _base_for(provider: str, table_base: str | None) -> str | None:
 
 
 def _raise_for(r: httpx.Response) -> None:
-    if r.status_code >= 400:
-        try:
-            detail = json.dumps(r.json())[:300]
-        except Exception:
-            detail = r.text[:300]
-        raise ChatProviderError(f"{r.request.url.host} -> {r.status_code}: {detail}")
+    """Raise the provider's own sentence, not its JSON.
+
+    Every provider buries the useful line in a different shape; a wall of escaped
+    JSON in the activity pane tells a user nothing they can act on.
+    """
+    if r.status_code < 400:
+        return
+    detail = ""
+    try:
+        payload = r.json()
+        err = payload.get("error", payload) if isinstance(payload, dict) else {}
+        if isinstance(err, dict):
+            detail = str(err.get("message") or err.get("detail") or "")
+        elif isinstance(err, str):
+            detail = err
+    except ValueError:
+        pass
+    if not detail:
+        detail = r.text[:200]
+    hint = {401: "  (check the key with /connect)", 404: "  (is that model available on this account?)",
+            429: "  (rate limited — wait, or /model something else)"}.get(r.status_code, "")
+    raise ChatProviderError(f"{r.request.url.host} {r.status_code}: {detail.strip()[:240]}{hint}")
 
 
 def _demo_reply(prompt: str) -> str:
