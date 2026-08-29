@@ -208,6 +208,7 @@ def seed(root: Path) -> Path:
     _write(root / ".gitignore", ".ratchet/\n__pycache__/\n*.pyc\n")
     _write(root / "patches" / "scripted.json", _scripted_run())
     _write(root / "patches" / "scripted_graph.json", _scripted_graph())
+    _write(root / "patches" / "scripted_graph_escalation.json", _scripted_graph_escalation())
 
     if not (root / ".git").exists():
         subprocess.run(["git", "init", "-q"], cwd=root, check=True)
@@ -286,6 +287,38 @@ def _scripted_graph() -> str:
         ],
         indent=2,
     )
+
+
+def _scripted_graph_escalation() -> str:
+    """Canned responses where the truncation node exhausts its three linear
+    attempts (same wrong idea three times) and is escalated to the tree search,
+    which prunes one more wrong candidate and then reaches green. Exists so the
+    escalation path is reproducible by anyone, offline."""
+    import json
+
+    accents_only = SLUGIFY_BUGGY.replace(
+        '    lowered = text.lower()\n    ascii_only = lowered.encode("ascii", "ignore").decode()',
+        '    folded = unicodedata.normalize("NFKD", text.lower())\n'
+        '    ascii_only = "".join(c for c in folded if not unicodedata.combining(c))\n'
+        '    ascii_only = ascii_only.encode("ascii", "ignore").decode()',
+    )
+    naive = accents_only.replace("    return slug[:max_length]", '    return slug[:max_length].strip("-")')
+    bad = (
+        "intent: strip trailing hyphens after the cut\n\n```diff\n"
+        + _unified(accents_only, naive, "src/textkit/slugify.py")
+        + "```"
+    )
+    good = (
+        "intent: truncate on the last word boundary inside max_length\n\n```diff\n"
+        + _unified(accents_only, SLUGIFY_FIXED, "src/textkit/slugify.py")
+        + "```"
+    )
+    fold = (
+        "intent: fold accents with NFKD before the ascii encode\n\n```diff\n"
+        + _unified(SLUGIFY_BUGGY, accents_only, "src/textkit/slugify.py")
+        + "```"
+    )
+    return json.dumps(["map of the repo", fold, bad, bad, bad, bad, good], indent=2)
 
 
 def _scripted_run() -> str:
