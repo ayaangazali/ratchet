@@ -44,3 +44,26 @@ def harness_provider(client, repo: Path) -> HarnessProvider | None:
         # primitive. Say so plainly rather than pretending; the caller falls back.
         return None
     return HarnessProvider(client, repo_url=str(repo))
+
+
+def describe_provider(settings) -> tuple[str, str]:
+    """Which sandbox `ratchet run` would actually use, and why.
+
+    `ratchet doctor` asks this before a run rather than after one: "harness" and
+    "worktree" behave the same to the search but differ enormously in speed, and
+    finding out which you got by watching a demo crawl is finding out too late.
+    """
+    want = getattr(settings, "provider", "auto")
+    if want in ("harness", "auto"):
+        try:
+            from .client import TrueForgeClient
+
+            client = TrueForgeClient(getattr(settings, "trueforge_base_url", ""))
+            prov = harness_provider(client, Path(getattr(settings, "repo", ".")))
+            if prov is not None:
+                snap = "snapshots" if getattr(prov, "supports_snapshots", False) else "no snapshots"
+                return "harness", f"TrueForge sandboxes, {snap}"
+        except Exception as e:
+            if want == "harness":
+                return "harness", f"unavailable: {str(e)[:100]}"
+    return "worktree", "git worktrees off a prebuilt base, sharing one warm venv"
