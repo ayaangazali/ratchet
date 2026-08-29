@@ -3,6 +3,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ratchet · __RUN__</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13' fill='%234d9fe8'>✻</text></svg>">
+<!-- The pixel-office idea is borrowed with admiration from Pixel Agents
+     (github.com/pixel-agents-hq/pixel-agents, MIT). Rebuilt here from scratch,
+     dependency-free, because this dashboard's contract is: no framework, no CDN,
+     nothing that goes blank on conference wifi. -->
 <style>
     :root {
 /*__PALETTE__*/
@@ -11,33 +15,31 @@
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0 auto; padding: 12px; gap: 10px; max-width: 1240px;
+      margin: 0 auto; padding: 12px; gap: 10px; max-width: 1240px; height: 100vh;
       display: flex; flex-direction: column;
       background: var(--bg); color: var(--text);
       font: 12.5px/1.5 var(--mono);
     }
     a { color: var(--accent); }
 
-    /* ---------------------------------------------------------------- hero -- */
+    /* ---------------------------------------------------------------- header -- */
     .hero {
-      display: flex; align-items: center; gap: 16px;
-      padding: 10px 16px; border: 1px solid var(--accentDim); border-radius: 8px;
+      display: flex; align-items: center; gap: 14px; flex: none;
+      padding: 8px 14px; border: 1px solid var(--accentDim); border-radius: 8px;
       background: var(--panel);
     }
-    /* The sprite is drawn at one unit per pixel and scaled here, so it stays
-       crisp at any size instead of shipping three copies of the same drawing. */
-    .hero svg { width: 52px; height: auto; flex: none; }
-    .hero h1 { margin: 0; font-size: 15px; letter-spacing: .02em; display: inline; }
+    .hero svg { width: 40px; height: auto; flex: none; }
+    .hero h1 { margin: 0; font-size: 14px; display: inline; }
     .hero h1 .mark { color: var(--accent); }
-    .tag { display: inline; margin: 0 0 0 10px; color: var(--dim); }
-    .meta { margin: 3px 0 0; color: var(--dim); }
+    .meta { margin: 2px 0 0; color: var(--dim); }
     .meta b { color: var(--text); font-weight: 600; }
-    .meta .sep { margin: 0 7px; color: var(--border); }
-    .grow { flex: 1; }
-
+    .meta .sep { margin: 0 6px; color: var(--border); }
+    .grow { flex: 1; min-width: 0; }
+    .budget { color: var(--dim); white-space: nowrap; }
+    .budget b { color: var(--blue); font-weight: 600; }
     .pill {
       flex: none; display: flex; align-items: center; gap: 8px;
-      padding: 6px 13px; border-radius: 999px;
+      padding: 5px 12px; border-radius: 999px;
       border: 1px solid var(--border); background: var(--bg); color: var(--muted);
       white-space: nowrap;
     }
@@ -48,195 +50,224 @@
     .pill[data-state="done"] .glyph { color: var(--green); }
     .pill[data-state="offline"] { border-color: var(--red); color: var(--red); }
 
-    /* ---------------------------------------------------------------- gate -- */
-    /* The one component that is allowed to shout. Nothing irreversible happens
-       until somebody presses a button in here. */
-    .gate {
-      border: 1px solid var(--accent); border-radius: 8px;
-      background: var(--panelWarm); padding: 14px 16px;
+    /* ------------------------------------------------------------------ gate -- */
+    /* The centerpiece promise: Ratchet asks BEFORE the irreversible step.
+       Armed = quiet strip. Holding = the loudest thing on the page. */
+    .gate-strip {
+      flex: none; display: flex; gap: 10px; align-items: center;
+      border: 1px dashed var(--border); border-radius: 8px;
+      padding: 7px 14px; color: var(--dim); background: var(--panel);
     }
-    .gate[hidden] { display: none; }
-    .gate h2 { margin: 0 0 4px; font-size: 14px; }
-    .gate h2 .mark { color: var(--accent); }
-    .gate .action { color: var(--accent); }
-    .gate .summary { margin: 8px 0 2px; color: var(--text); }
-    .gate .stats { margin: 0 0 10px; color: var(--dim); }
-    .gate pre {
-      margin: 0 0 12px; padding: 10px 12px; max-height: 180px; overflow: auto;
+    .gate-strip .dot { color: var(--green); }
+    .gate-live {
+      flex: none; border: 2px solid var(--amber); border-radius: 8px;
+      background: var(--panelWarm); padding: 14px 16px;
+      animation: gate-pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes gate-pulse { 50% { box-shadow: 0 0 0 4px rgba(224, 164, 74, .15); } }
+    .gate-live[hidden], .gate-strip[hidden] { display: none; }
+    .gate-live h2 { margin: 0 0 2px; font-size: 14px; color: var(--amber); }
+    .gate-live h2 .action { color: var(--text); }
+    .gate-live .before { margin: 0 0 8px; color: var(--muted); }
+    .gate-live .before b { color: var(--amber); }
+    .gate-live .summary { margin: 0 0 2px; color: var(--text); }
+    .gate-live .stats { margin: 0 0 8px; color: var(--dim); }
+    .gate-live pre {
+      margin: 0 0 10px; padding: 8px 12px; max-height: 140px; overflow: auto;
       border-radius: 6px; background: var(--bg); border: 1px solid var(--border);
     }
-    .gate pre .add { color: var(--green); }
-    .gate pre .del { color: var(--red); }
-    .gate pre .ctx { color: var(--dim); }
+    .gate-live pre .add { color: var(--green); }
+    .gate-live pre .del { color: var(--red); }
+    .gate-live pre .ctx { color: var(--dim); }
     .buttons { display: flex; gap: 10px; align-items: center; }
     button {
-      font: inherit; padding: 8px 16px; border-radius: 6px; cursor: pointer;
+      font: inherit; padding: 7px 16px; border-radius: 6px; cursor: pointer;
       border: 1px solid var(--border); background: var(--bg); color: var(--text);
     }
     button:hover { border-color: var(--muted); }
-    button.primary { background: var(--accent); border-color: var(--accent); color: #1a1210; font-weight: 600; }
+    button.primary { background: var(--amber); border-color: var(--amber); color: #1a1210; font-weight: 600; }
     button.primary:hover { filter: brightness(1.08); }
     button:disabled { opacity: .5; cursor: default; }
     .hint { color: var(--dim); }
 
-    /* ---------------------------------------------------------------- grid -- */
-    /* Two rows that read top-down: state first (tree + gauntlet + stats),
-       then a compact log underneath. */
-    main {
-      display: grid; gap: 10px; align-items: stretch;
-      grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-      grid-template-areas:
-        "tree side"
-        "log  log";
+    /* ---------------------------------------------------------------- office -- */
+    main { display: flex; gap: 10px; flex: 1; min-height: 0; }
+    .office {
+      position: relative; flex: 1; min-width: 0; overflow: hidden;
+      border: 1px solid var(--border); border-radius: 8px;
+      background:
+        linear-gradient(var(--panel) 1px, transparent 1px) 0 0 / 100% 28px,
+        linear-gradient(90deg, var(--panel) 1px, transparent 1px) 0 0 / 28px 100%,
+        var(--bg);
     }
-    @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-areas: "tree" "side" "log"; } }
-    .area-tree { grid-area: tree; display: flex; flex-direction: column; }
-    .area-side { grid-area: side; display: flex; flex-direction: column; gap: 10px; }
-    .area-log  { grid-area: log; }
-
-    .panel { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); min-width: 0; }
-    .area-tree .panel, .area-side .panel:first-child { flex: 1; display: flex; flex-direction: column; }
-    .panel > h2 {
-      margin: 0; padding: 7px 12px; font-size: 10.5px; font-weight: 600;
-      letter-spacing: .11em; text-transform: uppercase;
-      color: var(--muted); border-bottom: 1px solid var(--border);
-      display: flex; justify-content: space-between;
+    .office .floor-label {
+      position: absolute; top: 8px; left: 12px; color: var(--dim); font-size: 11px;
+      letter-spacing: .1em; text-transform: uppercase;
     }
-    .panel > h2 .count { color: var(--dim); letter-spacing: 0; text-transform: none; }
-    .panel > .body { padding: 10px 12px; overflow: auto; }
-    .area-tree .body { max-height: 380px; flex: 1; }
-    .empty { color: var(--dim); margin: 0; }
+    /* the gate structure the characters queue at */
+    .gate-door {
+      position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+      width: 92px; padding: 10px 8px 8px; text-align: center;
+      border: 2px dashed var(--amber); border-radius: 8px;
+      color: var(--amber); background: rgba(224, 164, 74, .06);
+      font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase; line-height: 1.5;
+      overflow-wrap: break-word;
+    }
+    .gate-door .bar { font-size: 18px; display: block; margin-bottom: 2px; }
+    .gate-door.holding { animation: gate-pulse 1.6s ease-in-out infinite; }
 
-    /* ---------------------------------------------------------------- tree -- */
-    .node { display: flex; align-items: baseline; gap: 8px; padding: 1px 0; white-space: nowrap; }
-    .node .glyph { color: var(--muted); }
-    .node .id { color: var(--text); font-weight: 600; }
-    .node .score { color: var(--muted); }
-    .node .tag2 { color: var(--dim); }
-    .node.live .glyph, .node.live .id { color: var(--accent); }
-    .node.green .glyph, .node.green .id { color: var(--green); }
-    .node.pruned .glyph, .node.pruned .id { color: var(--red); }
-    .node.pruned .score { color: var(--dim); }
-    .why { color: var(--red); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .model { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .agent { position: absolute; width: 24px; height: 21px; cursor: pointer; }
+    .agent .px { position: absolute; left: 0; top: 0; width: 3px; height: 3px; }
+    .agent .flip { position: absolute; inset: 0; }
+    .agent.left .flip { transform: scaleX(-1); }
+    .agent .badge {
+      position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+      font-size: 11px; line-height: 1;
+    }
+    .agent .name {
+      position: absolute; top: 23px; left: 50%; transform: translateX(-50%);
+      font-size: 9.5px; color: var(--dim); white-space: nowrap;
+    }
+    .agent.selected .name { color: var(--text); }
+    .agent.selected::after {
+      content: ""; position: absolute; inset: -6px -8px -18px;
+      border: 1px solid var(--accent); border-radius: 6px;
+    }
+    .agent .bubble {
+      position: absolute; bottom: 26px; left: 12px; max-width: 190px; width: max-content;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+      padding: 3px 8px; font-size: 10.5px; color: var(--muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      pointer-events: none;
+    }
+    .agent.waiting .bubble { border-color: var(--amber); color: var(--amber); }
 
-    /* ------------------------------------------------------------ activity -- */
-    /* One bullet per step, one elbow per result -- the same shape the terminal
-       console draws. Kept deliberately small: it is the log, not the headline. */
-    .area-log .body { max-height: 230px; font-size: 12px; line-height: 1.45; }
-    .step { margin-top: 7px; }
-    .step:first-child { margin-top: 0; }
-    .step .bullet { color: var(--accent); }
-    .step .verb { color: var(--text); font-weight: 600; }
-    .step .arg { color: var(--muted); }
-    .note { padding-left: 2px; color: var(--muted); }
-    .note .elbow { color: var(--border); margin-right: 8px; }
-    .note.ok { color: var(--green); }
-    .note.bad { color: var(--red); }
-    .note.warn { color: var(--amber); }
-    .note.faint { color: var(--dim); }
-    .note.data { color: var(--violet); }
-    .step.bad .bullet { color: var(--red); }
-    .step.warn .bullet { color: var(--amber); }
-    .step.data .bullet { color: var(--violet); }
-    .step.ok .bullet { color: var(--green); }
-    .step.info .bullet { color: var(--blue); }
+    /* ---------------------------------------------------------------- roster -- */
+    .roster {
+      flex: none; width: 250px; display: flex; flex-direction: column;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+      min-height: 0;
+    }
+    .roster h2 {
+      margin: 0; padding: 7px 12px; font-size: 10.5px; font-weight: 600; flex: none;
+      letter-spacing: .11em; text-transform: uppercase; color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .roster .rows { overflow-y: auto; flex: 1; }
+    .roster .row {
+      display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center;
+      padding: 7px 12px; cursor: pointer; border-bottom: 1px solid var(--panelWarm);
+    }
+    .roster .row:hover { background: var(--panelWarm); }
+    .roster .row.selected { background: var(--panelWarm); box-shadow: inset 2px 0 0 var(--accent); }
+    .roster .sw { width: 10px; height: 10px; border-radius: 2px; }
+    .roster .who { min-width: 0; }
+    .roster .who .nm { color: var(--text); font-weight: 600; }
+    .roster .who .brief { color: var(--dim); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .roster .st { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+    .st.working { color: var(--blue); } .st.waiting { color: var(--amber); }
+    .st.green { color: var(--green); } .st.pruned { color: var(--red); }
+    .st.done { color: var(--dim); }
+    .roster .foot { flex: none; padding: 7px 12px; color: var(--dim); font-size: 10.5px; border-top: 1px solid var(--border); }
 
-    /* ------------------------------------------------------------- gauntlet -- */
-    .stage { display: flex; align-items: baseline; gap: 10px; padding: 2px 0; }
-    .stage .g { width: 12px; color: var(--border); }
-    .stage .name { flex: 1; color: var(--dim); }
-    .stage .detail { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
-    .stage.pass .g { color: var(--green); } .stage.pass .name { color: var(--text); }
-    .stage.fail .g, .stage.fail .name { color: var(--red); font-weight: 600; }
-    .stage.skip .g, .stage.skip .name { color: var(--dim); }
-    .candidate { color: var(--muted); margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* ---------------------------------------------------------------- detail -- */
+    /* The must-have, spelled out: DOING / WAITING ON / DID for whoever is selected. */
+    .detail { flex: none; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+    .detail .head {
+      display: flex; gap: 10px; align-items: baseline; padding: 7px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .detail .head .nm { font-weight: 600; }
+    .detail .head .sub { color: var(--dim); font-size: 11px; }
+    .trip { display: grid; grid-template-columns: 1fr 1fr 1fr; }
+    @media (max-width: 800px) { .trip { grid-template-columns: 1fr; } }
+    .trip > div { padding: 8px 12px; min-width: 0; border-right: 1px solid var(--panelWarm); }
+    .trip > div:last-child { border-right: none; }
+    .trip .k { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); display: block; }
+    .trip .v { color: var(--text); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .trip .doing .k { color: var(--blue); }
+    .trip .waitk .k { color: var(--amber); }
+    .trip .didk .k { color: var(--green); }
+    .detail .log {
+      max-height: 96px; overflow-y: auto; padding: 6px 12px 8px;
+      border-top: 1px solid var(--panelWarm); color: var(--muted); font-size: 11px; line-height: 1.55;
+    }
+    .detail .log .ok { color: var(--green); } .detail .log .bad { color: var(--red); }
+    .detail .log .warn { color: var(--amber); } .detail .log .faint { color: var(--dim); }
 
-    /* ------------------------------------------------- run stats & meters -- */
-    /* Harness counters and the budget live in one panel: what the run is
-       spending, in one glance -- counts on the left, cost bars on the right. */
-    .stats-body { display: grid; grid-template-columns: 1fr 1.4fr; gap: 4px 18px; padding: 10px 12px; }
-    @media (max-width: 520px) { .stats-body { grid-template-columns: 1fr; } }
-    .stats-body > div { min-width: 0; }
-    .row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
-    .row .k { color: var(--dim); }
-    .row .v { color: var(--blue); font-variant-numeric: tabular-nums; }
-    .row .v.hot { color: var(--amber); font-weight: 600; }
-    .meter { height: 4px; border-radius: 2px; background: var(--border); margin: 3px 0 8px; overflow: hidden; }
-    .meter > span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+    .tip {
+      position: fixed; z-index: 90; pointer-events: none; display: none;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 10px; max-width: 280px; font-size: 11px; color: var(--text);
+    }
+    .tip .l2 { color: var(--dim); display: block; }
+    .empty { color: var(--dim); margin: 0; padding: 10px 12px; }
+    @media (prefers-reduced-motion: reduce) { .gate-live, .gate-door.holding { animation: none; } }
 </style>
 
 <header class="hero">
   <!--__DOLPHIN__-->
   <div class="grow">
-    <h1><span class="mark">✻</span> ratchet</h1><span class="tag">the agent doesn't decide it's done — the tests do</span>
+    <h1><span class="mark">✻</span> ratchet</h1>
     <p class="meta">
       task <b id="task">—</b><span class="sep">·</span>
-      provider <b id="provider">—</b><span class="sep">·</span>
       run <b id="run">—</b><span class="sep">·</span>
-      repo <b>__REPO__</b>
+      repo <b>__REPO__</b><span class="sep">·</span>
+      <span id="provider">—</span>
     </p>
   </div>
+  <span class="budget" id="budget">budget —</span>
   <div class="pill" id="pill" data-state="idle"><span class="glyph">·</span><span id="pill-text">connecting…</span></div>
 </header>
 
-<section class="gate" id="gate" hidden>
-  <h2><span class="mark">✻</span> Ratchet wants to <span class="action" id="gate-action">act</span></h2>
+<!-- armed: the quiet promise. holding: the loud question. -->
+<section class="gate-strip" id="gate-armed">
+  <span class="dot">●</span>
+  <span>gate armed — Ratchet <b style="color:var(--text)">asks before</b> any irreversible step (push, PR). Nothing leaves this machine without a yes below.</span>
+</section>
+<section class="gate-live" id="gate" hidden>
+  <h2>⏸ HOLDING — Ratchet wants to <span class="action" id="gate-action">act</span></h2>
+  <p class="before">Nothing has happened yet. This is the ask <b>before</b> the irreversible step, not a report after it.</p>
   <p class="summary" id="gate-summary"></p>
   <p class="stats" id="gate-stats"></p>
   <pre id="gate-diff"></pre>
   <div class="buttons">
-    <button class="primary" id="approve">Approve</button>
-    <button id="deny">Deny</button>
-    <span class="hint" id="gate-hint">nothing has been pushed yet — this is the last stop</span>
+    <button class="primary" id="approve">Approve — let it through</button>
+    <button id="deny">Deny — roll it back</button>
+    <span class="hint" id="gate-hint">keys: a approve · d deny</span>
   </div>
 </section>
 
 <main>
-  <div class="area-tree">
-    <section class="panel">
-      <h2>search tree</h2>
-      <div class="body" id="tree"><p class="empty">waiting for the root node…</p></div>
-    </section>
+  <div class="office" id="office">
+    <span class="floor-label">the floor · one pixel per agent</span>
+    <div class="gate-door" id="gate-door"><span class="bar">⛩</span>the gate<br>pushes &amp; PRs stop here</div>
   </div>
-
-  <div class="area-side">
-    <section class="panel">
-      <h2>gauntlet</h2>
-      <div class="body" id="gauntlet"></div>
-    </section>
-    <section class="panel">
-      <h2>run stats <span class="count">counts · budget</span></h2>
-      <div class="stats-body">
-        <div id="harness"></div>
-        <div id="budget"></div>
-      </div>
-    </section>
-  </div>
-
-  <div class="area-log">
-    <section class="panel">
-      <h2>activity <span class="count" id="activity-count"></span></h2>
-      <div class="body" id="activity"><p class="empty">nothing on the bus yet.</p></div>
-    </section>
-  </div>
+  <aside class="roster">
+    <h2>agents</h2>
+    <div class="rows" id="roster"><p class="empty">nobody on the floor yet.</p></div>
+    <div class="foot" id="roster-foot">0 sandboxes · 0 subagents</div>
+  </aside>
 </main>
+
+<section class="detail">
+  <div class="head">
+    <span class="nm" id="d-name">the run</span>
+    <span class="st working" id="d-state">idle</span>
+    <span class="sub" id="d-sub"></span>
+  </div>
+  <div class="trip">
+    <div class="doing"><span class="k">▸ doing now</span><span class="v" id="d-now">waiting for the bus…</span></div>
+    <div class="waitk"><span class="k">⏸ waiting on</span><span class="v" id="d-wait">nothing — not blocked</span></div>
+    <div class="didk"><span class="k">✔ did</span><span class="v" id="d-did">—</span></div>
+  </div>
+  <div class="log" id="d-log"></div>
+</section>
+
+<div class="tip" id="tip"></div>
 
 <script>
 "use strict";
-
-const STAGES = [
-  ["build",   "build / install"],
-  ["cheat",   "cheat check"],
-  ["f2p",     "fail-to-pass"],
-  ["p2p",     "pass-to-pass"],
-  ["types",   "type check"],
-  ["lint",    "lint"],
-  ["hygiene", "diff hygiene"],
-];
-const SPINNER = ["·", "✢", "✳", "∗", "✻", "✽"];
-const VERBS = ["Ratcheting", "Foraging", "Grazing", "Wallowing", "Snuffling",
-               "Nibbling", "Pondering", "Wading", "Chewing", "Paddling"];
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -245,17 +276,215 @@ const el = (tag, cls, text) => {
   if (text !== undefined) n.textContent = text;
   return n;
 };
-const short = (model) => String(model || "").split("/").pop();
+const short = (m) => String(m || "").split("/").pop();
+const SPINNER = ["·", "✢", "✳", "∗", "✻", "✽"];
+const STAGES = { build: "build/install", cheat: "cheat check", f2p: "fail-to-pass",
+                 p2p: "pass-to-pass", types: "types", lint: "lint", hygiene: "diff hygiene" };
 
-// The whole run lives here. The page holds no other state, so a refresh rebuilds
-// it from the bus rather than from anything the browser remembered.
+/* ------------------------------------------------------------- pixel sprites -- */
+// 8x7 creature, two walk frames. c = agent colour, W = eye. Drawn as box-shadow
+// on a 3px pixel, so one div per character and zero image assets.
+const FRAME_A = [
+  "..cccc..",
+  ".cccccc.",
+  ".cWccWc.",
+  ".cccccc.",
+  "..cccc..",
+  "..c..c..",
+  "..c..c..",
+];
+const FRAME_B = [
+  "..cccc..",
+  ".cccccc.",
+  ".cWccWc.",
+  ".cccccc.",
+  "..cccc..",
+  ".c....c.",
+  ".c....c.",
+];
+function shadow(map, colour) {
+  const out = [];
+  map.forEach((row, y) => [...row].forEach((ch, x) => {
+    if (ch === "c") out.push(`${x * 3}px ${y * 3}px 0 0 ${colour}`);
+    if (ch === "W") out.push(`${x * 3}px ${y * 3}px 0 0 var(--text)`);
+  }));
+  return out.join(",");
+}
+const HUES = ["var(--accent)", "var(--green)", "var(--amber)", "var(--violet)", "var(--blue)", "var(--red)"];
+let hueIdx = 0;
+
+/* ---------------------------------------------------------------- the model -- */
+
+const agents = new Map();  // id -> agent
 const state = {
-  nodes: new Map(), order: [], live: null,
-  stages: new Map(), candidate: "",
-  subagents: 0, live_sandboxes: 0, sandboxes: 0, approvals: 0,
-  budget: null, status: "idle", note: "waiting for a run", started: null,
-  pending: null, tick: 0, verb: 0, cleared: false, steps: 0,
+  selected: "run", pending: null, status: "idle", note: "waiting for a run",
+  started: null, tick: 0, sandboxes: 0, subagents: 0, currentVerify: null,
+  finished: false,
 };
+
+function spawn(id, name, opts = {}) {
+  if (agents.has(id)) return agents.get(id);
+  const office = $("office");
+  const colour = opts.colour || HUES[hueIdx++ % HUES.length];
+  const node = el("div", "agent");
+  const flip = el("div", "flip");
+  const px = el("div", "px");
+  px.style.boxShadow = shadow(FRAME_A, colour);
+  flip.append(px);
+  node.append(flip);
+  node.append(el("span", "badge", ""));
+  node.append(el("span", "name", name));
+  const bubble = el("span", "bubble", "");
+  bubble.hidden = true;
+  node.append(bubble);
+  office.append(node);
+
+  const a = {
+    id, name, colour, el: node, px, frame: false,
+    state: "working", now: opts.now || "spawning…", waiting: "", did: [],
+    log: [], model: opts.model || "", nodeId: opts.nodeId || "",
+    x: 40 + Math.random() * 120, y: 60 + Math.random() * 120,
+    tx: 0, ty: 0, pause: 0,
+  };
+  pickTarget(a);
+  node.addEventListener("click", () => select(id));
+  node.addEventListener("mousemove", (e) => tip(e, a));
+  node.addEventListener("mouseleave", hideTip);
+  agents.set(id, a);
+  drawRoster();
+  return a;
+}
+
+function log(a, body, kind) {
+  a.log.push({ body, kind });
+  if (a.log.length > 200) a.log.shift();
+  if (state.selected === a.id) drawDetail();
+}
+function setNow(a, now) { a.now = now; bubble(a, now, false); refresh(a); }
+function setDid(a, did) { a.did.push(did); refresh(a); }
+function setState(a, s) {
+  a.state = s;
+  const badge = a.el.querySelector(".badge");
+  badge.textContent = s === "green" ? "★" : s === "pruned" ? "✗" : s === "waiting" ? "⏸" : "";
+  badge.style.color = s === "green" ? "var(--green)" : s === "pruned" ? "var(--red)" : "var(--amber)";
+  a.el.classList.toggle("waiting", s === "waiting");
+  if (s === "pruned") a.px.style.filter = "grayscale(.7) brightness(.7)";
+  refresh(a);
+}
+function bubble(a, text, sticky) {
+  const b = a.el.querySelector(".bubble");
+  b.textContent = text;
+  b.hidden = !text;
+  clearTimeout(a._bt);
+  if (text && !sticky) a._bt = setTimeout(() => { b.hidden = true; }, 4000);
+}
+function refresh(a) { drawRoster(); if (state.selected === a.id) drawDetail(); }
+
+/* ------------------------------------------------------------------ motion -- */
+
+function pickTarget(a) {
+  const o = $("office");
+  const w = Math.max(120, o.clientWidth - 130), h = Math.max(100, o.clientHeight - 60);
+  a.tx = 20 + Math.random() * w;
+  a.ty = 34 + Math.random() * h;
+  a.pause = 600 + Math.random() * 2600;
+}
+function gateSlot(a) {
+  const o = $("office");
+  const idx = [...agents.values()].filter((x) => x.state === "waiting").indexOf(a);
+  a.tx = o.clientWidth - 120;
+  a.ty = o.clientHeight / 2 - 20 + idx * 30;
+}
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let lastT = 0;
+function tickMotion(t) {
+  const dt = Math.min(50, t - lastT); lastT = t;
+  for (const a of agents.values()) {
+    if (a.state === "waiting") gateSlot(a);
+    if (REDUCED) { // place, don't animate
+      a.x = a.tx; a.y = a.ty;
+      a.el.style.transform = `translate(${a.x}px, ${a.y}px)`;
+      continue;
+    }
+    const still = a.state !== "working" && a.state !== "waiting";
+    const dx = a.tx - a.x, dy = a.ty - a.y;
+    const dist = Math.hypot(dx, dy);
+    const moving = !still && dist > 3;
+    if (moving) {
+      const sp = 0.045 * dt;
+      a.x += (dx / dist) * Math.min(sp * 30, dist);
+      a.y += (dy / dist) * Math.min(sp * 30, dist);
+      a.el.classList.toggle("left", dx < 0);
+    } else if (a.state === "working") {
+      a.pause -= dt;
+      if (a.pause <= 0) pickTarget(a);
+    }
+    // two-frame bob while moving or working
+    if ((moving || a.state === "working") && Math.floor(t / 260) % 2 !== a.frame) {
+      a.frame = !a.frame;
+      a.px.style.boxShadow = shadow(a.frame ? FRAME_B : FRAME_A, a.colour);
+    }
+    a.el.style.transform = `translate(${a.x}px, ${a.y}px)`;
+  }
+  requestAnimationFrame(tickMotion);
+}
+requestAnimationFrame(tickMotion);
+
+/* ----------------------------------------------------------- roster + detail -- */
+
+function drawRoster() {
+  const box = $("roster");
+  box.textContent = "";
+  if (!agents.size) { box.append(el("p", "empty", "nobody on the floor yet.")); return; }
+  for (const a of agents.values()) {
+    const row = el("div", `row${state.selected === a.id ? " selected" : ""}`);
+    const sw = el("span", "sw"); sw.style.background = a.colour;
+    const who = el("div", "who");
+    who.append(el("div", "nm", a.name));
+    who.append(el("div", "brief", a.state === "waiting" ? `⏸ ${a.waiting}` : a.now));
+    row.append(sw, who, el("span", `st ${a.state}`, a.state));
+    row.addEventListener("click", () => select(a.id));
+    row.addEventListener("mousemove", (e) => tip(e, a));
+    row.addEventListener("mouseleave", hideTip);
+    box.append(row);
+  }
+  $("roster-foot").textContent = `${state.sandboxes} sandboxes · ${state.subagents} subagents`;
+}
+
+function select(id) {
+  state.selected = agents.has(id) ? id : "run";
+  for (const a of agents.values()) a.el.classList.toggle("selected", a.id === state.selected);
+  drawRoster();
+  drawDetail();
+}
+
+function drawDetail() {
+  const a = agents.get(state.selected) || agents.get("run");
+  if (!a) return;
+  $("d-name").textContent = a.name;
+  const st = $("d-state");
+  st.textContent = a.state;
+  st.className = `st ${a.state}`;
+  $("d-sub").textContent = [a.nodeId && `node ${a.nodeId}`, a.model && short(a.model)].filter(Boolean).join(" · ");
+  $("d-now").textContent = a.state === "done" || a.state === "green" || a.state === "pruned" ? "finished" : a.now;
+  $("d-wait").textContent = a.waiting || "nothing — not blocked";
+  $("d-did").textContent = a.did.length ? `${a.did[a.did.length - 1]}${a.did.length > 1 ? `  (+${a.did.length - 1} more)` : ""}` : "—";
+  const lg = $("d-log");
+  lg.textContent = "";
+  for (const line of a.log.slice(-40)) lg.append(el("div", line.kind || "", line.body));
+  lg.scrollTop = lg.scrollHeight;
+}
+
+const tipEl = $("tip");
+function tip(e, a) {
+  tipEl.innerHTML = "";
+  tipEl.append(el("b", "", `${a.name} — ${a.state}`));
+  tipEl.append(el("span", "l2", a.state === "waiting" ? `waiting on: ${a.waiting}` : a.now));
+  tipEl.style.display = "block";
+  tipEl.style.left = Math.min(e.clientX + 14, innerWidth - 290) + "px";
+  tipEl.style.top = (e.clientY + 14) + "px";
+}
+function hideTip() { tipEl.style.display = "none"; }
 
 /* ------------------------------------------------------------------- header -- */
 
@@ -265,149 +494,24 @@ function drawPill() {
   const glyph = pill.firstElementChild;
   const secs = state.started ? Math.max(0, Math.round((Date.now() - state.started) / 1000)) : null;
   const clock = secs === null ? "—" : (secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${String(secs % 60).padStart(2, "0")}s`);
-  if (state.status === "working") {
-    glyph.textContent = SPINNER[state.tick % SPINNER.length];
-    $("pill-text").textContent = `${VERBS[state.verb % VERBS.length]}… ${clock}`;
-  } else if (state.status === "blocked") {
-    glyph.textContent = "⏸";
-    $("pill-text").textContent = `waiting on you · ${clock}`;
-  } else if (state.status === "done") {
-    glyph.textContent = state.note === "green" ? "✔" : "■";
-    $("pill-text").textContent = `${state.note} · ${clock}`;
-  } else {
-    glyph.textContent = SPINNER[Math.floor(state.tick / 3) % SPINNER.length];
-    $("pill-text").textContent = state.note;
-  }
+  if (state.status === "working") { glyph.textContent = SPINNER[state.tick % SPINNER.length]; $("pill-text").textContent = `working… ${clock}`; }
+  else if (state.status === "blocked") { glyph.textContent = "⏸"; $("pill-text").textContent = `waiting on you · ${clock}`; }
+  else if (state.status === "done") { glyph.textContent = state.note === "green" ? "✔" : "■"; $("pill-text").textContent = `${state.note} · ${clock}`; }
+  else { glyph.textContent = SPINNER[Math.floor(state.tick / 3) % SPINNER.length]; $("pill-text").textContent = state.note; }
 }
-setInterval(() => {
-  state.tick++;
-  if (state.tick % 40 === 0) state.verb++;
-  drawPill();
-}, 120);
+setInterval(() => { state.tick++; drawPill(); }, 120);
 
-/* --------------------------------------------------------------------- tree -- */
-
-function drawTree() {
-  const box = $("tree");
-  box.textContent = "";
-  if (!state.order.length) { box.append(el("p", "empty", "waiting for the root node…")); return; }
-
-  const kids = new Map();
-  for (const id of state.order) {
-    const parent = state.nodes.get(id).parent ?? null;
-    if (!kids.has(parent)) kids.set(parent, []);
-    kids.get(parent).push(id);
-  }
-
-  const walk = (id, prefix, last, root) => {
-    const n = state.nodes.get(id);
-    const cls = n.pruned ? "pruned" : (n.green ? "green" : (id === state.live ? "live" : ""));
-    const line = el("div", `node ${cls}`);
-    line.append(el("span", "tag2", prefix + (root ? "" : (last ? "└─" : "├─"))));
-    line.append(el("span", "glyph", n.pruned ? "✗" : (n.green ? "★" : "●")));
-    line.append(el("span", "id", id));
-    line.append(el("span", "score", (n.score ?? 0).toFixed(2)));
-    if (n.green) line.append(el("span", "tag2", "green"));
-    else if (id === state.live && !n.pruned) line.append(el("span", "tag2", "live"));
-    box.append(line);
-
-    const indent = prefix + (root ? "" : (last ? "   " : "│  ")) + "  ";
-    if (n.pruned && (n.reason || n.outcome)) {
-      box.append(el("div", "why", indent + (n.reason || n.outcome)));
-    } else if (n.model) {
-      box.append(el("div", "model", indent + short(n.model)));
-    }
-    const children = kids.get(id) || [];
-    children.forEach((k, i) => walk(k, prefix + (root ? "" : (last ? "   " : "│  ")), i === children.length - 1, false));
-  };
-  (kids.get(null) || []).forEach((r) => walk(r, "", true, true));
-}
-
-/* ----------------------------------------------------------------- activity -- */
-
-function bumpCount() {
-  state.steps++;
-  $("activity-count").textContent = `${state.steps} events`;
-}
-
-function step(verb, arg, kind) {
-  const box = $("activity");
-  if (!state.cleared) { box.textContent = ""; state.cleared = true; }
-  const line = el("div", `step ${kind || ""}`);
-  line.append(el("span", "bullet", "● "));
-  line.append(el("span", "verb", verb));
-  if (arg) line.append(el("span", "arg", `(${arg})`));
-  box.append(line);
-  box.scrollTop = box.scrollHeight;
-  bumpCount();
-}
-
-function note(body, kind) {
-  const box = $("activity");
-  if (!state.cleared) { box.textContent = ""; state.cleared = true; }
-  const line = el("div", `note ${kind || ""}`);
-  line.append(el("span", "elbow", "⎿"));
-  line.append(document.createTextNode(body));
-  box.append(line);
-  box.scrollTop = box.scrollHeight;
-}
-
-/* ----------------------------------------------------------------- gauntlet -- */
-
-function drawGauntlet() {
-  const box = $("gauntlet");
-  box.textContent = "";
-  box.append(el("div", "candidate", state.candidate || "no candidate in flight"));
-  for (const [key, label] of STAGES) {
-    const s = state.stages.get(key);
-    const status = s ? (s.skipped ? "skip" : (s.passed ? "pass" : "fail")) : "";
-    const row = el("div", `stage ${status}`);
-    row.append(el("span", "g", s ? (s.skipped ? "−" : (s.passed ? "✔" : "✖")) : "○"));
-    row.append(el("span", "name", label));
-    row.append(el("span", "detail", s ? (s.detail || "") : ""));
-    box.append(row);
-  }
-}
-
-function drawHarness() {
-  const box = $("harness");
-  box.textContent = "";
-  const row = (k, v, hot) => {
-    const r = el("div", "row");
-    r.append(el("span", "k", k));
-    r.append(el("span", `v${hot ? " hot" : ""}`, v));
-    box.append(r);
-  };
-  row("subagents", String(state.subagents));
-  row("sandboxes", `${state.live_sandboxes} live / ${state.sandboxes}`);
-  row("approvals", String(state.approvals), state.approvals > 0);
-}
-
-function drawBudget() {
-  const box = $("budget");
-  const b = state.budget;
-  box.textContent = "";
-  if (!b) { box.append(el("p", "empty", "no budget reported yet")); return; }
-  const bar = (k, used, max, fmt) => {
-    const r = el("div", "row");
-    r.append(el("span", "k", k));
-    r.append(el("span", "v", `${fmt(used)} / ${fmt(max)}`));
-    box.append(r);
-    const meter = el("div", "meter");
-    const fill = el("span");
-    fill.style.width = `${Math.min(100, max ? (used / max) * 100 : 0)}%`;
-    meter.append(fill);
-    box.append(meter);
-  };
-  const secs = (s) => (s < 60 ? `${Math.round(s)}s` : `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, "0")}s`);
-  bar("nodes", b.nodes_used || 0, b.max_nodes || 0, (v) => String(Math.round(v)));
-  bar("time",  b.elapsed || 0,    b.max_seconds || 0, secs);
-  bar("spend", b.usd_used || 0,   b.max_usd || 0, (v) => `$${Number(v).toFixed(2)}`);
+const fmtSecs = (s) => (s < 60 ? `${Math.round(s)}s` : `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, "0")}s`);
+function drawBudget(b) {
+  $("budget").innerHTML =
+    `nodes <b>${Math.round(b.nodes_used || 0)}/${Math.round(b.max_nodes || 0)}</b> · ` +
+    `<b>${fmtSecs(b.elapsed || 0)}</b>/${fmtSecs(b.max_seconds || 0)} · ` +
+    `<b>$${Number(b.usd_used || 0).toFixed(2)}</b>/$${Number(b.max_usd || 0).toFixed(2)}`;
 }
 
 /* --------------------------------------------------------------------- gate -- */
 
-function showGate(p) {
+function showGate(p, run) {
   state.pending = p.id;
   $("gate-action").textContent = p.action || "do something irreversible";
   $("gate-summary").textContent = p.summary || "";
@@ -416,16 +520,19 @@ function showGate(p) {
   pre.textContent = "";
   for (const line of String(p.diff_preview || "").split("\n")) {
     const cls = line.startsWith("+++") || line.startsWith("---") ? "ctx"
-              : line.startsWith("+") ? "add"
-              : line.startsWith("-") ? "del" : "ctx";
+              : line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "ctx";
     pre.append(el("span", cls, line + "\n"));
   }
   $("approve").disabled = false;
   $("deny").disabled = false;
-  $("gate-hint").textContent = "nothing has been pushed yet — this is the last stop";
+  $("gate-hint").textContent = "keys: a approve · d deny";
   $("gate").hidden = false;
+  $("gate-armed").hidden = true;
+  $("gate-door").classList.add("holding");
+  run.waiting = `you — ${p.action || "approval"}`;
+  setState(run, "waiting");
+  bubble(run, "⏸ waiting on you", true);
 }
-
 async function decide(allow) {
   if (!state.pending) return;
   $("approve").disabled = true;
@@ -453,129 +560,148 @@ addEventListener("keydown", (e) => {
   if (e.key === "d" || e.key === "2" || e.key === "Escape") decide(false);
 });
 
-/* ---------------------------------------------------------------- the stream -- */
+/* --------------------------------------------------------------- the stream -- */
 
 function apply(kind, p, ts) {
   if (state.started === null && ts) state.started = ts * 1000;
   if (kind !== "run.done" && state.status !== "blocked") state.status = "working";
-  if (p.budget) { state.budget = p.budget; drawBudget(); }
+  if (p.budget) drawBudget(p.budget);
+  const run = agents.get("run");
 
   switch (kind) {
-    case "run.started":
+    case "run.started": {
       $("task").textContent = p.task ?? "—";
       $("provider").textContent = `${p.provider ?? "—"} · ${p.snapshots ? "snapshots" : "worktree fallback"}`;
       $("run").textContent = p.run_id ?? "—";
-      step("Run", p.run_id, "");
-      note(`task ${p.task} · provider ${p.provider}`);
+      const a = spawn("run", "ratchet", { now: "orchestrating the search" });
+      log(a, `run ${p.run_id} · task ${p.task} · provider ${p.provider}`);
+      select("run");
       break;
-
-    case "repo.mapped":
-      state.subagents++; drawHarness();
-      step("Cartographer", "repo map", "info");
-      note(`${p.lines} lines of repo map into the context`);
+    }
+    case "repo.mapped": {
+      state.subagents++;
+      const a = spawn("cartographer", "cartographer", { now: "mapping the repo" });
+      setDid(a, `mapped the repo — ${p.lines} lines into context`);
+      setNow(a, "map delivered");
+      setTimeout(() => setState(a, "done"), 3000);
+      log(a, `${p.lines} lines of repo map into the context`);
       break;
-
+    }
     case "sandbox.created":
-      state.sandboxes++; state.live_sandboxes++; drawHarness();
+      state.sandboxes++;
+      drawRoster();
       break;
 
     case "expand":
-      step("Expand", p.node, "");
-      note(`fanout ${p.fanout} · depth ${p.depth} · ${p.dead_ends || 0} dead end(s) fed back to siblings`);
+      if (run) { setNow(run, `expanding ${p.node} — fanout ${p.fanout}, depth ${p.depth}`); log(run, `expand ${p.node} · fanout ${p.fanout} · depth ${p.depth}`); }
       break;
 
-    case "verify.started":
-      state.subagents++; drawHarness();
-      state.stages.clear();
-      state.candidate = p.intent || "";
-      drawGauntlet();
-      step("Verify", p.label, "");
-      note(`${short(p.model)}  ${p.intent || ""}`, "faint");
-      break;
-
-    case "stage.result": {
-      state.stages.set(p.stage, { passed: !!p.passed, skipped: !!p.skipped, detail: p.detail || "" });
-      drawGauntlet();
-      const label = (STAGES.find((s) => s[0] === p.stage) || [null, p.stage])[1];
-      const mark = p.skipped ? "skip" : (p.passed ? "PASS" : "FAIL");
-      note(`${mark.padEnd(4)}  ${String(label).padEnd(16)}${p.detail || ""}`,
-           p.skipped ? "faint" : (p.passed ? "ok" : "bad"));
+    case "verify.started": {
+      state.subagents++;
+      const id = `v:${p.label}`;
+      const a = spawn(id, `verifier·${p.label}`, { now: p.intent || "running the gauntlet", model: p.model });
+      a.model = p.model || a.model;
+      setNow(a, p.intent || "running the gauntlet");
+      log(a, `${short(p.model)}  ${p.intent || ""}`, "faint");
+      state.currentVerify = id;
+      if (run) setNow(run, `verifying candidate ${p.label}`);
       break;
     }
-
-    case "subagent":
-      // Declared in bus.py as part of the renderer contract. Nothing in the loop
-      // emits it today; a role the harness spawns on its own would arrive here.
-      state.subagents++; drawHarness();
-      step("Subagent", p.role || p.label, "info");
-      if (p.task) note(String(p.task), "faint");
+    case "stage.result": {
+      const a = agents.get(state.currentVerify);
+      if (!a) break;
+      const label = STAGES[p.stage] || p.stage;
+      const mark = p.skipped ? "skip" : (p.passed ? "PASS" : "FAIL");
+      setNow(a, `gauntlet: ${label} — ${mark}`);
+      log(a, `${mark.padEnd(4)} ${label.padEnd(14)} ${p.detail || ""}`, p.skipped ? "faint" : (p.passed ? "ok" : "bad"));
       break;
-
-    case "candidate.empty":
-      note(`${short(p.model)} returned no patch`, "faint");
+    }
+    case "candidate.empty": {
+      const a = agents.get(state.currentVerify) || run;
+      if (a) log(a, `${short(p.model)} returned no patch`, "faint");
       break;
-
-    case "node.added":
-      state.live_sandboxes = Math.max(0, state.live_sandboxes - 1); drawHarness();
-      if (!state.nodes.has(p.id)) state.order.push(p.id);
-      state.nodes.set(p.id, { ...(state.nodes.get(p.id) || {}), ...p, pruned: false });
-      state.live = p.id;
-      drawTree();
-      note(`kept ${p.id} at ${(p.score ?? 0).toFixed(2)}${p.green ? "   ★ every gate green" : ""}`, "ok");
+    }
+    case "node.added": {
+      const a = agents.get(state.currentVerify) || run;
+      if (a && a !== run) {
+        a.nodeId = p.id;
+        setDid(a, `kept node ${p.id} at ${(p.score ?? 0).toFixed(2)}${p.green ? " — every gate green" : ""}`);
+        setState(a, p.green ? "green" : "done");
+        bubble(a, p.green ? "★ green!" : `kept ${p.id}`, false);
+        log(a, `kept ${p.id} at ${(p.score ?? 0).toFixed(2)}`, "ok");
+      }
+      if (run) { setDid(run, `node ${p.id} kept at ${(p.score ?? 0).toFixed(2)}`); log(run, `kept ${p.id} at ${(p.score ?? 0).toFixed(2)}${p.green ? " ★ green" : ""}`, "ok"); }
       break;
-
-    case "node.pruned":
-      state.live_sandboxes = Math.max(0, state.live_sandboxes - 1); drawHarness();
-      if (!state.nodes.has(p.id)) state.order.push(p.id);
-      state.nodes.set(p.id, { ...(state.nodes.get(p.id) || {}), ...p, pruned: true });
-      drawTree();
-      step("Prune", p.id, "bad");
-      note(`${p.reason || p.outcome}${(p.findings || []).length ? `  [${p.findings.join(", ")}]` : ""}`, "bad");
+    }
+    case "node.pruned": {
+      const a = agents.get(state.currentVerify) || run;
+      if (a && a !== run) {
+        a.nodeId = p.id;
+        setDid(a, `pruned: ${p.reason || p.outcome}`);
+        setState(a, "pruned");
+        bubble(a, `✗ ${p.reason || p.outcome}`, false);
+      }
+      const findings = (p.findings || []).length ? ` [${p.findings.join(", ")}]` : "";
+      if (run) log(run, `pruned ${p.id}: ${p.reason || p.outcome}${findings}`, "bad");
       break;
-
+    }
     case "stall":
-      step("Stall", p.node, "warn");
-      note(`no improvement for 3 expansions — forking ${p.fanout} ways from depth ${p.depth}`, "warn");
+      if (run) { setNow(run, `stalled at ${p.node} — forking ${p.fanout} ways`); log(run, `stall at ${p.node} · forking ${p.fanout} ways from depth ${p.depth}`, "warn"); }
       break;
 
-    case "docs.fetch":
-      step("BrightData", `${p.library} ${p.version}`, "data");
+    case "docs.fetch": {
+      const a = spawn("oracle", "docs·oracle", { now: "fetching upstream docs", colour: "var(--violet)" });
+      setNow(a, `fetching ${p.library} ${p.version} docs`);
+      log(a, `BrightData: ${p.library} ${p.version}`, "faint");
       break;
-
-    case "docs.heal":
-      step("ScraperRepair", p.library, "data");
-      note(`${JSON.stringify(p.old_section)} → ${JSON.stringify(p.new_section)}`, "data");
+    }
+    case "docs.heal": {
+      const a = spawn("oracle", "docs·oracle", { colour: "var(--violet)" });
+      setDid(a, `healed scraper for ${p.library}`);
+      log(a, `repair: ${JSON.stringify(p.old_section)} → ${JSON.stringify(p.new_section)}`, "warn");
       break;
-
+    }
     case "approval.required":
-      state.approvals++; drawHarness();
       state.status = "blocked";
-      showGate(p);
-      step("Approval", p.action, "warn");
-      note("held — a human has to decide before anything leaves this machine", "warn");
+      if (run) { showGate(p, run); log(run, `approval required: ${p.action} — held before anything leaves this machine`, "warn"); }
       break;
 
     case "approval.resolved":
-      state.approvals = Math.max(0, state.approvals - 1); drawHarness();
-      state.status = "working";
+      // If the run already finished, the resolution is the epilogue, not a resume.
+      state.status = state.finished ? "done" : "working";
       state.pending = null;
       $("gate").hidden = true;
-      note(`approval ${p.approved ? "granted" : "denied"}`, p.approved ? "ok" : "bad");
+      $("gate-armed").hidden = false;
+      $("gate-door").classList.remove("holding");
+      if (run) {
+        run.waiting = "";
+        setState(run, state.finished ? (state.note === "green" ? "green" : "done") : "working");
+        setDid(run, `approval ${p.approved ? "granted" : "denied"} at the gate`);
+        setNow(run, p.approved ? "proceeding — approved" : "rolled back — denied");
+        bubble(run, p.approved ? "✔ approved" : "✗ denied", false);
+        log(run, `approval ${p.approved ? "granted" : "denied"}`, p.approved ? "ok" : "bad");
+      }
       break;
 
     case "rewind":
-      step("Rewind", p.node, "warn");
+      if (run) log(run, `rewind to ${p.node}`, "warn");
       break;
 
     case "run.done":
       state.status = "done";
+      state.finished = true;
       state.note = p.green ? "green" : (p.reason || "stopped");
-      step("Done", p.winner, p.green ? "ok" : "");
-      note(`${p.reason} · winner ${p.winner} at ${(p.score ?? 0).toFixed(2)} · ${p.nodes} nodes`,
-           p.green ? "ok" : "faint");
+      for (const a of agents.values()) if (a.state === "working") setState(a, "done");
+      if (run) {
+        setDid(run, `${p.reason} — winner ${p.winner} at ${(p.score ?? 0).toFixed(2)}, ${p.nodes} nodes`);
+        setState(run, p.green ? "green" : "done");
+        bubble(run, p.green ? "★ green — one clean diff" : String(p.reason || "stopped"), true);
+        log(run, `${p.reason} · winner ${p.winner} at ${(p.score ?? 0).toFixed(2)} · ${p.nodes} nodes`, p.green ? "ok" : "faint");
+      }
       break;
   }
   drawPill();
+  drawDetail();
 }
 
 const source = new EventSource("/events");
@@ -584,7 +710,6 @@ source.onmessage = (e) => {
   apply(kind, payload || {}, ts);
 };
 source.onerror = () => {
-  // EventSource reconnects on its own; say so rather than looking merely frozen.
   if (source.readyState === EventSource.CLOSED) {
     state.status = "offline";
     state.note = "stream closed — is `ratchet dashboard` still running?";
@@ -592,7 +717,6 @@ source.onerror = () => {
   }
 };
 
-drawGauntlet();
-drawHarness();
-drawBudget();
+drawPill();
+drawDetail();
 </script>
