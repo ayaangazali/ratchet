@@ -1,0 +1,13 @@
+# The image every graded patch runs inside.
+# Deliberately boring: a pinned interpreter, the test runner, nothing else. The
+# fewer things in here, the fewer things a patch can reach for.
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends git patch \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir pytest==8.3.3 ruff==0.6.9 mypy==1.11.2
+
+# Grading runs with --network=none, so anything a task needs must be baked in here.
+WORKDIR /work
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1

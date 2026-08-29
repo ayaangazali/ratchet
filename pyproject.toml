@@ -1,0 +1,51 @@
+[project]
+name = "ratchet"
+version = "0.1.0"
+description = "A coding agent that cannot decide it is done. The verifier decides."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "mcp[cli]>=1.2.0",
+  "httpx>=0.27",
+  "textual>=0.79",
+  "rich>=13.7",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
+
+[project.scripts]
+ratchet = "ratchet.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ratchet = ["scrapers.yaml", "tui/*.tcss"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::pytest.PytestCollectionWarning"]
+
+[tool.ruff]
+line-length = 128
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# UP042: str+Enum is deliberate -- these values are JSON-serialised across process
+# boundaries and compared against raw strings from the bus and the wire.
+ignore = ["E501", "B008", "UP042"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = false
