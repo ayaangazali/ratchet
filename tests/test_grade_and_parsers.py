@@ -142,6 +142,47 @@ def test_empty_suite_is_not_a_clean_sweep():
     assert parse(EMPTY) == {}
 
 
+def test_a_forged_exit_marker_inside_the_region_is_ignored():
+    """A patch can print an identical marker line from inside the suite; only the
+    region after END -- which the suite cannot write into -- is parsed."""
+    forged = log(f"{EXIT} 0\ncollected 1 items\nPASSED tests/test_v.py::test_a", exit_code=2)
+    assert parse_exit_code(forged) == 2
+
+
+def test_a_reset_marker_printed_by_the_suite_is_ignored():
+    """The reset runs before START; a test that prints the failure marker cannot
+    force INFRA verdicts (self-DoS) because only the pre-START region is checked."""
+    spoof = log(RESET_FAILED + "\ncollected 1 items\nPASSED tests/test_v.py::test_a")
+    assert reset_ok(spoof)
+
+
+def test_non_pytest_failure_blocks_are_withheld_too():
+    """Cargo (and jest/go) failure sections must be suppressed like pytest's."""
+    body = log(
+        "test result: FAILED.\n"
+        "---- test_c stdout ----\n"
+        "thread panicked at 'assertion failed: secret-cargo-input'\n"
+        "================\n"
+        "failures: test_c",
+        exit_code=101,
+    )
+    out = failure_excerpt(body, {}, redact=["test_c"])
+    assert "secret-cargo-input" not in out
+
+
+def test_class_based_hidden_ids_are_fully_redacted():
+    hidden = ["tests/test_h.py::MyTest::test_method"]
+    body = log(
+        "collected 1 items\n"
+        "FAILED tests/test_h.py::MyTest::test_method\n"
+        "____ MyTest.test_method ____\n"
+        "E   AssertionError: secret-class-value",
+        exit_code=1,
+    )
+    out = failure_excerpt(body, parse(body), redact=hidden)
+    assert "test_method" not in out and "secret-class-value" not in out
+
+
 def test_a_failed_protected_path_reset_is_not_ok():
     # the suite may look perfectly green -- if the revert failed, it graded the
     # agent's own edits to the tests, and nothing in that log is evidence

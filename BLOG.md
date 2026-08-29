@@ -48,7 +48,7 @@ the class of hack static analysis will never catch.
 **6b. Does the search actually beat a loop? (350 words).**
 The eval nobody runs on their own submission. Same bugs, same draws, same budget; the
 only difference is whether a bad step persists. Linear 50% ±14 versus search 100%, and
-seven cheating patches that stuck under linear versus zero. Define "stuck" honestly:
+the cheating patch that persists under linear versus zero under search. Define "stuck" honestly:
 still in the trial's final state — linear has no rollback so every applied cheat
 persists, and under search the zero is structural, because nothing is inherited unless
 the verifier passed it. Be explicit that the generator is simulated and that this

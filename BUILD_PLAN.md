@@ -210,7 +210,7 @@ that persisted:
 
 ```
 overall   linear 50% ±14   ·   search 100% ±0
-cheating patches that persisted   linear 7   ·   search 0
+cheating patches that persisted   linear 1   ·   search 0
 ```
 
 Then, in the demo: *"we changed the scheduler at 15:00 — here's the regression our own

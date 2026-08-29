@@ -50,9 +50,13 @@ def slice_output(log: str) -> str:
 
 
 def parse_exit_code(log: str) -> int | None:
-    """Echoed *outside* the markers, so a patch that fakes lines inside them cannot
-    fake this."""
-    m = _EXIT_RE.search(log)
+    """Echoed *outside* the markers -- specifically AFTER the end marker, so only
+    that region is parsed. A patch can print an identical-looking marker line from
+    inside the suite, but everything it prints lands before END; parsing the tail
+    region means the forged copy is never read. (Found by review: first-match
+    parsing over the whole log accepted a forged `exit code: 0`.)"""
+    region = log.split(END, 1)[1] if END in log else log
+    m = _EXIT_RE.search(region)
     return int(m.group(1)) if m else None
 
 
@@ -131,11 +135,13 @@ def reset_ok(log: str) -> bool:
 
     A reset that silently did not happen means the run would grade the agent's own
     edits to the graded tests. Fail closed: the gauntlet treats this as an
-    infrastructure failure, never as a pass. The marker sits outside the parsed
-    region, so the only thing a patch gains by printing it is an INFRA verdict
-    against itself.
+    infrastructure failure, never as a pass. Only the region BEFORE the start
+    marker is checked -- the reset runs before the suite, and suite output (which
+    the agent controls) all lands after START, so printing the marker from a test
+    buys nothing at all.
     """
-    return RESET_FAILED not in log
+    region = log.split(START, 1)[0] if START in log else log
+    return RESET_FAILED not in region
 
 
 def suite_ran(log: str) -> bool:
@@ -177,19 +183,32 @@ def failure_excerpt(
 
     tokens: set[str] = set()
     for t in hidden:
-        path, _, name = t.partition("::")
-        tokens.update(x for x in (t, path, name) if x)
+        # every ::-segment separately: `file.py::MyTest::test_m` must also redact
+        # pytest's unittest heading form `MyTest.test_m` and the bare method name
+        tokens.add(t)
+        tokens.update(seg for seg in t.split("::") if seg)
+        tokens.update(seg.replace("::", ".") for seg in (t.partition("::")[2],) if seg)
 
-    # Names are not enough: pytest's FAILURES section echoes the failing test's
-    # *source and rendered values* -- the exact inputs a patch would special-case.
-    # So a whole failure block whose header names a held-out test is dropped, and
-    # any remaining line that mentions a held-out token is replaced outright rather
+    # Names are not enough: failure sections echo the failing test's *source and
+    # rendered values* -- the exact inputs a patch would special-case. So a whole
+    # failure block whose header names a held-out test is dropped, and any
+    # remaining line that mentions a held-out token is replaced outright rather
     # than token-substituted (the short-summary line carries the assertion message).
+    # Header shapes per shipped framework: pytest `___ name ___`, cargo
+    # `---- name stdout ----`, jest/vitest `● name`, go `--- FAIL: name` / `=== RUN name`.
+    def _is_header(stripped: str) -> bool:
+        return (
+            (len(stripped) > 6 and stripped.startswith("_") and stripped.endswith("_"))
+            or (stripped.startswith("----") and stripped.endswith("----"))
+            or stripped.startswith("●")
+            or stripped.startswith(("--- FAIL:", "--- PASS:", "--- SKIP:", "=== RUN"))
+        )
+
     kept: list[str] = []
     dropping = False
     for ln in slice_output(log).strip().splitlines():
         stripped = ln.strip()
-        is_hdr = len(stripped) > 6 and stripped.startswith("_") and stripped.endswith("_")
+        is_hdr = _is_header(stripped)
         if is_hdr or stripped.startswith("="):
             dropping = is_hdr and any(tok in ln for tok in tokens)
             if dropping:

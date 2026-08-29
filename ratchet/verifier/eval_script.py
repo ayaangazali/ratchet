@@ -38,7 +38,9 @@ def _reset_lines(base_commit: str, protected_paths: list[str], *, quiet: bool = 
 
     `git clean` is the other half of "pristine": checkout restores tracked content
     but leaves behind any file the patch *created* under a protected path (a new
-    tests/conftest.py, say). Untracked files under a protected path are deleted.
+    tests/conftest.py, say). `-x` includes ignored files -- without it, a created
+    file matching an ignore pattern survived the reset (found by review). Scoped
+    to the protected paths, so nothing outside them is touched.
     """
     base = shlex.quote(base_commit)
     tail = " >/dev/null 2>&1 || true" if quiet else f" || echo '{RESET_FAILED}'"
@@ -46,7 +48,7 @@ def _reset_lines(base_commit: str, protected_paths: list[str], *, quiet: bool = 
     for p in protected_paths:
         q = shlex.quote(p)
         lines.append(f'if [ -n "$(git ls-tree --name-only {base} -- {q})" ]; then git checkout {base} -- {q}{tail}; fi')
-        lines.append(f"git clean -fdq -- {q}{tail}")
+        lines.append(f"git clean -fdxq -- {q}{tail}")
     return lines
 
 

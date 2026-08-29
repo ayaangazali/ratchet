@@ -126,8 +126,8 @@ def test_graph_fulfils_nodes_in_order_and_composes_state(repo):
         _reply(_unified(ACCENTS_ONLY, NAIVE_TRUNCATE), "strip after cut"),
         _reply(_unified(ACCENTS_ONLY, SLUGIFY_FIXED), "word-boundary truncate"),
     ])
-    assert summary["green"], summary
-    assert summary["fulfilled"] == ["accents", "truncation"]
+    assert summary.all_fulfilled, summary
+    assert summary.fulfilled == ["accents", "truncation"]
     assert run.graph.nodes["truncation"].attempts == 2  # the first was rejected
     ok, problems = run.receipts.verify()
     assert ok, problems
@@ -147,7 +147,7 @@ def test_exhausted_node_escalates_to_the_search_engine(repo):
         bad,                                                       # first search candidate
         _reply(_unified(ACCENTS_ONLY, SLUGIFY_FIXED), "the fix"),  # search reaches green
     ])
-    assert summary["green"], summary
+    assert summary.all_fulfilled, summary
     node = run.graph.nodes["truncation"]
     assert node.escalated and node.status == "fulfilled" and node.sub_run_id
 
@@ -176,7 +176,7 @@ def test_a_claim_of_completion_fulfils_nothing(repo, tmp_path):
         graph_path=p,
         budget=Budget(max_nodes=2, max_seconds=15, max_usd=1),
     )
-    assert not summary["green"]
+    assert not summary.all_fulfilled
     assert run.graph.nodes["accents"].status == "failed"
 
 
