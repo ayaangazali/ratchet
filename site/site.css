@@ -95,7 +95,6 @@ code:not(pre code) {
   .wordmark { font-size: 15px; letter-spacing: 0.1em; }
   .nav-links { gap: 11px; }
   .nav-links a { font-size: 10.5px; letter-spacing: 0.03em; }
-  .nav-links a[href="#about"] { display: none; }
   #hero3d { opacity: 0.35; } /* keep the hero copy readable over the tree on phones */
 }
 
@@ -200,9 +199,10 @@ h3 { font-size: 19px; font-weight: 600; }
 
 /* ---------- terminal blocks ---------- */
 .term {
-  background: #0c0f13; border: 1px solid var(--hairline); border-radius: 6px;
-  font-family: var(--mono); font-size: 13.5px; line-height: 1.75;
-  padding: 18px 22px; overflow-x: auto; white-space: pre;
+  background: #0c0f13; border: 1px solid var(--hairline); border-radius: 8px;
+  font-family: var(--mono); font-size: 14px; line-height: 1.8;
+  padding: 22px 26px; overflow-x: auto; white-space: pre;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
 }
 .term .g { color: var(--green); }
 .term .r { color: var(--red); }
