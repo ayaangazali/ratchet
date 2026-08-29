@@ -8,6 +8,7 @@ fins -- and the grid is filled from that. Every row is the declared width becaus
 the grid allocates it that way, and the same description renders at three sizes.
 
     python scripts/make_mascot.py             # preview, with silhouettes
+    python scripts/make_mascot.py --stdout    # the generated module, to stdout
     python scripts/make_mascot.py --write     # regenerate ratchet/tui/sprites.py
 
 The silhouette column in the preview is the thing to actually look at. If the
@@ -110,7 +111,7 @@ def _profile(points, u: float) -> float | None:
     """Smoothstepped interpolation along a profile; None outside its span."""
     if u <= points[0][0] or u >= points[-1][0]:
         return None
-    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+    for (x0, y0), (x1, y1) in zip(points, points[1:], strict=False):
         if x0 <= u <= x1:
             t = 0.0 if x1 == x0 else (u - x0) / (x1 - x0)
             return y0 + (y1 - y0) * t * t * (3 - 2 * t)
@@ -222,7 +223,12 @@ def preview() -> None:
 
 
 if __name__ == "__main__":
-    if "--write" in sys.argv:
+    if "--stdout" in sys.argv:
+        # `tests/test_console.py` diffs this against the committed module, which is
+        # how a hand-edited sprite gets caught before `make mascot` silently
+        # reverts it.
+        sys.stdout.write(emit())
+    elif "--write" in sys.argv:
         target = Path(__file__).resolve().parents[1] / "ratchet" / "tui" / "sprites.py"
         target.write_text(emit())
         print(f"wrote {target}")

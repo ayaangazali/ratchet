@@ -1,7 +1,7 @@
 """The console's invariants.
 
 Generated art and injected templates are exactly the things that break quietly: a
-sprite row loses a character and the capybara shears, a colour is edited in the
+sprite row loses a character and the dolphin shears, a colour is edited in the
 stylesheet but not in the module and the browser slowly stops matching the terminal.
 None of this needs a model, a key, a network or a terminal.
 """
@@ -20,7 +20,7 @@ from ratchet.tui import mascot as m
 from ratchet.tui.sprites import PALETTE, Sprite
 
 ROOT = Path(__file__).resolve().parents[1]
-SPRITES = [m.CAPY, m.CAPY_SMALL, m.CAPY_TINY]
+SPRITES = [m.FIN, m.FIN_SMALL, m.FIN_TINY]
 
 
 @pytest.mark.parametrize("sprite", SPRITES, ids=lambda s: f"{s.width}x{s.height}")
@@ -61,7 +61,7 @@ def test_sprites_match_their_geometry() -> None:
 
 
 def test_svg_uses_only_palette_colours() -> None:
-    svg = m.to_svg(m.CAPY)
+    svg = m.to_svg(m.FIN)
     assert svg.startswith("<svg") and svg.endswith("</svg>")
     fills = set(re.findall(r'fill="([^"]+)"', svg))
     assert fills and fills <= set(PALETTE.values())
@@ -79,7 +79,7 @@ def test_stylesheet_and_module_agree_on_colours() -> None:
 def test_dashboard_page_leaves_no_placeholder() -> None:
     page = _page(Path(".ratchet/demo.bus.jsonl"), Path("demo-repo")).decode()
     assert "__PALETTE__" not in page
-    assert "__CAPYBARA__" not in page
+    assert "__DOLPHIN__" not in page
     assert "__RUN__" not in page and "__REPO__" not in page
     for name, value in m.COLOURS.items():
         assert f"--{name}: {value};" in page, f"palette entry {name} never reached the page"

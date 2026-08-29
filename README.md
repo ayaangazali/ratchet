@@ -50,6 +50,43 @@ pytest's own report objects ([paper](https://arxiv.org/html/2511.18397v1)).
 
 ---
 
+## Start here
+
+```bash
+npx github:ayaangazali/ratchet https://github.com/owner/repo
+```
+
+Nothing to install but Node — the shim finds or installs `uv`, which resolves a
+Python 3.11+ interpreter and builds the package. If you would rather not go through
+npm: `uvx --from git+https://github.com/ayaangazali/ratchet ratchet go <url>`.
+
+`go` does not ask you to write a task file, because everything in one is observable:
+
+```
+  [1/5] clone       full clone -- rewind restores to a sha, so depth-1 would break
+  [2/5] detect      framework, test command, source dirs, protected paths
+  [3/5] provision   a venv at <repo>/.ratchet/venv, which the worktree provider
+                    finds on its own and puts on PATH for every node in the search
+  [4/5] probe       the suite, once: 6 failing · 8 passing
+  [5/5] task        tasks/<repo>-auto.yaml
+```
+
+Red tests become fail-to-pass, green tests become pass-to-pass, test directories and
+config files become protected paths. Half the failures are **held out** by
+interleaving the sorted list — adjacent test names in a file usually cover the same
+behaviour with different inputs, which is exactly what a held-out slice should be;
+take the tail instead and you tend to hold out a whole separate feature and measure
+the wrong thing.
+
+Step 4 runs somebody's entire test suite, so it streams: the log goes to
+`<repo>/.ratchet/probe.log` and the line on screen keeps moving. A silent subprocess
+for ten minutes is indistinguishable from a hang. `--probe-timeout` raises the
+ceiling, `--no-run` stops after writing the task, `--goal` overrides the statement.
+
+Detects pytest, jest, vitest, `go test` and cargo.
+
+---
+
 ## Run it
 
 Python 3.11+, git, and Node 22.14+ for TrueForge.
@@ -347,6 +384,7 @@ ratchet/
 
 | command | what it does |
 |---|---|
+| `ratchet go <url>` | clone a repository, work out the task from its own suite, and start |
 | `ratchet run` | search until green or the budget runs out |
 | `ratchet tree` | the search tree, scores, live and pruned |
 | `ratchet rewind <node>` | restore that state and branch from it |

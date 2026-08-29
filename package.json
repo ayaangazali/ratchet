@@ -1,0 +1,19 @@
+{
+  "name": "ratchet-agent",
+  "version": "0.1.0",
+  "description": "A coding agent that never decides it's done. The tests do. Point it at a repository and it searches over repo states until a verifier says green.",
+  "bin": { "ratchet": "bin/ratchet.js" },
+  "files": [
+    "bin/",
+    "ratchet/",
+    "tasks/",
+    "scripts/",
+    "pyproject.toml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/ayaangazali/ratchet.git" },
+  "keywords": ["agent", "coding-agent", "verifier", "tree-search", "trueforge", "swe-bench"]
+}
