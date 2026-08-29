@@ -34,7 +34,7 @@ user's working directory; every turn becomes one git commit the user can revert.
 Working directory listing:
 {listing}
 
-{history}User request:
+{sources}{history}User request:
 {prompt}
 
 Reply with ONE line starting `intent:` describing the change, then the change itself:
@@ -50,6 +50,7 @@ class Turn:
     intent: str = ""
     files: list[str] = field(default_factory=list)
     commit: str = ""
+    commit_note: str = ""
     error: str = ""
     cancelled: bool = False
     seconds: float = 0.0
@@ -100,6 +101,22 @@ class ChatSession:
             emit("error", turn.error)
             return self._finish(turn, t0)
 
+        # The gauntlet's static stage, before a byte lands: the same cheat detector
+        # the run loop uses inspects what the model wants to write. sys.exit(0) in
+        # generated source, report-hook tampering, writes into graded paths -- the
+        # chat door is not a way around the verifier.
+        from .verifier import cheat as cheat_mod
+
+        synth = self._as_diff(files, diff.group(1) if diff else "")
+        findings = cheat_mod.inspect(synth, protected_paths=list(cheat_mod.DEFAULT_PROTECTED))
+        crit = [f for f in findings if f.severity.value == "critical"]
+        if crit:
+            turn.error = f"gauntlet blocked the turn: {crit[0].one_line()}"
+            emit("error", turn.error)
+            return self._finish(turn, t0)
+        emit("step", "gauntlet cheat check: clean" if not findings
+             else f"gauntlet cheat check: {len(findings)} warning(s), none blocking")
+
         for raw_path, content in files:
             if self.cancel.is_set():
                 turn.cancelled = True
@@ -121,7 +138,13 @@ class ChatSession:
 
         if diff and not self.cancel.is_set():
             applied = self._apply(diff.group(1))
-            emit("step" if applied else "note", "applied diff" if applied else "diff did not apply; skipped")
+            if applied:
+                from .verifier.cheat import parse_unified_diff
+
+                turn.files.extend(f.path for f in parse_unified_diff(diff.group(1)) if f.path)
+                emit("step", "applied diff")
+            else:
+                emit("note", "diff did not apply; skipped")
 
         return self._commit_and_finish(turn, t0)
 
@@ -133,7 +156,57 @@ class ChatSession:
             lines = [f"- {t.intent or t.prompt[:60]} -> {'ok' if t.ok else t.error or 'cancelled'}"
                      for t in self.turns[-3:]]
             history = "Recent turns:\n" + "\n".join(lines) + "\n\n"
-        return _PROMPT.format(listing=tree_listing(self.repo, [])[:4000], history=history, prompt=prompt)
+        return _PROMPT.format(
+            listing=tree_listing(self.repo, [])[:4000],
+            sources=self._sources_block(),
+            history=history,
+            prompt=prompt,
+        )
+
+    def _sources_block(self, *, max_files: int = 8, max_chars: int = 10_000) -> str:
+        """The current contents of the repo's small text files, so an edit request
+        edits what is actually there instead of hallucinating it. Capped hard --
+        context is the scarcest resource, and a lockfile is not worth shipping."""
+        keep = (".html", ".css", ".js", ".ts", ".py", ".md", ".json", ".yaml", ".yml", ".toml")
+        parts: list[str] = []
+        used = 0
+        for path in sorted(self.repo.rglob("*")):
+            if len(parts) >= max_files or used >= max_chars:
+                break
+            if not path.is_file() or path.suffix not in keep:
+                continue
+            rel = path.relative_to(self.repo)
+            if any(seg in (".git", ".ratchet", "node_modules", ".venv") for seg in rel.parts):
+                continue
+            text = path.read_text(errors="replace")
+            if len(text) > 4000:
+                continue  # big files are named in the listing; the model can ask
+            parts.append(f"--- {rel} ---\n{text}")
+            used += len(text)
+        if not parts:
+            return ""
+        return "Current file contents (edit these, do not reinvent them):\n" + "\n".join(parts) + "\n\n"
+
+    def _as_diff(self, files: list[tuple[str, str]], diff_text: str) -> str:
+        """What the model wants to write, as one unified diff the cheat detector
+        can inspect -- new files synthesised, an explicit diff passed through."""
+        import difflib
+
+        chunks: list[str] = []
+        for raw_path, content in files:
+            rel = raw_path.strip()
+            existing = ""
+            target = self.repo / rel
+            if target.is_file():
+                existing = target.read_text(errors="replace")
+            body = "".join(difflib.unified_diff(
+                existing.splitlines(keepends=True), content.splitlines(keepends=True),
+                fromfile=f"a/{rel}" if existing else "/dev/null", tofile=f"b/{rel}",
+            ))
+            chunks.append(f"diff --git a/{rel} b/{rel}\n" + ("" if existing else "new file mode 100644\n") + body)
+        if diff_text:
+            chunks.append(diff_text)
+        return "\n".join(chunks)
 
     def _apply(self, diff: str) -> bool:
         import tempfile
@@ -149,28 +222,33 @@ class ChatSession:
             fd_path.unlink(missing_ok=True)
 
     def _commit_and_finish(self, turn: Turn, t0: float) -> Turn:
-        if turn.files or not turn.error:
-            sha = self._commit(turn.intent or "chat turn")
-            if sha:
-                turn.commit = sha
+        if turn.files:
+            turn.commit = self._commit(turn, turn.intent or "chat turn")
         self.turns.append(turn)
         return self._finish(turn, t0)
 
-    def _commit(self, intent: str) -> str:
-        if subprocess.run(["git", "rev-parse", "--git-dir"], cwd=self.repo, capture_output=True).returncode != 0:
-            return ""  # not a repo: files written, nothing to revert to -- said in the summary
-        # never commit the machinery: the bus keeps being written after the commit,
-        # and a committed .ratchet/ makes every later `git revert` a conflict
-        subprocess.run(["git", "add", "-A", "--", ".", ":!.ratchet"], cwd=self.repo, capture_output=True)
+    def _commit(self, turn: Turn, intent: str) -> str:
+        if subprocess.run(["git", "rev-parse", "--git-dir"], cwd=self.repo,
+                          capture_output=True, timeout=20).returncode != 0:
+            turn.commit_note = "not a git repo — files written, but nothing to revert to"
+            return ""
+        # only what THIS turn touched is staged: `git add -A` swept a user's own
+        # in-flight edits into a chat commit (found by audit). Never the machinery.
+        paths = [f for f in dict.fromkeys(turn.files) if not f.startswith(".ratchet")]
+        if not paths:
+            turn.commit_note = "nothing to commit"
+            return ""
+        subprocess.run(["git", "add", "--", *paths], cwd=self.repo, capture_output=True, timeout=30)
         r = subprocess.run(
             ["git", "-c", "user.name=ratchet-chat", "-c", "user.email=chat@ratchet.local",
              "commit", "-q", "-m", f"[ratchet chat] {intent}"],
-            cwd=self.repo, capture_output=True,
+            cwd=self.repo, capture_output=True, text=True, timeout=30,
         )
         if r.returncode != 0:
+            turn.commit_note = f"commit failed: {(r.stderr or r.stdout)[-80:].strip()}"
             return ""
         return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=self.repo,
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True, timeout=20).stdout.strip()
 
     def _finish(self, turn: Turn, t0: float) -> Turn:
         turn.seconds = round(time.time() - t0, 2)

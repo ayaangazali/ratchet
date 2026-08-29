@@ -123,7 +123,15 @@ def cmd_run(args) -> int:
     else:
         from .harness.backend import HarnessBackend
         from .harness.client import TrueForgeClient
+        from .providers import trueforge_alive
 
+        # a raw ConnectError sixty seconds into a run is not an error message
+        if not trueforge_alive(ttl=0):
+            raise SystemExit(
+                f"no TrueForge answering at {s.trueforge_base_url} — start it with\n"
+                "  npx @truefoundry/trueforge@latest\n"
+                "or run offline: ratchet run --repo demo-repo --scripted demo-repo/patches/scripted.json"
+            )
         backend = HarnessBackend(TrueForgeClient(s.trueforge_base_url))
 
     agents = Subagents(backend, s.roles())
@@ -414,9 +422,13 @@ def cmd_console(args) -> int:
         bus_path = _latest(repo, "bus.jsonl", args.run)
     if not bus_path:
         # no run yet is not an error -- open the console anyway, on an empty bus,
-        # and let the idle splash say what to do next. `claude` does not refuse to
-        # start because you have no conversation yet; neither does this.
-        bus_path = repo / ".ratchet" / "session.bus.jsonl"
+        # and let the idle splash say what to do next. Inside a git repo the bus
+        # lives with the project; anywhere else (say, $HOME) it goes to the cache
+        # dir rather than littering the directory you happened to be in.
+        from .gitstate import is_repo
+
+        base = repo if is_repo(repo) else Path.home() / ".cache" / "ratchet"
+        bus_path = base / ".ratchet" / "session.bus.jsonl" if is_repo(repo) else base / "session.bus.jsonl"
         bus_path.parent.mkdir(parents=True, exist_ok=True)
         bus_path.touch(exist_ok=True)
     RatchetApp(bus_path, repo).run()
@@ -476,10 +488,13 @@ def _latest(repo: Path, suffix: str, run: str | None = None) -> Path | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from . import __version__
+
     ap = argparse.ArgumentParser(
         "ratchet",
         description="a coding agent that cannot decide it is done. Bare `ratchet` opens the console.",
     )
+    ap.add_argument("--version", action="version", version=f"ratchet {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=False)
 
     p = sub.add_parser("run", help="search until green or the budget runs out")

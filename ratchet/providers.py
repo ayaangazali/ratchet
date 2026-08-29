@@ -30,6 +30,10 @@ PROVIDERS: dict[str, tuple[str | None, str, str]] = {
     "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-5.2"),
     "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "llama-3.3-70b-versatile"),
     "kimi": ("https://api.moonshot.ai/v1", "MOONSHOT_API_KEY", "kimi-k2-0905-preview"),
+    "trueforge": (None, "", "auto"),  # the local agent harness; TRUEFORGE_BASE_URL, no key
+    # the TrueFoundry AI Gateway (cloud): OpenAI-compatible, key from
+    # https://shryukg.truefoundry.cloud/gateway-onboarding — base overridable via TFY_BASE_URL
+    "truefoundry": ("https://shryukg.truefoundry.cloud/api/llm/v1", "TFY_API_KEY", "auto"),
     "demo": (None, "", "demo"),
 }
 
@@ -57,6 +61,8 @@ MODEL_CATALOG: dict[str, list[tuple[str, str]]] = {
         ("kimi-k2-turbo-preview", "k2, faster"),
         ("moonshot-v1-32k", "long context"),
     ],
+    "trueforge": [("auto", "whatever the harness routes — needs TrueForge on :8790")],
+    "truefoundry": [("auto", "first model on the gateway — /connect truefoundry with your TFY key")],
     "demo": [("demo", "offline scaffolder — no key, no network")],
 }
 
@@ -97,21 +103,51 @@ def validate_key(provider: str, key: str, *, timeout: float = 20.0) -> str:
     makes /connect honest -- a saved key that never worked is worse than none."""
     if provider == "demo":
         return "demo needs no key"
+    if provider == "trueforge":
+        if trueforge_alive(ttl=0):
+            return "connected — the harness is answering"
+        raise ChatProviderError("no TrueForge answering — `npx @truefoundry/trueforge@latest` first")
     base, _env, _default = PROVIDERS[provider]
     if provider == "anthropic":
         r = httpx.get("https://api.anthropic.com/v1/models",
                       headers={"x-api-key": key, "anthropic-version": "2023-06-01"}, timeout=timeout)
     else:
-        r = httpx.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"}, timeout=timeout)
+        r = httpx.get(f"{_base_for(provider, base)}/models",
+                      headers={"Authorization": f"Bearer {key}"}, timeout=timeout)
     _raise_for(r)
     n = len(r.json().get("data", []))
     return f"connected — {n} models visible"
 
 
+_TF_CACHE: dict[str, object] = {}
+
+
+def trueforge_alive(*, ttl: float = 10.0) -> bool:
+    """Is a TrueForge instance answering? Cached briefly -- the palette asks on
+    every keystroke and a dead socket costs a timeout."""
+    import time as _time
+
+    now = _time.monotonic()
+    if _TF_CACHE.get("at", 0) and now - _TF_CACHE["at"] < ttl:  # type: ignore[operator]
+        return bool(_TF_CACHE["ok"])
+    base = os.environ.get("TRUEFORGE_BASE_URL", "http://localhost:8790")
+    try:
+        ok = httpx.get(f"{base}/api/v1/models", timeout=1.5).status_code < 500
+    except Exception:
+        ok = False
+    _TF_CACHE.update(at=now, ok=ok)
+    return ok
+
+
 def connected_providers() -> dict[str, bool]:
     load_saved_keys()
-    return {name: (not key_env or bool(os.environ.get(key_env)))
-            for name, (_b, key_env, _m) in PROVIDERS.items()}
+    out = {}
+    for name, (_b, key_env, _m) in PROVIDERS.items():
+        if name == "trueforge":
+            out[name] = trueforge_alive()
+        else:
+            out[name] = not key_env or bool(os.environ.get(key_env))
+    return out
 
 
 class ChatProviderError(RuntimeError):
@@ -153,6 +189,8 @@ class ChatBackend:
     def complete(self, prompt: str, *, max_tokens: int = 8192, timeout: float = 180.0) -> str:
         if self.provider == "demo":
             return _demo_reply(prompt)
+        if self.provider == "trueforge":
+            return self._trueforge_complete(prompt, max_tokens=max_tokens)
         base, key_env, _default = PROVIDERS[self.provider]
         key = os.environ.get(key_env, "")
         if not key:
@@ -169,15 +207,66 @@ class ChatBackend:
             )
             _raise_for(r)
             return "".join(part.get("text", "") for part in r.json().get("content", []))
+        base = _base_for(self.provider, base)
+        model = self.model
+        if model == "auto":
+            # gateways (TrueFoundry) route many models; with none named, take the
+            # first the gateway lists rather than guessing a name it may not have
+            lr = httpx.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"}, timeout=timeout)
+            _raise_for(lr)
+            data = lr.json().get("data", [])
+            if not data:
+                raise ChatProviderError(f"{self.provider} lists no models; add one in its console")
+            model = str(data[0].get("id") or data[0].get("name") or "")
+            if not model:
+                raise ChatProviderError(f"{self.provider} returned a model with no id")
+            self.model = model  # pin it, so the activity line names something real
         r = httpx.post(
             f"{base}/chat/completions",
             headers={"Authorization": f"Bearer {key}"},
-            json={"model": self.model, "max_tokens": max_tokens,
+            json={"model": model, "max_tokens": max_tokens,
                   "messages": [{"role": "user", "content": prompt}]},
             timeout=timeout,
         )
         _raise_for(r)
         return r.json()["choices"][0]["message"]["content"] or ""
+
+
+    def _trueforge_complete(self, prompt: str, *, max_tokens: int) -> str:
+        """Route the turn through the TrueForge agent harness -- the same machinery
+        the run loop uses -- instead of a direct provider wire. Sessions are cached
+        on this backend so a conversation stays one harness session."""
+        from .harness.backend import HarnessBackend
+        from .harness.client import TrueForgeClient, TrueForgeError
+
+        if not trueforge_alive():
+            base = os.environ.get("TRUEFORGE_BASE_URL", "http://localhost:8790")
+            raise ChatProviderError(
+                f"no TrueForge at {base} — start it with `npx @truefoundry/trueforge@latest`"
+            )
+        if not hasattr(self, "_tf"):
+            self._tf = HarnessBackend(TrueForgeClient(os.environ.get("TRUEFORGE_BASE_URL", "http://localhost:8790")))
+        model = self.model
+        if model == "auto":
+            try:
+                models = self._tf.client.models()
+            except Exception as e:
+                raise ChatProviderError(f"trueforge model listing failed: {e}") from e
+            model = str((models[0].get("id") or models[0].get("name")) or "") if models else ""
+            if not model:
+                raise ChatProviderError("TrueForge lists no models — add a provider in its Settings")
+        try:
+            text, _tokens, _cost = self._tf.complete(prompt, model=model, role="chat", max_tokens=max_tokens)
+        except TrueForgeError as e:
+            raise ChatProviderError(f"trueforge: {e}") from e
+        return text
+
+
+def _base_for(provider: str, table_base: str | None) -> str | None:
+    """A provider's base URL, env-overridable for the gateway case."""
+    if provider == "truefoundry":
+        return os.environ.get("TFY_BASE_URL") or table_base
+    return table_base
 
 
 def _raise_for(r: httpx.Response) -> None:

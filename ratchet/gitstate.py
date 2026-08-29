@@ -49,17 +49,29 @@ class GitState:
     repo: Path
     run_id: str
     trunk: str  # the scratch branch the run lives on
+    home_ref: str = ""  # where the user was before the run; restored on finish
 
     # ------------------------------------------------------------------ setup --
 
     @classmethod
     def start(cls, repo: Path, run_id: str, *, base: str = "HEAD") -> GitState:
         repo = Path(repo).resolve()
+        # remember where the user was: leaving a real project stranded on a
+        # ratchet scratch branch after the run is not acceptable (found by audit)
+        home = git("symbolic-ref", "--short", "-q", "HEAD", cwd=repo, check=False) or git(
+            "rev-parse", "HEAD", cwd=repo
+        )
         trunk = f"ratchet/{run_id}/trunk"
         git("checkout", "-B", trunk, base, cwd=repo)
-        st = cls(repo=repo, run_id=run_id, trunk=trunk)
+        st = cls(repo=repo, run_id=run_id, trunk=trunk, home_ref=home)
         (repo / ".ratchet").mkdir(parents=True, exist_ok=True)
         return st
+
+    def return_home(self) -> None:
+        """Back to the ref the run started from. The scratch branch and every
+        parked node stay reachable by name; only the checkout moves."""
+        if self.home_ref:
+            git("checkout", "-q", self.home_ref, cwd=self.repo, check=False)
 
     # ------------------------------------------------------------------ reads --
 

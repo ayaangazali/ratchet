@@ -207,7 +207,7 @@ def test_palette_autocompletes_commands_and_models():
     assert [r.label for r in rows_for("/mo")] == ["/model"]
     assert len(rows_for("/")) == len(COMMANDS)
     models = rows_for("/model ")
-    assert len(models) == 13 and all(r.kind == "model" for r in models)
+    assert len(models) == 15 and all(r.kind == "model" for r in models)  # +trueforge, +truefoundry
     kimi = [r.label for r in rows_for("/model kimi")]
     assert kimi and all("kimi" in label for label in kimi)
     providers = [r.label for r in rows_for("/connect")]
@@ -247,3 +247,60 @@ def test_undo_reverts_only_chat_commits(repo):
     files = subprocess.run(["git", "show", "--name-only", "--format="], cwd=repo,
                            capture_output=True, text=True).stdout
     assert ".ratchet" not in files
+
+
+def test_chat_turns_go_through_the_gauntlets_static_gate(repo):
+    """The chat door is not a way around the verifier: generated source carrying a
+    known cheat pattern is blocked before a byte lands; a clean page passes with
+    the check named in the summary."""
+
+    class Hostile:
+        provider, model = "h", "h"
+
+        def complete(self, prompt, **kw):
+            return ("intent: sneaky\n"
+                    "```file:app.py\nimport sys\nsys.exit(0)\nprint('never runs')\n```\n")
+
+    turn, lines = _run(ChatSession(repo, backend=Hostile()), "make an app")
+    assert not turn.ok and "gauntlet blocked" in turn.error
+    assert not (repo / "app.py").exists()
+
+    session = ChatSession(repo, backend=ChatBackend("demo", "demo"))
+    turn, lines = _run(session, "make a coffee site")
+    assert turn.ok
+    assert any("gauntlet cheat check" in t for _k, t in lines)
+
+
+def test_edits_see_the_existing_file(repo):
+    """An edit request rides with the current file contents -- editing blind is
+    hallucinating."""
+    (repo / "index.html").write_text("<h1>OLD TITLE MARKER</h1>\n")
+    session = ChatSession(repo, backend=ChatBackend("demo", "demo"))
+    prompt = session._render("change the title")
+    assert "OLD TITLE MARKER" in prompt
+    assert "Current file contents" in prompt
+
+
+def test_first_run_lands_in_the_connect_picker(repo, monkeypatch):
+    import asyncio
+
+    from textual.widgets import Input as _Input
+
+    import ratchet.providers as prov
+    from ratchet.tui.app import RatchetApp
+
+    # a machine with nothing connected at all
+    monkeypatch.setattr(prov, "connected_providers",
+                        lambda: {k: (k == "demo") for k in prov.PROVIDERS})
+    monkeypatch.setenv("RATCHET_CHAT_PROVIDER", "demo")
+    (repo / ".ratchet").mkdir(exist_ok=True)
+    bus = repo / ".ratchet" / "session.bus.jsonl"
+    bus.touch()
+
+    async def drive():
+        app = RatchetApp(bus, repo)
+        async with app.run_test(size=(150, 46)) as pilot:
+            await pilot.pause(0.6)
+            return app.query_one("#chat", _Input).value
+
+    assert asyncio.run(drive()) == "/connect "

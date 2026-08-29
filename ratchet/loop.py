@@ -304,6 +304,7 @@ class SearchRun:
             nodes=len(self.tree),
             budget=self.scheduler.budget.to_dict(),
         )
+        self.git.return_home()
         return RunResult(winner=winner, tree=self.tree, green=winner.green,
                          stopped_because=why, budget=self.scheduler.budget)
 

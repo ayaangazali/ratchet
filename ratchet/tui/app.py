@@ -421,6 +421,10 @@ class ApprovalGate(Vertical):
 
 
 class RatchetApp(App):
+    # focus starts in the chat box: the first keystroke on a coding console must
+    # type, not fire a letter binding (a prompt containing "q" used to quit)
+    AUTO_FOCUS = "#chat"
+
     CSS_PATH = "theme.tcss"
     TITLE = "ratchet"
 
@@ -485,6 +489,7 @@ class RatchetApp(App):
         self._resize_banner()
         self._fit()
         self._idle_splash()
+        self.call_after_refresh(self._first_run_connect)
         self.set_interval(0.2, self.drain)
         self.set_interval(0.12, self.animate_status)
 
@@ -520,6 +525,23 @@ class RatchetApp(App):
         if compact != banner.compact:
             banner.compact = compact
             banner.draw()
+
+    def _first_run_connect(self) -> None:
+        """Nothing connected means the first thing on screen is the connect picker:
+        a coding console whose first prompt would hit a demo scaffolder is a trap."""
+        from ..providers import connected_providers
+
+        live = connected_providers()
+        if any(ok for name, ok in live.items() if name != "demo"):
+            return
+        log = self.query_one("#activity", RichLog)
+        self._step(log, "connect", "no model connected yet", m.AMBER)
+        self._note(log, "pick a provider below and paste its API key — once, it persists.")
+        self._note(log, "or start TrueForge (`npx @truefoundry/trueforge@latest`) and pick trueforge.")
+        box = self.query_one("#chat", Input)
+        box.value = "/connect "
+        box.focus()
+        box.cursor_position = len(box.value)
 
     def _idle_splash(self) -> None:
         """Until the first event lands, the console is a dolphin and a promise."""
@@ -920,6 +942,9 @@ class RatchetApp(App):
             self._note(log, "a turn is already running — Esc to interrupt it first", m.AMBER)
             return
         self._step(log, "chat", f"{session.backend.provider}/{session.backend.model}", m.ACCENT)
+        if session.backend.provider == "demo":
+            self._note(log, "demo provider: this scaffolds a stub, it does not think — "
+                            "/connect for real codegen", m.AMBER)
         self._note(log, prompt[:120])
         self._chat_worker = self._run_chat_turn(prompt)
 
@@ -934,7 +959,7 @@ class RatchetApp(App):
 
         turn = session.run_turn(prompt, emit)
         if turn.ok:
-            where = f" · commit {turn.commit}" if turn.commit else " · not a git repo, nothing to revert to"
+            where = f" · commit {turn.commit}" if turn.commit else f" · {turn.commit_note or 'no commit'}"
             self.call_from_thread(
                 self._note, log,
                 f"done in {turn.seconds}s · {len(turn.files)} file(s){where}", m.GREEN,

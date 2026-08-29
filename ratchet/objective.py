@@ -391,6 +391,7 @@ class GraphRun:
             pass
         summary = self.graph.summary()
         self.bus.emit(GRAPH_DONE, run_id=self.run_id, **summary.to_dict())
+        self.git.return_home()
         return summary
 
     # ----------------------------------------------------------------- node --
