@@ -38,7 +38,6 @@
     .budget { color: var(--dim); white-space: nowrap; }
     .budget b { color: var(--blue); font-weight: 600; }
 
-    /* the "how far along is she" bar — big, obvious, always current */
     .runprog { flex: none; width: 190px; }
     .runprog .lbl { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--dim); letter-spacing: .08em; text-transform: uppercase; }
     .runprog .lbl b { color: var(--green); font-size: 12px; }
@@ -98,7 +97,7 @@
     .hint { color: var(--dim); }
 
     /* ---------------------------------------------------------------- office -- */
-    main { display: flex; gap: 10px; flex: none; height: 440px; }
+    main { display: flex; gap: 10px; flex: none; height: 480px; }
     .office {
       position: relative; flex: 1; min-width: 0; overflow: hidden;
       border: 2px solid #0c1117; border-radius: 8px;
@@ -123,6 +122,10 @@
     .door::after {
       content: ""; position: absolute; right: 4px; top: 42px; width: 4px; height: 4px;
       background: var(--amber);
+    }
+    .lounge-label {
+      position: absolute; z-index: 1; color: rgba(143, 151, 172, .8); font-size: 9.5px;
+      letter-spacing: .12em; text-transform: uppercase;
     }
 
     .spr { position: absolute; image-rendering: pixelated; pointer-events: none; }
@@ -163,6 +166,12 @@
     .agent.bubble-flip .bubble { left: auto; right: 22px; }
     .agent.bubble-flip .bubble::after { left: auto; right: 8px; }
 
+    .desk-id {
+      position: absolute; z-index: 39; pointer-events: none;
+      font-size: 9px; letter-spacing: .08em; color: #e8dcc8;
+      background: rgba(38, 26, 14, .85); padding: 0 4px; border-radius: 2px;
+    }
+
     .torii-label {
       position: absolute; text-align: center; color: var(--amber); z-index: 40;
       font-size: 10px; letter-spacing: .05em; text-transform: uppercase; line-height: 1.5;
@@ -195,6 +204,7 @@
     }
     .roster .who { min-width: 0; }
     .roster .who .nm { color: var(--text); font-weight: 600; font-size: 13px; }
+    .roster .who .nm .at { color: var(--dim); font-weight: 400; font-size: 11px; }
     .roster .who .brief { color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .roster .who .mini { height: 3px; border-radius: 2px; background: var(--border); margin-top: 4px; overflow: hidden; }
     .roster .who .mini > span { display: block; height: 100%; background: var(--accent); }
@@ -205,17 +215,15 @@
     .roster .foot { flex: none; padding: 8px 12px; color: var(--dim); font-size: 11px; border-top: 1px solid var(--border); }
 
     /* ---------------------------------------------------------------- detail -- */
-    /* Click anyone: a plain-English card, everything visible, nothing to scroll. */
     .detail { flex: none; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
     .detail .head {
-      display: flex; gap: 12px; align-items: center; padding: 8px 14px;
+      display: flex; gap: 12px; align-items: center; padding: 9px 14px;
       border-bottom: 1px solid var(--border);
     }
-    .detail .head .nm { font-weight: 700; font-size: 15px; }
-    .detail .head .sub { color: var(--dim); font-size: 12px; }
+    .detail .head .nm { font-weight: 700; font-size: 16px; }
     .detail .head .stagedots { margin-left: auto; display: flex; gap: 5px; align-items: center; }
     .stagedots .dot {
-      width: 13px; height: 13px; border-radius: 3px; background: var(--border);
+      width: 14px; height: 14px; border-radius: 3px; background: var(--border);
       display: inline-flex; align-items: center; justify-content: center;
       font-size: 9px; color: #0c1117; font-weight: 700;
     }
@@ -223,19 +231,28 @@
     .stagedots .dot.fail { background: var(--red); color: #fff; }
     .stagedots .dot.skip { background: var(--dim); }
     .stagedots .lbl { font-size: 10px; color: var(--dim); letter-spacing: .08em; text-transform: uppercase; margin-right: 3px; }
+
+    /* the facts strip: repo · task · branch · model · workstation · PRs */
+    .facts { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--panelWarm); }
+    .facts > div { padding: 7px 14px; border-right: 1px solid var(--panelWarm); min-width: 0; }
+    .facts > div:last-child { border-right: none; }
+    .facts .k { display: block; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+    .facts .v { display: block; font-size: 13.5px; color: var(--text); white-space: nowrap; }
+    .facts .v a { color: var(--accent); }
+
     .trip { display: grid; grid-template-columns: 1fr 1fr 1fr; }
     @media (max-width: 800px) { .trip { grid-template-columns: 1fr; } }
     .trip > div { padding: 9px 14px 7px; min-width: 0; border-right: 1px solid var(--panelWarm); }
     .trip > div:last-child { border-right: none; }
     .trip .k { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); display: block; margin-bottom: 2px; }
-    .trip .v { color: var(--text); display: block; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .trip .v { color: var(--text); display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .trip .doing .k { color: var(--blue); }
     .trip .waitk .k { color: var(--amber); }
     .trip .didk .k { color: var(--green); }
 
     .summary {
       padding: 10px 14px 12px; border-top: 1px solid var(--panelWarm);
-      font-size: 14px; line-height: 1.7; color: var(--text);
+      font-size: 15px; line-height: 1.7; color: var(--text);
       font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     }
     .summary b { color: var(--green); }
@@ -304,7 +321,7 @@
 
 <main>
   <div class="office" id="office">
-    <span class="floor-label">the floor · one pixel per agent</span>
+    <span class="floor-label">the floor · one agent per workstation</span>
     <div class="door" title="the door"></div>
   </div>
   <aside class="roster">
@@ -318,9 +335,9 @@
   <div class="head">
     <span class="nm" id="d-name">the run</span>
     <span class="st working" id="d-state">idle</span>
-    <span class="sub" id="d-sub"></span>
     <span class="stagedots" id="d-dots"></span>
   </div>
+  <div class="facts" id="d-facts"></div>
   <div class="trip">
     <div class="doing"><span class="k">▸ doing now</span><span class="v" id="d-now">waiting for the bus…</span></div>
     <div class="waitk"><span class="k">⏸ waiting on</span><span class="v" id="d-wait">nothing — not blocked</span></div>
@@ -377,6 +394,7 @@ const STAGES = { build: "build/install", cheat: "cheat check", f2p: "fail-to-pas
                  p2p: "pass-to-pass", types: "types", lint: "lint", hygiene: "diff hygiene" };
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const REPO_URL = "__REPO_URL__";
+const REPO_NAME = "__REPO__";
 
 /* --------------------------------------------------------------- sprite kit -- */
 // Character sheets: 112x96 = 3 direction rows (down, up, right) x 7 frames of
@@ -421,8 +439,8 @@ const zOf = (bottomY) => 2 + Math.max(0, Math.round(bottomY / 4));
 
 const office = $("office");
 office.style.backgroundImage = `url(${ASSETS.floor})`;
-const DESKS = [];
-const scene = { built: false, w: 0, h: 0, gate: { x: 0, y: 0 }, post: { x: 0, y: 0 } };
+const DESKS = [];   // {id: "PC-01", x, y, pc, busyBy}
+const scene = { built: false, w: 0, h: 0, gate: { x: 0, y: 0 }, post: { x: 0, y: 0 }, lounge: { x: 0, y: 0 } };
 
 const TORII_MAP = [
   "aaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -462,21 +480,26 @@ function buildScene() {
   const w = office.clientWidth, h = office.clientHeight;
   if (!w || (scene.built && Math.abs(w - scene.w) < 40 && Math.abs(h - scene.h) < 40)) return;
   scene.w = w; scene.h = h;
-  office.querySelectorAll(".prop, .torii, .torii-label, .desk-pc").forEach((n) => n.remove());
+  office.querySelectorAll(".prop, .torii, .torii-label, .desk-pc, .desk-id, .lounge-label").forEach((n) => n.remove());
 
   office.append(propEl("shelf", 30, 6));
   office.append(propEl("whiteboard", w / 2 - 90, 10));
   office.append(propEl("bin", w / 2 + 90, 22));
   office.append(propEl("plant", w - 260, 44));
   office.append(propEl("cactus", 18, h - 96));
-  office.append(propEl("bench", w - 210, h - 70));
+  office.append(propEl("bench", w - 236, h - 66));
+  const loungeLbl = el("div", "lounge-label", "the lounge · off duty");
+  loungeLbl.style.transform = `translate(${w - 380}px, ${h - 16}px)`;
+  office.append(loungeLbl);
 
+  // one agent per workstation — each desk has an id plate
   DESKS.length = 0;
   const cols = 3, rows = 2;
   const zoneW = (w - 240);
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const i = r * cols + c;
     const x = 44 + c * (zoneW / cols) + (r % 2 ? 26 : 0);
-    const y = 152 + r * 152;
+    const y = 138 + r * 134;
     const desk = propEl("desk", x, y);
     desk.classList.add("desk-pc");
     office.append(desk);
@@ -484,26 +507,53 @@ function buildScene() {
     pc.classList.add("desk-pc");
     pc.style.zIndex = zOf(y + 90);
     office.append(pc);
-    DESKS.push({ x, y, pc, busyBy: null });
+    const id = `PC-0${i + 1}`;
+    const plate = el("div", "desk-id", id);
+    plate.style.transform = `translate(${x + 4}px, ${y + 44}px)`;
+    office.append(plate);
+    DESKS.push({ id, x, y, pc, busyBy: null });
   }
-  const gx = w - 150, gy = h / 2 - 50;
+  const gx = w - 150, gy = h / 2 - 56;
   office.append(toriiEl(gx, gy));
   const lbl = el("div", "torii-label");
   lbl.innerHTML = "⛩ the gate<br>pushes &amp; PRs stop here";
-  lbl.style.transform = `translate(${gx - 8}px, ${gy + 68}px)`;
+  lbl.style.transform = `translate(${gx - 8}px, ${gy + 66}px)`;
   office.append(lbl);
-  scene.gate = { x: gx - 60, y: gy - 20 };
-  scene.post = { x: gx + 110, y: gy + 6 };  // the gatekeeper's standing post
+  scene.gate = { x: gx - 60, y: gy - 22 };
+  scene.post = { x: gx + 96, y: gy + 2 };
+  scene.lounge = { x: w - 380, y: h - 100 };
   scene.built = true;
   for (const a of agents.values()) {
     const d = desk(a);
     if (d) { d.busyBy = a.id; a.tx = d.x + 12; a.ty = d.y - 44; }
     if (a.post) { a.tx = scene.post.x; a.ty = scene.post.y; }
+    if (a.mode === "lounge") loungeSlot(a);
   }
 }
 function desk(a) { return a.deskIdx === null ? null : DESKS[a.deskIdx] || null; }
 function freeDesk() { return DESKS.find((d) => !d.busyBy) || null; }
 addEventListener("resize", () => { scene.built = false; buildScene(); });
+
+// finished agents clock off: free the workstation, head to the lounge
+function releaseDesk(a) {
+  const d = desk(a);
+  if (!d) return;
+  setTimeout(() => {
+    if (agents.get(a.id) !== a) return;
+    const dd = desk(a);
+    if (dd && dd.busyBy === a.id) { dd.busyBy = null; dd.pc.src = ASSETS.pcOff; }
+    a.deskIdx = null;
+    a.mode = "lounge";
+    loungeSlot(a);
+    refresh(a);
+  }, 2600);
+}
+function loungeSlot(a) {
+  const idx = [...agents.values()].filter((x) => x.mode === "lounge").indexOf(a);
+  const i = idx < 0 ? 0 : idx;
+  a.tx = scene.lounge.x + (i % 4) * 48;
+  a.ty = scene.lounge.y + Math.floor(i / 4) * 44;
+}
 
 let pcTick = 0;
 setInterval(() => {
@@ -517,8 +567,6 @@ setInterval(() => {
   }
 }, REDUCED ? 10 ** 9 : 400);
 
-// the office pet: pure charm, wanders the floor (sheet probed at runtime —
-// if the grid guess is wrong it just doesn't spawn)
 const pet = { el: null, x: 200, y: 300, tx: 260, ty: 320, frame: 0 };
 function spawnPet() {
   if (!ASSETS.pet || pet.el || pet.loading) return;
@@ -547,7 +595,7 @@ const state = {
   started: null, tick: 0, sandboxes: 0, subagents: 0, currentVerify: null,
   finished: false, best: 0, green: false, kept: 0, pruned: 0,
   asked: 0, granted: 0, denied: 0, expands: 0, stalls: 0, approvedShip: false,
-  budget: null,
+  budget: null, task: "", prCount: null,
 };
 let charIdx = 0;
 
@@ -571,6 +619,7 @@ function spawn(id, name, opts = {}) {
     did: [], log: [], model: opts.model || "", nodeId: "", intent: opts.intent || "",
     stageMarks: {}, reason: "", lines: 0, libs: [],
     x: -60, y: 120, tx: 0, ty: 0, pause: 0, deskIdx: null, post: !!opts.post,
+    zone: opts.zone || null,
   };
   if (opts.desk) {
     const d = freeDesk();
@@ -601,6 +650,7 @@ function setState(a, s) {
   a.el.classList.toggle("waiting", s === "waiting");
   a.el.classList.toggle("green-hop", s === "green" && !REDUCED);
   a.el.classList.toggle("pruned-look", s === "pruned");
+  if (["green", "pruned", "done"].includes(s)) releaseDesk(a);
   refresh(a);
 }
 function bubble(a, text, sticky) {
@@ -614,9 +664,19 @@ function refresh(a) { drawRoster(); if (state.selected === a.id) drawDetail(); d
 
 /* ------------------------------------------------------------------ motion -- */
 
+// wander zones keep the aisles clear: the conductor works the corridor between
+// desk rows, the scheduler paces near the plant, everyone else roams free floor
 function pickTarget(a) {
-  a.tx = 40 + Math.random() * Math.max(160, scene.w - 300);
-  a.ty = 90 + Math.random() * Math.max(120, scene.h - 210);
+  if (a.zone === "corridor") {
+    a.tx = 60 + Math.random() * Math.max(120, scene.w - 460);
+    a.ty = 252 + Math.random() * 36;
+  } else if (a.zone === "plantside") {
+    a.tx = scene.w - 360 + Math.random() * 90;
+    a.ty = 92 + Math.random() * 46;
+  } else {
+    a.tx = 40 + Math.random() * Math.max(160, scene.w - 300);
+    a.ty = 90 + Math.random() * Math.max(120, scene.h - 210);
+  }
   a.pause = 900 + Math.random() * 3200;
 }
 function gateSlot(a) {
@@ -655,7 +715,7 @@ function tickMotion(t) {
       if (a.mode === "desk" && desk(a)) {
         setCharFrame(a, 3 + beat3, "down");
       } else if (a.mode === "post") {
-        setCharFrame(a, 5 + beat4, "down");   // the gatekeeper reads at their post
+        setCharFrame(a, 5 + beat4, "down");
       } else {
         a.pause -= dt;
         if (a.pause <= 0) pickTarget(a);
@@ -670,7 +730,6 @@ function tickMotion(t) {
     a.el.style.zIndex = zOf(a.y + CH);
     a.el.classList.toggle("bubble-flip", a.x > scene.w - 260);
   }
-  // pet wander
   if (pet.el && !REDUCED) {
     const dx = pet.tx - pet.x, dy = pet.ty - pet.y;
     const dist = Math.hypot(dx, dy);
@@ -693,7 +752,6 @@ function tickMotion(t) {
 requestAnimationFrame(tickMotion);
 
 /* -------------------------------------------------------------- summaries -- */
-// Plain English, no jargon: what is this agent doing, in a sentence or three.
 
 function stagesPassed(a) { return Object.values(a.stageMarks).filter((m) => m === "PASS").length; }
 
@@ -748,7 +806,10 @@ function drawRoster() {
     face.style.backgroundPosition = "-16px 0";
     row.append(face);
     const who = el("div", "who");
-    who.append(el("div", "nm", a.name));
+    const nm = el("div", "nm", a.name);
+    const d = desk(a);
+    if (d) nm.append(el("span", "at", `  @ ${d.id}`));
+    who.append(nm);
     who.append(el("div", "brief", a.state === "waiting" ? `⏸ ${a.waiting}` : a.now));
     if (a.role === "verifier" && a.state === "working") {
       const mini = el("div", "mini");
@@ -774,6 +835,15 @@ function select(id) {
   document.querySelector(".detail").scrollIntoView({ block: "nearest", behavior: REDUCED ? "auto" : "smooth" });
 }
 
+function fact(k, vHtml) {
+  const d = el("div");
+  d.append(el("span", "k", k));
+  const v = el("span", "v");
+  v.innerHTML = vHtml;
+  d.append(v);
+  return d;
+}
+
 function drawDetail() {
   const a = agents.get(state.selected) || agents.get("run");
   if (!a) return;
@@ -781,22 +851,35 @@ function drawDetail() {
   const st = $("d-state");
   st.textContent = a.state;
   st.className = `st ${a.state}`;
-  $("d-sub").textContent = [a.nodeId && `node ${a.nodeId}`, a.model && short(a.model)].filter(Boolean).join(" · ");
   $("d-now").textContent = ["done", "green", "pruned"].includes(a.state) ? "finished" : a.now;
   $("d-wait").textContent = a.waiting || "nothing — not blocked";
   $("d-did").textContent = a.did.length ? `${a.did[a.did.length - 1]}${a.did.length > 1 ? `  (+${a.did.length - 1} more)` : ""}` : "—";
   $("d-summary").innerHTML = summarize(a);
-  // the seven checks, as dots — only where they mean something
+
+  // the facts strip: where this work lives
+  const facts = $("d-facts");
+  facts.textContent = "";
+  const linkable = REPO_URL && !REPO_URL.startsWith("__");
+  facts.append(fact("repo", linkable ? `<a href="${REPO_URL}" target="_blank">${REPO_NAME}</a>` : REPO_NAME));
+  facts.append(fact("task", state.task || "—"));
+  facts.append(fact("branch / node", a.nodeId ? `<span style="font-family:var(--mono)">${a.nodeId}</span>` : (a.role === "run" ? "search tree" : "—")));
+  if (a.model) facts.append(fact("model", short(a.model)));
+  const d = desk(a);
+  facts.append(fact("workstation", d ? d.id : a.post ? "gate post" : a.mode === "lounge" ? "lounge" : "the floor"));
+  facts.append(fact("open PRs", state.prCount === null
+    ? (linkable ? "…" : "n/a — no remote")
+    : `<a href="${REPO_URL}/pulls" target="_blank">${state.prCount} open</a>`));
+
   const dots = $("d-dots");
   dots.textContent = "";
   if (a.role === "verifier") {
     dots.append(el("span", "lbl", "checks"));
     for (const key of STAGE_ORDER) {
       const m = a.stageMarks[key];
-      const d = el("span", `dot ${m === "PASS" ? "pass" : m === "FAIL" ? "fail" : m === "skip" ? "skip" : ""}`,
-                   m === "PASS" ? "✓" : m === "FAIL" ? "✗" : m === "skip" ? "−" : "");
-      d.title = STAGES[key];
-      dots.append(d);
+      const dd = el("span", `dot ${m === "PASS" ? "pass" : m === "FAIL" ? "fail" : m === "skip" ? "skip" : ""}`,
+                    m === "PASS" ? "✓" : m === "FAIL" ? "✗" : m === "skip" ? "−" : "");
+      dd.title = STAGES[key];
+      dots.append(dd);
     }
   }
   const lg = $("d-log");
@@ -811,10 +894,22 @@ function drawProgress() {
   $("prog-fill").style.width = `${pct}%`;
 }
 
+// Optional enrichment, never load-bearing: with a GitHub remote, count open PRs.
+// Fails silently offline — the page renders fully without it.
+(async () => {
+  const m = REPO_URL.match(/github\.com\/([^/]+\/[^/]+)/);
+  if (!m) return;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${m[1]}/pulls?state=open&per_page=100`);
+    if (r.ok) { state.prCount = (await r.json()).length; drawDetail(); drawPrLink(); }
+  } catch { /* offline is fine */ }
+})();
+
 const tipEl = $("tip");
 function tip(e, a) {
   tipEl.innerHTML = "";
-  tipEl.append(el("b", "", `${a.name} — ${a.state}`));
+  const d = desk(a);
+  tipEl.append(el("b", "", `${a.name}${d ? ` @ ${d.id}` : ""} — ${a.state}`));
   tipEl.append(el("span", "l2", a.state === "waiting" ? `waiting on: ${a.waiting}` : a.now));
   tipEl.style.display = "block";
   tipEl.style.left = Math.min(e.clientX + 14, innerWidth - 310) + "px";
@@ -846,12 +941,12 @@ function drawBudget(b) {
     `<b>$${Number(b.usd_used || 0).toFixed(2)}</b>/$${Number(b.max_usd || 0).toFixed(2)}`;
 }
 
-// where the work will land, linked when the repo has a remote
 function drawPrLink() {
   const box = $("prlink");
   const label = state.approvedShip ? "PR approved →" : state.pending ? "PR waiting on you →" : "ships to →";
   if (REPO_URL && !REPO_URL.startsWith("__")) {
-    box.innerHTML = `${label} <a href="${REPO_URL}/pulls" target="_blank">${REPO_URL.replace("https://", "")}</a>`;
+    const count = state.prCount === null ? "" : ` (${state.prCount} open)`;
+    box.innerHTML = `${label} <a href="${REPO_URL}/pulls" target="_blank">${REPO_URL.replace("https://", "")}${count}</a>`;
   } else {
     box.textContent = `${label} local repo (no remote configured)`;
   }
@@ -920,10 +1015,11 @@ function apply(kind, p, ts) {
 
   switch (kind) {
     case "run.started": {
+      state.task = p.task ?? "";
       $("task").textContent = p.task ?? "—";
       $("provider").textContent = `${p.provider ?? "—"} · ${p.snapshots ? "snapshots" : "worktree fallback"}`;
       $("run").textContent = p.run_id ?? "—";
-      const a = spawn("run", "ratchet", { role: "run", now: "orchestrating the search" });
+      const a = spawn("run", "ratchet", { role: "run", now: "orchestrating the search", zone: "corridor" });
       log(a, `run ${p.run_id} · task ${p.task} · provider ${p.provider}`);
       spawn("gatekeeper", "gatekeeper", { role: "gatekeeper", now: "guarding the gate", post: true });
       spawnPet();
@@ -948,7 +1044,7 @@ function apply(kind, p, ts) {
 
     case "expand": {
       state.expands++;
-      const s = spawn("scheduler", "scheduler", { role: "scheduler", now: "choosing where compute goes" });
+      const s = spawn("scheduler", "scheduler", { role: "scheduler", now: "choosing where compute goes", zone: "plantside" });
       setNow(s, `expanding ${p.node} — fanout ${p.fanout}`);
       log(s, `expand ${p.node} · fanout ${p.fanout} · depth ${p.depth}`);
       if (run) setNow(run, `searching from ${p.node}`);
@@ -1012,7 +1108,7 @@ function apply(kind, p, ts) {
     }
     case "stall": {
       state.stalls++;
-      const s = spawn("scheduler", "scheduler", { role: "scheduler" });
+      const s = spawn("scheduler", "scheduler", { role: "scheduler", zone: "plantside" });
       setNow(s, `stall at ${p.node} — forking ${p.fanout} ways`);
       log(s, `stall at ${p.node} · forking ${p.fanout} ways from depth ${p.depth}`, "warn");
       break;
