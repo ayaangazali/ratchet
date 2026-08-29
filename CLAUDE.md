@@ -36,9 +36,11 @@ project and of the track we are entering.
 7. **Nothing irreversible happens without the gate.** `open_pull_request` and any
    push go through `gate.py`. Add an irreversible action, add it there in the same
    commit.
-8. **Every graded node is receipted.** `receipts.record_result` runs on the accepted
-   path and the pruned path alike. A node that skips it is a hole in the chain.
-9. **`make redteam` stays at 10/10 with zero false positives**, and it is in CI. If
+8. **Every graded node is receipted, and every finished run seals its chain.**
+   `receipts.record_result` runs on the accepted path and the pruned path alike, and
+   a run's finish path calls `receipts.seal` — an unsealed chain fails `ratchet
+   audit`, so a new run path that forgets the seal is caught, not silent.
+9. **`make redteam` catches every attack in the battery (11/11 today) with zero false positives**, and it is in CI. If
    your change breaks it, your change is the problem — unless the attack was
    mis-specified, in which case fix the attack and say so in the PR.
 10. **We do not orchestrate containers.** No `docker run`, no `subprocess` container
@@ -64,6 +66,10 @@ project and of the track we are entering.
 ```bash
 make dev              # editable install + dev deps
 make demo             # seed demo-repo/ with the broken slugify and three patches
+make run-offline      # a complete search with no model, no key, no network
+make run-graph        # an objective graph run, offline
+make proof            # exercise every claim offline; evidence in .ratchet-proof/<ts>/
+make docs             # fetch upstream docs through Bright Data (needs the key)
 make test             # the whole suite; no docker, no network
 make lint             # ruff + mypy
 make redteam          # score the verifier against known cheating patterns

@@ -77,6 +77,15 @@ def test_truncating_the_tail_is_detected(tmp_path):
     assert not ok
 
 
+def test_a_chain_truncated_to_nothing_does_not_audit_clean(tmp_path):
+    book = _book(tmp_path)
+    book.record_result("a", _r(Outcome.CHEATED, 0.0))
+    book.seal("done")
+    book.path.write_text("")  # delete every verdict, including the seal
+    ok, problems = book.verify()
+    assert not ok and any("empty" in p for p in problems)
+
+
 def test_an_unsealed_chain_does_not_audit_clean(tmp_path):
     book = _book(tmp_path)
     book.record_result("a", _r(Outcome.PROGRESS, 0.3))

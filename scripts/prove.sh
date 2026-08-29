@@ -31,9 +31,9 @@ python -m pytest -q > "$OUT/suite.log" 2>&1
 check "pytest suite" $? 0
 tail -2 "$OUT/suite.log"
 
-say "2 · the red team: ten known attacks, two controls"
+say "2 · the red team: eleven known attacks, two controls"
 python -m ratchet.cli redteam --repo demo-repo > "$OUT/redteam.log" 2>&1
-check "redteam 10/10, zero false positives" $? 0
+check "redteam: whole battery caught, zero false positives" $? 0
 grep -E "caught|false positives" "$OUT/redteam.log"
 
 say "3 · three standalone verdicts"

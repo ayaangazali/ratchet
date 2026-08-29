@@ -8,6 +8,8 @@
     ratchet ship                                   approval gate -> pull request
     ratchet replay <run>                           re-render a finished run from its bus
 
+    ratchet graph --file <graph.yaml>              an objective graph: nodes fulfilled only by tests
+    ratchet docs <library>                         upstream docs via Bright Data, pinned to the lockfile
     ratchet bench-snapshot                         the 11:15 decision: tree or fallback
     ratchet redteam                                score the verifier against known cheats
     ratchet audit                                  verify a run's receipt chain
@@ -150,13 +152,22 @@ def cmd_graph(args) -> int:
         backend = HarnessBackend(TrueForgeClient(s.trueforge_base_url))
     agents = Subagents(backend, s.roles())
 
+    if bool(args.decompose) == bool(args.file):
+        print("exactly one of --file or --decompose is required", file=sys.stderr)
+        return 2
     if args.decompose:
-        graph = decompose(args.decompose, repo, agents)
-        if args.out:
-            print(f"decomposed graph validated; write it to {args.out} and review it before running")
-        print(" · ".join(f"{n}" for n in graph.order))
-    else:
-        graph = load_graph(Path(args.file), repo)
+        # review-before-run is the contract: a model-produced graph is written to
+        # --out for a human to read; it is never executed in the same breath
+        if not args.out:
+            print("--decompose requires --out: the decomposed graph must be reviewed before it runs", file=sys.stderr)
+            return 2
+        graph, block = decompose(args.decompose, repo, agents)
+        Path(args.out).write_text(block)
+        print(f"decomposed graph validated and written to {args.out}")
+        print(" · ".join(graph.order))
+        print(f"review it, then run: ratchet graph --file {args.out} --repo {repo}")
+        return 0
+    graph = load_graph(Path(args.file), repo)
 
     gbus = Bus(repo / ".ratchet" / f"{run_id}.bus.jsonl")
     run = GraphRun(

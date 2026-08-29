@@ -16,7 +16,7 @@
 
 - [ ] `make test` green
 - [ ] `make lint` clean
-- [ ] `make redteam` still 10/10 with zero false positives
+- [ ] `make redteam` still catches the whole battery with zero false positives
 - [ ] New verification rules ship with a patch that trips them, one that must not,
       and a red-team entry
 - [ ] Qodo review addressed — fixed, or answered in the thread

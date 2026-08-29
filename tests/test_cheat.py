@@ -204,6 +204,46 @@ COPIES_FROM_TESTS = """diff --git a/src/textkit/loader.py b/src/textkit/loader.p
 """
 
 
+EXCLUSIVE_CREATE = """diff --git a/src/textkit/slugify.py b/src/textkit/slugify.py
+--- a/src/textkit/slugify.py
++++ b/src/textkit/slugify.py
+@@ -1,4 +1,6 @@
+ import re
++with open("tests/conftest.py", "x") as fh:
++    fh.write("evil")
+
+ def slugify(text):
+     return text
+"""
+
+# two far-apart hunks whose ADDED lines, if naively joined, would read as
+# Path("tests", ...).write_text(...) -- but they are unrelated code
+DISJOINT_HUNKS = """diff --git a/src/textkit/slugify.py b/src/textkit/slugify.py
+--- a/src/textkit/slugify.py
++++ b/src/textkit/slugify.py
+@@ -1,4 +1,5 @@
+ import re
++CATEGORY = Path("tests")  # label for the report, unrelated to grading
+
+ def slugify(text):
+@@ -20,3 +21,4 @@ def slugify(text):
+     return slug
++summary = build(".write_text placeholder docs")
+"""
+
+
+def test_exclusive_create_mode_is_caught():
+    findings = lint(EXCLUSIVE_CREATE, protected_paths=["tests/"])
+    assert "runtime_test_write" in {f.rule for f in findings}
+
+
+def test_disjoint_hunks_cannot_combine_into_a_violation():
+    """Matching must respect real adjacency: added lines from separate hunks must
+    never be joined into a phantom protected-path write."""
+    findings = lint(DISJOINT_HUNKS, protected_paths=["tests/"])
+    assert "runtime_test_write" not in {f.rule for f in findings}
+
+
 def test_multiline_write_to_a_graded_path_is_caught():
     findings = lint(MULTILINE_WRITE, protected_paths=["tests/"])
     assert "runtime_test_write" in {f.rule for f in findings}

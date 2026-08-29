@@ -92,7 +92,7 @@ Approve. Squash lands.
 **4:40 — the receipts and the chart (20s).**
 ```bash
 ratchet audit          # chain intact
-make evals             # linear 58% ±14 · search 100% · cheats persisted 8 vs 0
+make evals             # linear 50% ±14 · search 100% · cheats persisted 1 vs 0
 ```
 > That's our own harness pointed at our own seeded bugs. Same draws, same budget; the
 > only difference is whether a bad step is allowed to persist.
@@ -101,10 +101,10 @@ make evals             # linear 58% ±14 · search 100% · cheats persisted 8 vs
 
 ## At the table
 
-Four things, each under ten seconds to start, because judges interrupt.
+Five things, each under ten seconds to start, because judges interrupt.
 
 1. **"Show me it can't cheat."**
-   `make redteam` — 10/10 with the two controls still green.
+   `make redteam` — 11/11 with the two controls still green.
 
 2. **"What if the cheat is subtle?"**
    The canary command above. Zero static findings, still caught.
@@ -157,13 +157,15 @@ it shows you made an engineering decision on evidence rather than hoping.
 ## Section 6 · The offline demo, if everything is down
 
 ```bash
-make redteam        # the verifier, scored against ten known attacks
+make redteam        # the verifier, scored against eleven known attacks
 make run-offline    # a complete search: root, a prune, a green node, the gate
+make run-graph      # the objective graph: a rejected candidate, then fulfilment
 ratchet tree        # the search tree
 ratchet audit       # the receipt chain
 make evals          # linear vs search, with error bars
 make replay         # the recorded run, in the terminal
+make proof          # all of the above plus a forged-receipt catch, with evidence kept
 ```
 
-Six commands, no network, and every claim in the pitch is demonstrated. Practise this
-once — it is the version you will be glad to have.
+Eight commands, no network, and every claim in the pitch is demonstrated. Practise
+this once — it is the version you will be glad to have.

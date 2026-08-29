@@ -34,6 +34,7 @@ import time
 
 from ..models import CheatFinding, GauntletResult, Outcome, StageResult, TaskSpec, TestStatus
 from . import cheat as cheat_mod
+from . import grade as grade_mod
 from . import parsers
 from .eval_script import build_stage_command, build_test_command
 from .grade import grade
@@ -170,11 +171,7 @@ class Gauntlet:
         # so a suite where UNGRADED tests legitimately fail (an objective-graph
         # node grading only its slice) is untouched: those runs exit nonzero with
         # honest FAILED lines, not with a passing test inside a dead file.
-        impossible = [
-            t for t in (*task.f2p_all, *task.p2p)
-            if status_map.get(t) is TestStatus.PASSED
-            and status_map.get(t.partition("::")[0]) in (TestStatus.FAILED, TestStatus.ERROR)
-        ]
+        impossible = grade_mod.impossible_passes(status_map, [*task.f2p_all, *task.p2p])
         if impossible:
             stages["f2p"] = _stage("f2p", False, 0.0, "a passing test inside a file that failed collection", t0)
             findings.append(

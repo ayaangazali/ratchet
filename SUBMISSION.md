@@ -40,7 +40,7 @@ or the README, so writing them here first means you are not composing prose at 1
 > **Why it matters.** Give an agent a repository and a test command and it will
 > eventually find that the cheapest way to make tests pass is to change what "pass"
 > means. That is measured, not hypothetical. So we took the decision away — and then
-> tested our own defences. `make redteam` fires ten published reward-hacking patterns
+> tested our own defences. `make redteam` fires eleven known reward-hacking patterns
 > at the verifier and reports how many got through, alongside two control patches that
 > must *not* be caught. It has already earned its keep: it found an attack we had not
 > thought of, where patched source rewrites a graded test file at import time, after
@@ -49,7 +49,7 @@ or the README, so writing them here first means you are not composing prose at 1
 
 ## Numbers to quote
 
-- `make redteam` → caught `__/10`, false positives `__`
+- `make redteam` → caught `__/__` (11/11 at freeze), false positives `__`
 - `make evals` → linear `__%` ±`__` · search `__%` ±`__`; cheating patches that
   persisted: linear `__`, search `__`
 - `make bench` → fork round trip `__`s, so we ran on `snapshots / worktrees`

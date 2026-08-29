@@ -43,9 +43,14 @@ SUITE_RAN = [
 
 
 def slice_output(log: str) -> str:
-    """Only what sits between the markers is parsed. Everything else is untrusted."""
+    """Only what sits between the markers is parsed. Everything else is untrusted.
+
+    The LAST end marker bounds the region: suite output all lands before the real
+    END, so a forged END printed from inside a test becomes inert text instead of
+    truncating the parsed region and hiding the real results after it (found by
+    review)."""
     if START in log and END in log:
-        return log.split(START, 1)[1].split(END, 1)[0]
+        return log.split(START, 1)[1].rsplit(END, 1)[0]
     return log
 
 
@@ -55,7 +60,9 @@ def parse_exit_code(log: str) -> int | None:
     inside the suite, but everything it prints lands before END; parsing the tail
     region means the forged copy is never read. (Found by review: first-match
     parsing over the whole log accepted a forged `exit code: 0`.)"""
-    region = log.split(END, 1)[1] if END in log else log
+    # last END for the same reason as slice_output: a forged END inside the suite
+    # must not promote a forged exit line into the trusted region
+    region = log.rsplit(END, 1)[1] if END in log else log
     m = _EXIT_RE.search(region)
     return int(m.group(1)) if m else None
 
