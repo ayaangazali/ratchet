@@ -11,6 +11,10 @@
     :root {
 /*__PALETTE__*/
       --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      --floor-a: #182028;
+      --floor-b: #1b242d;
+      --wood: #7c5433;
+      --wood-dark: #5d3f26;
       color-scheme: dark;
     }
     * { box-sizing: border-box; }
@@ -73,7 +77,7 @@
     .gate-live .summary { margin: 0 0 2px; color: var(--text); }
     .gate-live .stats { margin: 0 0 8px; color: var(--dim); }
     .gate-live pre {
-      margin: 0 0 10px; padding: 8px 12px; max-height: 140px; overflow: auto;
+      margin: 0 0 10px; padding: 8px 12px; max-height: 96px; overflow: auto;
       border-radius: 6px; background: var(--bg); border: 1px solid var(--border);
     }
     .gate-live pre .add { color: var(--green); }
@@ -93,54 +97,88 @@
     /* ---------------------------------------------------------------- office -- */
     main { display: flex; gap: 10px; flex: 1; min-height: 0; }
     .office {
-      position: relative; flex: 1; min-width: 0; overflow: hidden;
-      border: 1px solid var(--border); border-radius: 8px;
+      position: relative; flex: 1; min-width: 0; min-height: 300px; overflow: hidden;
+      border: 2px solid var(--border); border-radius: 8px;
+      /* checkerboard floor, two warm-dark tiles */
       background:
-        linear-gradient(var(--panel) 1px, transparent 1px) 0 0 / 100% 28px,
-        linear-gradient(90deg, var(--panel) 1px, transparent 1px) 0 0 / 28px 100%,
-        var(--bg);
+        repeating-conic-gradient(var(--floor-a) 0% 25%, var(--floor-b) 0% 50%) 0 0 / 56px 56px;
+      image-rendering: pixelated;
     }
-    .office .floor-label {
-      position: absolute; top: 8px; left: 12px; color: var(--dim); font-size: 11px;
-      letter-spacing: .1em; text-transform: uppercase;
+    /* baseboard wall along the top */
+    .office::before {
+      content: ""; position: absolute; left: 0; right: 0; top: 0; height: 34px;
+      background: #121820; border-bottom: 4px solid #0c1117;
     }
-    /* the gate structure the characters queue at */
-    .gate-door {
-      position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
-      width: 92px; padding: 10px 8px 8px; text-align: center;
-      border: 2px dashed var(--amber); border-radius: 8px;
-      color: var(--amber); background: rgba(224, 164, 74, .06);
-      font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase; line-height: 1.5;
-      overflow-wrap: break-word;
+    .floor-label {
+      position: absolute; top: 9px; left: 12px; z-index: 3; color: var(--dim); font-size: 10.5px;
+      letter-spacing: .12em; text-transform: uppercase;
     }
-    .gate-door .bar { font-size: 18px; display: block; margin-bottom: 2px; }
-    .gate-door.holding { animation: gate-pulse 1.6s ease-in-out infinite; }
+    /* entrance door on the left wall */
+    .door {
+      position: absolute; left: 0; top: 90px; width: 10px; height: 74px; z-index: 1;
+      background: var(--wood-dark); border: 2px solid #0c1117; border-left: none;
+      border-radius: 0 4px 4px 0;
+    }
+    .door::after {
+      content: ""; position: absolute; right: 3px; top: 32px; width: 3px; height: 3px;
+      background: var(--amber);
+    }
 
-    .agent { position: absolute; width: 24px; height: 21px; cursor: pointer; }
-    .agent .px { position: absolute; left: 0; top: 0; width: 3px; height: 3px; }
-    .agent .flip { position: absolute; inset: 0; }
-    .agent.left .flip { transform: scaleX(-1); }
+    .sprite { position: absolute; z-index: 2; }
+    .sprite .px { position: absolute; left: 0; top: 0; width: 4px; height: 4px; }
+    .sprite .flip { position: absolute; inset: 0; }
+    .sprite.left .flip { transform: scaleX(-1); transform-origin: 24px 0; }
+
+    .agent { cursor: pointer; width: 48px; height: 64px; }
+    .agent .shadow {
+      position: absolute; left: 8px; bottom: -3px; width: 32px; height: 8px; z-index: -1;
+      background: radial-gradient(closest-side, rgba(0,0,0,.45), transparent 70%);
+    }
     .agent .badge {
-      position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
-      font-size: 11px; line-height: 1;
+      position: absolute; top: -16px; left: 50%; transform: translateX(-50%);
+      font-size: 13px; line-height: 1; text-shadow: 0 1px 0 #000;
     }
     .agent .name {
-      position: absolute; top: 23px; left: 50%; transform: translateX(-50%);
-      font-size: 9.5px; color: var(--dim); white-space: nowrap;
+      position: absolute; top: 66px; left: 50%; transform: translateX(-50%);
+      font-size: 10px; color: var(--muted); white-space: nowrap;
+      background: rgba(13, 18, 25, .75); padding: 0 5px; border-radius: 3px;
     }
-    .agent.selected .name { color: var(--text); }
-    .agent.selected::after {
-      content: ""; position: absolute; inset: -6px -8px -18px;
-      border: 1px solid var(--accent); border-radius: 6px;
-    }
+    .agent.selected .name { color: var(--text); background: var(--accentDim); }
     .agent .bubble {
-      position: absolute; bottom: 26px; left: 12px; max-width: 190px; width: max-content;
-      background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+      position: absolute; bottom: 72px; left: 20px; max-width: 200px; width: max-content;
+      background: #0d1219; border: 2px solid var(--border);
       padding: 3px 8px; font-size: 10.5px; color: var(--muted);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      pointer-events: none;
+      pointer-events: none; z-index: 4;
+    }
+    .agent .bubble::after {
+      content: ""; position: absolute; left: 8px; bottom: -6px;
+      border: 4px solid transparent; border-top-color: var(--border); border-bottom: none;
     }
     .agent.waiting .bubble { border-color: var(--amber); color: var(--amber); }
+    .agent.bubble-flip .bubble { left: auto; right: 20px; }
+    .agent.bubble-flip .bubble::after { left: auto; right: 8px; }
+
+    /* furniture */
+    .desk { width: 88px; height: 60px; z-index: 1; pointer-events: none; }
+    .desk .screen {
+      position: absolute; left: 28px; top: 4px; width: 32px; height: 16px;
+      background: #0e141b;
+    }
+    .desk.on .screen { animation: screenflick 1.1s steps(2) infinite; }
+    @keyframes screenflick {
+      0% { background: #173049; box-shadow: inset 0 -4px 0 #1d4262; }
+      100% { background: #1d4262; box-shadow: inset 0 -6px 0 #2a5f8f; }
+    }
+    .desk.green-glow .screen { background: #1d4a33; box-shadow: inset 0 -4px 0 #2c6b4a; animation: none; }
+    .desk.red-glow .screen { background: #4a231f; box-shadow: inset 0 -4px 0 #6b332d; animation: none; }
+    .plant, .torii { z-index: 1; pointer-events: none; }
+    .torii-label {
+      position: absolute; text-align: center; color: var(--amber); z-index: 1;
+      font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; line-height: 1.5;
+      width: 120px;
+    }
+    .torii.holding-glow { filter: drop-shadow(0 0 10px rgba(224,164,74,.7)); }
 
     /* ---------------------------------------------------------------- roster -- */
     .roster {
@@ -189,7 +227,7 @@
     .trip .waitk .k { color: var(--amber); }
     .trip .didk .k { color: var(--green); }
     .detail .log {
-      max-height: 96px; overflow-y: auto; padding: 6px 12px 8px;
+      max-height: 88px; overflow-y: auto; padding: 6px 12px 8px;
       border-top: 1px solid var(--panelWarm); color: var(--muted); font-size: 11px; line-height: 1.55;
     }
     .detail .log .ok { color: var(--green); } .detail .log .bad { color: var(--red); }
@@ -197,12 +235,14 @@
 
     .tip {
       position: fixed; z-index: 90; pointer-events: none; display: none;
-      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      background: var(--bg); border: 2px solid var(--border);
       padding: 6px 10px; max-width: 280px; font-size: 11px; color: var(--text);
     }
     .tip .l2 { color: var(--dim); display: block; }
     .empty { color: var(--dim); margin: 0; padding: 10px 12px; }
-    @media (prefers-reduced-motion: reduce) { .gate-live, .gate-door.holding { animation: none; } }
+    @media (prefers-reduced-motion: reduce) {
+      .gate-live, .desk.on .screen, .torii.holding-glow { animation: none; }
+    }
 </style>
 
 <header class="hero">
@@ -241,7 +281,7 @@
 <main>
   <div class="office" id="office">
     <span class="floor-label">the floor · one pixel per agent</span>
-    <div class="gate-door" id="gate-door"><span class="bar">⛩</span>the gate<br>pushes &amp; PRs stop here</div>
+    <div class="door" title="the door"></div>
   </div>
   <aside class="roster">
     <h2>agents</h2>
@@ -280,57 +320,281 @@ const short = (m) => String(m || "").split("/").pop();
 const SPINNER = ["·", "✢", "✳", "∗", "✻", "✽"];
 const STAGES = { build: "build/install", cheat: "cheat check", f2p: "fail-to-pass",
                  p2p: "pass-to-pass", types: "types", lint: "lint", hygiene: "diff hygiene" };
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* ------------------------------------------------------------- pixel sprites -- */
-// 8x7 creature, two walk frames. c = agent colour, W = eye. Drawn as box-shadow
-// on a 3px pixel, so one div per character and zero image assets.
-const FRAME_A = [
-  "..cccc..",
-  ".cccccc.",
-  ".cWccWc.",
-  ".cccccc.",
-  "..cccc..",
-  "..c..c..",
-  "..c..c..",
+// 12x16 characters at 4px per pixel, rendered as one box-shadow per sprite.
+// Palette keys: h hair · s skin · W eye · c shirt (per agent) · d pants · e shoes
+const STAND = [
+  "....hhhh....",
+  "...hhhhhh...",
+  "...ssssss...",
+  "...sWssWs...",
+  "...ssssss...",
+  "....ssss....",
+  "...cccccc...",
+  "..cccccccc..",
+  ".cc.cccc.cc.",
+  ".cc.cccc.cc.",
+  "....cccc....",
+  "...dddddd...",
+  "...dd..dd...",
+  "...dd..dd...",
+  "...dd..dd...",
+  "...ee..ee...",
 ];
-const FRAME_B = [
-  "..cccc..",
-  ".cccccc.",
-  ".cWccWc.",
-  ".cccccc.",
-  "..cccc..",
-  ".c....c.",
-  ".c....c.",
+const WALK = [
+  "....hhhh....",
+  "...hhhhhh...",
+  "...ssssss...",
+  "...sWssWs...",
+  "...ssssss...",
+  "....ssss....",
+  "...cccccc...",
+  "..cccccccc..",
+  ".cc.cccc.cc.",
+  ".cc.cccc.cc.",
+  "....cccc....",
+  "...dddddd...",
+  "..dd....dd..",
+  "..dd....dd..",
+  ".dd......dd.",
+  ".ee......ee.",
 ];
-function shadow(map, colour) {
+const TYPE_A = [ // at the desk, hands forward
+  "....hhhh....",
+  "...hhhhhh...",
+  "...ssssss...",
+  "...sWssWs...",
+  "...ssssss...",
+  "....ssss....",
+  "...cccccc...",
+  "..cccccccc..",
+  "..cccccccc..",
+  ".sscccccss..",
+  "....cccc....",
+  "...dddddd...",
+  "...dd..dd...",
+  "...dd..dd...",
+  "...dd..dd...",
+  "...ee..ee...",
+];
+const TYPE_B = [
+  "....hhhh....",
+  "...hhhhhh...",
+  "...ssssss...",
+  "...sWssWs...",
+  "...ssssss...",
+  "....ssss....",
+  "...cccccc...",
+  "..cccccccc..",
+  ".sscccccss..",
+  "..cccccccc..",
+  "....cccc....",
+  "...dddddd...",
+  "...dd..dd...",
+  "...dd..dd...",
+  "...dd..dd...",
+  "...ee..ee...",
+];
+const WIN = [ // arms up
+  "cc..hhhh..cc",
+  "cc.hhhhhh.cc",
+  "cc.ssssss.cc",
+  ".c.sWssWs.c.",
+  ".c.ssssss.c.",
+  ".c..ssss..c.",
+  ".cccccccccc.",
+  "..cccccccc..",
+  "..cccccccc..",
+  "..cccccccc..",
+  "....cccc....",
+  "...dddddd...",
+  "...dd..dd...",
+  "...dd..dd...",
+  "...dd..dd...",
+  "...ee..ee...",
+];
+const SAD = [ // x eyes, arms drooped
+  "....hhhh....",
+  "...hhhhhh...",
+  "...ssssss...",
+  "...sxssxs...",
+  "...ssssss...",
+  "....ssss....",
+  "...cccccc...",
+  "..cccccccc..",
+  ".c.cccccc.c.",
+  ".c.cccccc.c.",
+  ".c..cccc..c.",
+  "...dddddd...",
+  "...dd..dd...",
+  "...dd..dd...",
+  "...dd..dd...",
+  "...ee..ee...",
+];
+const DESK_MAP = [ // 22x15 — monitor on a wooden desk (screen drawn as its own div)
+  "......mmmmmmmmmm......",
+  "......m........m......",
+  "......m........m......",
+  "......m........m......",
+  "......m........m......",
+  "......mmmmmmmmmm......",
+  "..........mm..........",
+  ".........mmmm.........",
+  "tttttttttttttttttttttt",
+  "tttttttttttttttttttttt",
+  ".ll..............ll...",
+  ".ll..............ll...",
+  ".ll..............ll...",
+  ".ll..............ll...",
+  "......................",
+];
+const PLANT_MAP = [ // 10x13
+  "..gg..gg..",
+  ".gggggggg.",
+  "gggggggggg",
+  ".gggggggg.",
+  "..gggggg..",
+  "...gggg...",
+  "....gg....",
+  "...pppp...",
+  "..pppppp..",
+  "..pppppp..",
+  "..pppppp..",
+  "...pppp...",
+  "..........",
+];
+const TORII_MAP = [ // 26x16, the gate
+  "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+  ".aaaaaaaaaaaaaaaaaaaaaaaa.",
+  "...aa................aa...",
+  "..aaaaaaaaaaaaaaaaaaaaaa..",
+  "...aa................aa...",
+  "...aa................aa...",
+  "...aa................aa...",
+  "...aa................aa...",
+  "...aa................aa...",
+  "...aa................aa...",
+  "...aa................aa...",
+  "...aa................aa...",
+  "...aa................aa...",
+  "...aa................aa...",
+  "..aaaa..............aaaa..",
+  "..aaaa..............aaaa..",
+];
+
+const HAIR = ["#2b2b33", "#6b4526", "#8a6a2f", "#3a2f52", "#5b2f2f"];
+const SHIRT = ["#4d9fe8", "#5cbf8a", "#e0a44a", "#a795d6", "#7fb8e6", "#e5675c"];
+const FIXED = { s: "#e6b98c", W: "#141a21", d: "#31405292", e: "#20262e",
+                x: "#e5675c", m: "#0e141b", t: "#7c5433", l: "#5d3f26",
+                g: "#5cbf8a", p: "#7c5433", a: "#e0a44a" };
+// pants: solid, not translucent
+FIXED.d = "#33445a";
+
+const shadowCache = new Map();
+function shadow(map, pal, px) {
+  const key = map[0] + map[12] + (pal.c || "") + (pal.h || "") + px + map.length + (map[8] || "");
+  if (shadowCache.has(key)) return shadowCache.get(key);
   const out = [];
   map.forEach((row, y) => [...row].forEach((ch, x) => {
-    if (ch === "c") out.push(`${x * 3}px ${y * 3}px 0 0 ${colour}`);
-    if (ch === "W") out.push(`${x * 3}px ${y * 3}px 0 0 var(--text)`);
+    if (ch === ".") return;
+    const col = pal[ch] || FIXED[ch];
+    if (col) out.push(`${x * px}px ${y * px}px 0 0 ${col}`);
   }));
-  return out.join(",");
+  const s = out.join(",");
+  shadowCache.set(key, s);
+  return s;
 }
-const HUES = ["var(--accent)", "var(--green)", "var(--amber)", "var(--violet)", "var(--blue)", "var(--red)"];
-let hueIdx = 0;
+function sprite(map, pal, px, cls) {
+  const n = el("div", `sprite ${cls || ""}`);
+  n.style.width = `${map[0].length * px}px`;
+  n.style.height = `${map.length * px}px`;
+  const flip = el("div", "flip");
+  const dot = el("div", "px");
+  dot.style.width = dot.style.height = `${px}px`;
+  dot.style.boxShadow = shadow(map, pal, px);
+  flip.append(dot);
+  n.append(flip);
+  return n;
+}
+
+/* ----------------------------------------------------------------- the scene -- */
+
+const office = $("office");
+const DESKS = [];       // {x, y, el, busyBy}
+const scene = { built: false, w: 0, h: 0, gate: { x: 0, y: 0 } };
+
+function buildScene() {
+  const w = office.clientWidth, h = office.clientHeight;
+  if (!w || (scene.built && Math.abs(w - scene.w) < 40 && Math.abs(h - scene.h) < 40)) return;
+  scene.w = w; scene.h = h;
+  office.querySelectorAll(".desk, .plant, .torii, .torii-label").forEach((n) => n.remove());
+
+  // six desk slots in two rows on the left ~70% of the floor
+  DESKS.length = 0;
+  const cols = 3, rows = 2;
+  const zoneW = (w - 190), zoneH = (h - 90);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const x = 34 + c * (zoneW / cols) + (r % 2 ? 20 : 0);
+    const y = 64 + r * (zoneH / rows);
+    const d = sprite(DESK_MAP, {}, 4, "desk");
+    d.style.transform = `translate(${x}px, ${y}px)`;
+    const screen = el("div", "screen");
+    d.append(screen);
+    office.append(d);
+    DESKS.push({ x, y, el: d, busyBy: null });
+  }
+  // plants in the corners
+  for (const [px_, py] of [[w - 300, 44], [12, h - 70]]) {
+    const p = sprite(PLANT_MAP, {}, 4, "plant");
+    p.style.transform = `translate(${px_}px, ${py}px)`;
+    office.append(p);
+  }
+  // the torii gate on the right — where irreversible steps stop
+  const gx = w - 130, gy = h / 2 - 70;
+  const t = sprite(TORII_MAP, {}, 4, "torii");
+  t.id = "torii";
+  t.style.transform = `translate(${gx}px, ${gy}px)`;
+  office.append(t);
+  const lbl = el("div", "torii-label");
+  lbl.innerHTML = "the gate<br>pushes &amp; PRs stop here";
+  lbl.style.transform = `translate(${gx - 8}px, ${gy + 70}px)`;
+  office.append(lbl);
+  scene.gate = { x: gx - 62, y: gy + 6 }; // queue forms in front of the gate
+  scene.built = true;
+  // desks were rebuilt: re-pin every desk worker's target to its slot
+  for (const a of agents.values()) {
+    const d = desk(a);
+    if (d) { d.busyBy = a.id; a.tx = d.x + 20; a.ty = d.y + 30; }
+  }
+}
+function desk(a) { return a.deskIdx === null ? null : DESKS[a.deskIdx] || null; }
+addEventListener("resize", () => { scene.built = false; buildScene(); });
+
+function freeDesk() { return DESKS.find((d) => !d.busyBy) || null; }
 
 /* ---------------------------------------------------------------- the model -- */
 
-const agents = new Map();  // id -> agent
+const agents = new Map();
 const state = {
   selected: "run", pending: null, status: "idle", note: "waiting for a run",
   started: null, tick: 0, sandboxes: 0, subagents: 0, currentVerify: null,
   finished: false,
 };
+let charIdx = 0;
 
 function spawn(id, name, opts = {}) {
   if (agents.has(id)) return agents.get(id);
-  const office = $("office");
-  const colour = opts.colour || HUES[hueIdx++ % HUES.length];
-  const node = el("div", "agent");
+  buildScene();
+  const pal = { c: opts.colour || SHIRT[charIdx % SHIRT.length], h: HAIR[charIdx % HAIR.length] };
+  charIdx++;
+  const node = el("div", "sprite agent");
   const flip = el("div", "flip");
-  const px = el("div", "px");
-  px.style.boxShadow = shadow(FRAME_A, colour);
-  flip.append(px);
+  const dot = el("div", "px");
+  dot.style.boxShadow = shadow(STAND, pal, 4);
+  flip.append(dot);
+  node.append(el("div", "shadow"));
   node.append(flip);
   node.append(el("span", "badge", ""));
   node.append(el("span", "name", name));
@@ -340,13 +604,17 @@ function spawn(id, name, opts = {}) {
   office.append(node);
 
   const a = {
-    id, name, colour, el: node, px, frame: false,
-    state: "working", now: opts.now || "spawning…", waiting: "", did: [],
-    log: [], model: opts.model || "", nodeId: opts.nodeId || "",
-    x: 40 + Math.random() * 120, y: 60 + Math.random() * 120,
-    tx: 0, ty: 0, pause: 0,
+    id, name, pal, el: node, px: dot, frame: false,
+    state: "working", mode: "wander", now: opts.now || "walking in…", waiting: "",
+    did: [], log: [], model: opts.model || "", nodeId: opts.nodeId || "",
+    x: -50, y: 96, tx: 0, ty: 0, pause: 0, deskIdx: null,
   };
-  pickTarget(a);
+  // claim a desk if this agent works at one; otherwise wander the floor
+  if (opts.desk) {
+    const d = freeDesk();
+    if (d) { d.busyBy = id; a.deskIdx = DESKS.indexOf(d); a.mode = "desk"; a.tx = d.x + 20; a.ty = d.y + 30; }
+  }
+  if (a.deskIdx === null) pickTarget(a);
   node.addEventListener("click", () => select(id));
   node.addEventListener("mousemove", (e) => tip(e, a));
   node.addEventListener("mouseleave", hideTip);
@@ -368,7 +636,13 @@ function setState(a, s) {
   badge.textContent = s === "green" ? "★" : s === "pruned" ? "✗" : s === "waiting" ? "⏸" : "";
   badge.style.color = s === "green" ? "var(--green)" : s === "pruned" ? "var(--red)" : "var(--amber)";
   a.el.classList.toggle("waiting", s === "waiting");
-  if (s === "pruned") a.px.style.filter = "grayscale(.7) brightness(.7)";
+  const d = desk(a);
+  if (d) {
+    d.el.classList.toggle("on", s === "working");
+    d.el.classList.toggle("green-glow", s === "green");
+    d.el.classList.toggle("red-glow", s === "pruned");
+  }
+  if (s === "pruned") a.px.style.filter = "grayscale(.55) brightness(.75)";
   refresh(a);
 }
 function bubble(a, text, sticky) {
@@ -376,55 +650,74 @@ function bubble(a, text, sticky) {
   b.textContent = text;
   b.hidden = !text;
   clearTimeout(a._bt);
-  if (text && !sticky) a._bt = setTimeout(() => { b.hidden = true; }, 4000);
+  if (text && !sticky) a._bt = setTimeout(() => { b.hidden = true; }, 4200);
 }
 function refresh(a) { drawRoster(); if (state.selected === a.id) drawDetail(); }
 
 /* ------------------------------------------------------------------ motion -- */
 
 function pickTarget(a) {
-  const o = $("office");
-  const w = Math.max(120, o.clientWidth - 130), h = Math.max(100, o.clientHeight - 60);
-  a.tx = 20 + Math.random() * w;
-  a.ty = 34 + Math.random() * h;
-  a.pause = 600 + Math.random() * 2600;
+  a.tx = 30 + Math.random() * Math.max(160, scene.w - 260);
+  a.ty = 48 + Math.random() * Math.max(120, scene.h - 130);
+  a.pause = 900 + Math.random() * 3200;
 }
 function gateSlot(a) {
-  const o = $("office");
   const idx = [...agents.values()].filter((x) => x.state === "waiting").indexOf(a);
-  a.tx = o.clientWidth - 120;
-  a.ty = o.clientHeight / 2 - 20 + idx * 30;
+  a.tx = scene.gate.x + (idx % 2) * 34;
+  a.ty = scene.gate.y + 10 + Math.floor(idx / 2) * 30;
 }
-const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function setFrame(a, map) {
+  a.px.style.boxShadow = shadow(map, a.pal, 4);
+}
 let lastT = 0;
 function tickMotion(t) {
   const dt = Math.min(50, t - lastT); lastT = t;
+  buildScene();
   for (const a of agents.values()) {
     if (a.state === "waiting") gateSlot(a);
-    if (REDUCED) { // place, don't animate
+    if (REDUCED) {
       a.x = a.tx; a.y = a.ty;
       a.el.style.transform = `translate(${a.x}px, ${a.y}px)`;
+      setFrame(a, a.state === "green" ? WIN : a.state === "pruned" ? SAD : STAND);
       continue;
     }
-    const still = a.state !== "working" && a.state !== "waiting";
     const dx = a.tx - a.x, dy = a.ty - a.y;
     const dist = Math.hypot(dx, dy);
-    const moving = !still && dist > 3;
+    // everyone finishes their walk — a verifier that ends green mid-stride
+    // still makes it to its desk instead of freezing off-screen
+    const moving = dist > 4;
+    const beat = Math.floor(t / 240) % 2;
+
     if (moving) {
-      const sp = 0.045 * dt;
-      a.x += (dx / dist) * Math.min(sp * 30, dist);
-      a.y += (dy / dist) * Math.min(sp * 30, dist);
+      const sp = (0.09 * dt);
+      a.x += (dx / dist) * Math.min(sp * 18, dist);
+      a.y += (dy / dist) * Math.min(sp * 18, dist);
       a.el.classList.toggle("left", dx < 0);
+      if (beat !== a.frame) { a.frame = beat; setFrame(a, beat ? WALK : STAND); }
     } else if (a.state === "working") {
-      a.pause -= dt;
-      if (a.pause <= 0) pickTarget(a);
-    }
-    // two-frame bob while moving or working
-    if ((moving || a.state === "working") && Math.floor(t / 260) % 2 !== a.frame) {
-      a.frame = !a.frame;
-      a.px.style.boxShadow = shadow(a.frame ? FRAME_B : FRAME_A, a.colour);
+      if (a.mode === "desk" && desk(a)) {
+        // typing at the monitor
+        if (beat !== a.frame) { a.frame = beat; setFrame(a, beat ? TYPE_B : TYPE_A); }
+      } else {
+        a.pause -= dt;
+        if (a.pause <= 0) pickTarget(a);
+        if (a.frame) { a.frame = false; setFrame(a, STAND); }
+      }
+    } else if (a.state === "waiting") {
+      // stand at the gate, fidget slowly
+      const slow = Math.floor(t / 700) % 2;
+      if (slow !== a.frame) { a.frame = slow; setFrame(a, slow ? TYPE_A : STAND); }
+    } else if (a.state === "green") {
+      const slow = Math.floor(t / 500) % 2;
+      if (slow !== a.frame) { a.frame = slow; setFrame(a, slow ? WIN : STAND); }
+    } else if (a.state === "pruned") {
+      setFrame(a, SAD);
+    } else if (a.frame) {
+      a.frame = false; setFrame(a, STAND);
     }
     a.el.style.transform = `translate(${a.x}px, ${a.y}px)`;
+    a.el.style.zIndex = 2 + Math.round(a.y / 10);
+    a.el.classList.toggle("bubble-flip", a.x > scene.w - 250); // keep bubbles on-screen
   }
   requestAnimationFrame(tickMotion);
 }
@@ -438,7 +731,7 @@ function drawRoster() {
   if (!agents.size) { box.append(el("p", "empty", "nobody on the floor yet.")); return; }
   for (const a of agents.values()) {
     const row = el("div", `row${state.selected === a.id ? " selected" : ""}`);
-    const sw = el("span", "sw"); sw.style.background = a.colour;
+    const sw = el("span", "sw"); sw.style.background = a.pal.c;
     const who = el("div", "who");
     who.append(el("div", "nm", a.name));
     who.append(el("div", "brief", a.state === "waiting" ? `⏸ ${a.waiting}` : a.now));
@@ -466,7 +759,7 @@ function drawDetail() {
   st.textContent = a.state;
   st.className = `st ${a.state}`;
   $("d-sub").textContent = [a.nodeId && `node ${a.nodeId}`, a.model && short(a.model)].filter(Boolean).join(" · ");
-  $("d-now").textContent = a.state === "done" || a.state === "green" || a.state === "pruned" ? "finished" : a.now;
+  $("d-now").textContent = ["done", "green", "pruned"].includes(a.state) ? "finished" : a.now;
   $("d-wait").textContent = a.waiting || "nothing — not blocked";
   $("d-did").textContent = a.did.length ? `${a.did[a.did.length - 1]}${a.did.length > 1 ? `  (+${a.did.length - 1} more)` : ""}` : "—";
   const lg = $("d-log");
@@ -528,7 +821,7 @@ function showGate(p, run) {
   $("gate-hint").textContent = "keys: a approve · d deny";
   $("gate").hidden = false;
   $("gate-armed").hidden = true;
-  $("gate-door").classList.add("holding");
+  document.getElementById("torii")?.classList.add("holding-glow");
   run.waiting = `you — ${p.action || "approval"}`;
   setState(run, "waiting");
   bubble(run, "⏸ waiting on you", true);
@@ -580,10 +873,10 @@ function apply(kind, p, ts) {
     }
     case "repo.mapped": {
       state.subagents++;
-      const a = spawn("cartographer", "cartographer", { now: "mapping the repo" });
+      const a = spawn("cartographer", "cartographer", { now: "mapping the repo", desk: true });
       setDid(a, `mapped the repo — ${p.lines} lines into context`);
       setNow(a, "map delivered");
-      setTimeout(() => setState(a, "done"), 3000);
+      setTimeout(() => setState(a, "done"), 4000);
       log(a, `${p.lines} lines of repo map into the context`);
       break;
     }
@@ -599,7 +892,7 @@ function apply(kind, p, ts) {
     case "verify.started": {
       state.subagents++;
       const id = `v:${p.label}`;
-      const a = spawn(id, `verifier·${p.label}`, { now: p.intent || "running the gauntlet", model: p.model });
+      const a = spawn(id, `verifier·${p.label}`, { now: p.intent || "running the gauntlet", model: p.model, desk: true });
       a.model = p.model || a.model;
       setNow(a, p.intent || "running the gauntlet");
       log(a, `${short(p.model)}  ${p.intent || ""}`, "faint");
@@ -650,13 +943,13 @@ function apply(kind, p, ts) {
       break;
 
     case "docs.fetch": {
-      const a = spawn("oracle", "docs·oracle", { now: "fetching upstream docs", colour: "var(--violet)" });
+      const a = spawn("oracle", "docs·oracle", { now: "fetching upstream docs", colour: "#a795d6", desk: true });
       setNow(a, `fetching ${p.library} ${p.version} docs`);
       log(a, `BrightData: ${p.library} ${p.version}`, "faint");
       break;
     }
     case "docs.heal": {
-      const a = spawn("oracle", "docs·oracle", { colour: "var(--violet)" });
+      const a = spawn("oracle", "docs·oracle", { colour: "#a795d6", desk: true });
       setDid(a, `healed scraper for ${p.library}`);
       log(a, `repair: ${JSON.stringify(p.old_section)} → ${JSON.stringify(p.new_section)}`, "warn");
       break;
@@ -672,7 +965,7 @@ function apply(kind, p, ts) {
       state.pending = null;
       $("gate").hidden = true;
       $("gate-armed").hidden = false;
-      $("gate-door").classList.remove("holding");
+      document.getElementById("torii")?.classList.remove("holding-glow");
       if (run) {
         run.waiting = "";
         setState(run, state.finished ? (state.note === "green" ? "green" : "done") : "working");
@@ -717,6 +1010,7 @@ source.onerror = () => {
   }
 };
 
+buildScene();
 drawPill();
 drawDetail();
 </script>
