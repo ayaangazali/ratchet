@@ -96,10 +96,23 @@ away — the same bargain as the run loop, in chat shape.
 └  done in 6.2s · 2 file(s) · commit 3f9c2a1
 ```
 
+Slash commands autocomplete as you type — `/` opens the palette, every keystroke
+filters it, arrows or a click pick, Enter applies:
+
+| command | what it does |
+|---|---|
+| `/help` | every command, one line each |
+| `/model` | a dropdown of every provider and model — arrows/click to choose |
+| `/connect` | connect an account: pick a provider, paste the API key (masked), validated live, saved to `~/.config/ratchet/keys.env` (0600) |
+| `/providers` | which accounts are connected, each one's default model |
+| `/undo` | revert the last chat commit — git revert, nothing lost |
+| `/last` | what the last turn did: intent, files, commit |
+| `/clear` · `/quit` | housekeeping |
+
 Providers are a wire call, not an SDK: **Claude** (default), **OpenAI**, **Groq**,
-**Kimi** — set `RATCHET_CHAT_PROVIDER` / `RATCHET_CHAT_MODEL`, or switch live with
-`/model groq` typed straight into the box. With no key at all, the offline `demo`
-provider still scaffolds real files, so the flow works on a fresh laptop.
+**Kimi**. Connect once with `/connect` and the key persists across sessions; or set
+`RATCHET_CHAT_PROVIDER` / the key env vars yourself. With no key at all, the offline
+`demo` provider still scaffolds real files, so the flow works on a fresh laptop.
 
 Everything else is a subcommand:
 

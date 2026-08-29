@@ -159,7 +159,9 @@ class ChatSession:
     def _commit(self, intent: str) -> str:
         if subprocess.run(["git", "rev-parse", "--git-dir"], cwd=self.repo, capture_output=True).returncode != 0:
             return ""  # not a repo: files written, nothing to revert to -- said in the summary
-        subprocess.run(["git", "add", "-A"], cwd=self.repo, capture_output=True)
+        # never commit the machinery: the bus keeps being written after the commit,
+        # and a committed .ratchet/ makes every later `git revert` a conflict
+        subprocess.run(["git", "add", "-A", "--", ".", ":!.ratchet"], cwd=self.repo, capture_output=True)
         r = subprocess.run(
             ["git", "-c", "user.name=ratchet-chat", "-c", "user.email=chat@ratchet.local",
              "commit", "-q", "-m", f"[ratchet chat] {intent}"],

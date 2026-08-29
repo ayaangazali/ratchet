@@ -193,4 +193,57 @@ def test_typing_in_the_console_codes_in_the_background(repo, monkeypatch):
     assert "<!doctype" not in text             # never the raw code
     assert "done in" in text and "commit" in text
     assert (repo / "index.html").exists()
-    assert "kimi/" in text2                    # provider switch, live
+    # the palette applied its highlighted row: /model kimi filtered the catalog and
+    # Enter picked the top match -- a live provider/model switch from the dropdown
+    assert "chat model ->" in text2 and "kimi" in text2
+
+
+# ------------------------------------------------------------------ palette --
+
+
+def test_palette_autocompletes_commands_and_models():
+    from ratchet.tui.palette import COMMANDS, help_lines, rows_for
+
+    assert [r.label for r in rows_for("/mo")] == ["/model"]
+    assert len(rows_for("/")) == len(COMMANDS)
+    models = rows_for("/model ")
+    assert len(models) == 13 and all(r.kind == "model" for r in models)
+    kimi = [r.label for r in rows_for("/model kimi")]
+    assert kimi and all("kimi" in label for label in kimi)
+    providers = [r.label for r in rows_for("/connect")]
+    assert "groq" in providers and "demo" not in providers
+    assert rows_for("just some prose") == []
+    # /help IS the command dict: every command self-documents
+    joined = "\n".join(help_lines())
+    assert all(cmd in joined for cmd in COMMANDS)
+
+
+def test_connect_saves_a_validated_key_and_a_bad_key_is_refused(repo, monkeypatch, tmp_path):
+    import ratchet.providers as prov
+
+    monkeypatch.setattr(prov, "KEYS_PATH", tmp_path / "keys.env")
+    monkeypatch.setattr(prov, "validate_key", lambda p, k: "connected — 5 models visible")
+    path = prov.save_key("groq", "gsk_test123")
+    assert path.read_text().strip() == "GROQ_API_KEY=gsk_test123"
+    assert (path.stat().st_mode & 0o777) == 0o600
+    import os
+
+    assert os.environ["GROQ_API_KEY"] == "gsk_test123"
+    # saved keys load into a fresh backend
+    monkeypatch.delenv("RATCHET_CHAT_PROVIDER", raising=False)
+    assert prov.connected_providers()["groq"] is True
+
+
+def test_undo_reverts_only_chat_commits(repo):
+    import subprocess
+
+    from ratchet.providers import ChatBackend
+
+    session = ChatSession(repo, backend=ChatBackend("demo", "demo"))
+    turn, _ = _run(session, "make a page")
+    assert (repo / "index.html").exists() and turn.commit
+    # the machinery is never part of the commit -- committing .ratchet/ made every
+    # later revert a conflict, because the bus keeps being written after the commit
+    files = subprocess.run(["git", "show", "--name-only", "--format="], cwd=repo,
+                           capture_output=True, text=True).stdout
+    assert ".ratchet" not in files

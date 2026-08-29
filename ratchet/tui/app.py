@@ -445,7 +445,7 @@ class RatchetApp(App):
         self._short = False
         self._chat = None                                    # lazy ChatSession
         self._chat_worker: Worker | None = None              # the running background turn, if any
-        self._palette_rows = []                              # rows behind the visible options
+        self._palette_rows: list = []                        # rows behind the visible options
         self._awaiting_key: str | None = None                # /connect: which provider's key comes next
 
     # ----------------------------------------------------------------- layout --
@@ -903,7 +903,11 @@ class RatchetApp(App):
         if not subject.startswith("[ratchet chat]"):
             self._note(log, f"last commit is not a chat turn ({subject[:50]!r}); refusing to touch it", m.AMBER)
             return
-        r = subprocess.run(["git", "revert", "--no-edit", "HEAD"], cwd=self.repo, capture_output=True, text=True)
+        r = subprocess.run(
+            ["git", "-c", "user.name=ratchet-chat", "-c", "user.email=chat@ratchet.local",
+             "revert", "--no-edit", "HEAD"],
+            cwd=self.repo, capture_output=True, text=True,
+        )
         if r.returncode == 0:
             self._note(log, f"reverted: {subject[15:66]}", m.GREEN)
         else:
