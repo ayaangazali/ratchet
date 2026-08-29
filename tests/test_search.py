@@ -74,6 +74,30 @@ def test_path_and_render(tmp_path):
     assert any("live" in line for line, _ in lines)
 
 
+def test_concurrent_adds_do_not_corrupt_the_tree(tmp_path):
+    """The fan-out path adds nodes from a thread pool. Unlocked, two saves race on
+    one .tmp file and the nodes dict mutates mid-iteration."""
+    import threading
+
+    t = _tree(tmp_path)
+    n = 32
+    barrier = threading.Barrier(n)
+
+    def add(i: int) -> None:
+        barrier.wait()
+        t.add(Node.child_of(t.root, commit=f"c{i}", image="i", patch=f"+line{i}", intent=f"i{i}", result=_res(0.5)))
+
+    threads = [threading.Thread(target=add, args=(i,)) for i in range(n)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+
+    assert len(t) == n + 1
+    reloaded = Tree.load(t.path)  # the file on disk is whole, parseable json
+    assert len(reloaded) == n + 1
+
+
 # ---------------------------------------------------------------- scheduler --
 
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
@@ -137,17 +138,23 @@ class Tree:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.nodes: dict[str, Node] = {}
         self.order: list[str] = []
+        # loop.expand grades a fan-out on a thread pool, and every candidate lands
+        # here via add/prune. Unlocked, two writers race on the same .tmp file and
+        # on the nodes dict mid-iteration. ponytail: one coarse lock per tree --
+        # n is capped at Budget.max_nodes (40), so contention is not worth designing for.
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------ basics --
 
     def add(self, node: Node) -> Node:
-        # id collisions are possible in principle (4 hex chars); make them impossible
-        while node.id in self.nodes:
-            node.id = Node.new_id(node.parent_id, node.patch + node.id, node.commit)
-        self.nodes[node.id] = node
-        self.order.append(node.id)
-        self.save()
-        return node
+        with self._lock:
+            # id collisions are possible in principle (4 hex chars); make them impossible
+            while node.id in self.nodes:
+                node.id = Node.new_id(node.parent_id, node.patch + node.id, node.commit)
+            self.nodes[node.id] = node
+            self.order.append(node.id)
+            self.save()
+            return node
 
     def get(self, node_id: str) -> Node:
         if node_id in self.nodes:
@@ -196,19 +203,21 @@ class Tree:
         return max(self, key=lambda n: (n.green, n.score, -n.depth))
 
     def prune(self, node: Node, reason: str = "") -> None:
-        node.pruned = True
-        node.untried = False
-        if reason:
-            node.last_failure = (node.last_failure or reason)[:2000]
-        self.save()
+        with self._lock:
+            node.pruned = True
+            node.untried = False
+            if reason:
+                node.last_failure = (node.last_failure or reason)[:2000]
+            self.save()
 
     # ------------------------------------------------------------- persistence --
 
     def save(self) -> None:
-        payload = {"order": self.order, "nodes": {k: v.to_dict() for k, v in self.nodes.items()}}
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, indent=2, default=str))
-        tmp.replace(self.path)  # atomic: a half-written tree is worse than none
+        with self._lock:
+            payload = {"order": self.order, "nodes": {k: v.to_dict() for k, v in self.nodes.items()}}
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload, indent=2, default=str))
+            tmp.replace(self.path)  # atomic: a half-written tree is worse than none
 
     @classmethod
     def load(cls, path: Path) -> Tree:
