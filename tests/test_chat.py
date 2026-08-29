@@ -528,3 +528,66 @@ def test_sources_prefer_the_file_the_prompt_names(repo):
     assert "THE PAGE YOU ASKED ABOUT" in sources
     # within the attached sources, the named file leads
     assert sources.index("index.html") < sources.index("AAA_first")
+
+
+# ------------------------------------------------------------------ report --
+
+
+def test_export_reports_what_the_session_actually_did(repo):
+    from ratchet import report
+    from ratchet.providers import ChatBackend
+
+    session = ChatSession(repo, backend=ChatBackend("demo", "demo"))
+    _run(session, "make a page for my cafe")
+    _run(session, "add a menu")
+
+    text = report.build(repo, turns=session.turns, work_seconds=42.0)
+    assert "# ratchet session" in text
+    assert "index.html" in text
+    assert "42s" in text
+    rows = [ln for ln in text.splitlines() if ln.startswith("| 1 |") or ln.startswith("| 2 |")]
+    assert len(rows) == 2 and "cafe" in rows[0] and "menu" in rows[1]
+    assert session.turns[0].commit in text          # the commit trail
+    assert "git revert" in text                     # says how to undo it
+
+    path = report.write(repo, turns=session.turns, work_seconds=1.0)
+    assert path.exists() and path.name.startswith("session-")
+
+
+def test_export_redacts_secrets_and_survives_a_failed_turn(repo):
+    from ratchet import report
+
+    class Broken:
+        provider, model = "b", "b"
+
+        def complete(self, prompt, **kw):
+            raise RuntimeError("nope")
+
+    session = ChatSession(repo, backend=Broken())
+    _run(session, "here is my key gsk_abcdef1234567890abcdef build a site")
+    text = report.build(repo, turns=session.turns)
+    assert "gsk_abcdef" not in text
+    assert "failed" in text or "API key" in text
+    assert "gsk_abcdef" not in report.to_json(repo, turns=session.turns)
+
+
+def test_the_clock_counts_work_not_session_age():
+    """The reported bug: a console open for an hour claimed an hour of work on a
+    one-second turn. The clock must only run while something is running."""
+    import time as _t
+
+    from ratchet.tui.app import StatusLine
+
+    s = StatusLine()
+    s.started = _t.time() - 3600          # console has been open an hour
+    assert s.work_seconds == 0.0          # ...but nothing has been done
+    assert s._clock() == "0s"
+
+    s.begin_work()
+    _t.sleep(0.05)
+    s.end_work()
+    banked = s.work_seconds
+    assert 0.0 < banked < 5.0             # a fraction of a second, not an hour
+
+    _t.sleep(0.05)
+    assert s.work_seconds == banked       # idle time does not accrue

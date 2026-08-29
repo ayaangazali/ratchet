@@ -468,6 +468,20 @@ def cmd_dashboard(args) -> int:
     return 0
 
 
+def cmd_export(args) -> int:
+    """The session report, from outside the console."""
+    from . import report
+
+    repo = Path(args.repo or ".").resolve()
+    bus_path = _latest(repo, "bus.jsonl", args.run)
+    if args.json:
+        print(report.to_json(repo))
+        return 0
+    path = report.write(repo, bus_path=bus_path)
+    print(path)
+    return 0
+
+
 def cmd_demo(args) -> int:
     from .demo import seed
 
@@ -597,6 +611,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--host", default="127.0.0.1", help="loopback by default: this endpoint can approve a pull request")
     p.add_argument("--port", type=int, default=8788)
     p.set_defaults(fn=cmd_dashboard)
+
+    p = sub.add_parser("export", help="write a session report: turns, files, commits, verdicts")
+    p.add_argument("--repo")
+    p.add_argument("--run")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_export)
 
     p = sub.add_parser("demo", help="seed the demo repository")
     p.add_argument("--dir")
