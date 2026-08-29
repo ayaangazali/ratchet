@@ -162,8 +162,17 @@ def _check_task(settings) -> Check:
 
 
 def _check_runner(settings) -> Check:
-    """The gauntlet shells out to the test command; if that binary is missing every
-    node scores zero and the search looks broken rather than unconfigured."""
+    """Can the task's test command actually be found when a node runs it?
+
+    The naive version of this check reads PATH and is wrong on exactly the machine
+    that needs it most: the task says `python -m pytest`, macOS ships `python3` and
+    no bare `python`, and the check fails a setup that works. It works because
+    `WorktreeSandbox.exec` puts the task venv -- or, failing that, the directory of
+    the interpreter running ratchet -- on PATH first. So resolve the command the way
+    a node will, not the way this shell would.
+    """
+    import sys
+
     from .cli import _resolve_task
 
     try:
@@ -171,9 +180,27 @@ def _check_runner(settings) -> Check:
     except Exception:
         return Check("test runner", WARN, "skipped — task did not load")
     exe = cmd.split()[0] if cmd else ""
-    if exe and not shutil.which(exe) and not Path(exe).exists():
-        return Check("test runner", FAIL, f"{exe!r} is not on PATH (test_cmd: {cmd})", f"pip install {exe}")
-    return Check("test runner", OK, f"{cmd}")
+    if not exe:
+        return Check("test runner", FAIL, "the task declares no test command", "set test_cmd in the task yaml")
+
+    # the same search order sandbox.py uses, in the same order
+    candidates: list[Path] = []
+    if settings.venv:
+        candidates.append(Path(settings.venv) / "bin")
+    candidates.append(Path(settings.repo) / ".ratchet" / "venv" / "bin")
+    candidates.append(Path(sys.executable).parent)
+
+    for d in candidates:
+        if (d / exe).exists():
+            return Check("test runner", OK, f"{cmd}  (via {d})")
+    if shutil.which(exe):
+        return Check("test runner", OK, f"{cmd}  (via PATH)")
+    return Check(
+        "test runner",
+        FAIL,
+        f"{exe!r} is not on PATH and is in none of {', '.join(str(c) for c in candidates)}",
+        f"create the task venv:  python3 -m venv {Path(settings.repo) / '.ratchet' / 'venv'}",
+    )
 
 
 def _check_sandbox(settings) -> Check:

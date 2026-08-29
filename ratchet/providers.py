@@ -28,7 +28,7 @@ ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 #: provider -> (openai-compatible base url or None for native, key env var, default model)
 PROVIDERS: dict[str, tuple[str | None, str, str]] = {
     "anthropic": (None, "ANTHROPIC_API_KEY", "claude-sonnet-4-6"),
-    "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-5.2"),
+    "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-4o"),
     "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "llama-3.3-70b-versatile"),
     "kimi": ("https://api.moonshot.ai/v1", "MOONSHOT_API_KEY", "kimi-k2-0905-preview"),
     "trueforge": (None, "", "auto"),  # the local agent harness; TRUEFORGE_BASE_URL, no key
@@ -204,14 +204,28 @@ class ChatBackend:
 
     @classmethod
     def from_env(cls) -> ChatBackend:
+        # `.env` first. This line is the whole bug report: the key lived in .env,
+        # `Settings.from_env` read it and this did not, so the selector below saw no
+        # key anywhere and quietly chose `demo` -- a provider that fabricates a reply
+        # without a network call. The user had configured everything correctly and
+        # got a canned answer, which is indistinguishable from the tool being fake.
+        from .config import load_dotenv
+
+        load_dotenv()
         load_saved_keys()  # /connect persists here; a fresh session picks them up
         provider = os.environ.get("RATCHET_CHAT_PROVIDER", "").strip().lower()
         if not provider:
-            # pick the first provider with a key; fall back to the offline demo
-            provider = next(
-                (name for name, (_b, key_env, _m) in PROVIDERS.items() if key_env and os.environ.get(key_env)),
-                "demo",
-            )
+            # Preference order, and `demo` is the last resort rather than the second.
+            # TrueForge comes first when it is up: it already holds the provider
+            # credentials, it is the harness the rest of the tool routes through, and
+            # picking it keeps a direct provider SDK off the default path.
+            if trueforge_alive():
+                provider = "trueforge"
+            else:
+                provider = next(
+                    (name for name, (_b, key_env, _m) in PROVIDERS.items() if key_env and os.environ.get(key_env)),
+                    "demo",
+                )
         if provider not in PROVIDERS:
             raise ChatProviderError(f"unknown chat provider {provider!r}; known: {sorted(PROVIDERS)}")
         model = os.environ.get("RATCHET_CHAT_MODEL") or PROVIDERS[provider][2]
@@ -264,13 +278,18 @@ class ChatBackend:
             if not model:
                 raise ChatProviderError(f"{self.provider} returned a model with no id")
             self.model = model  # pin it, so the activity line names something real
-        r = httpx.post(
-            f"{base}/chat/completions",
-            headers={"Authorization": f"Bearer {key}"},
-            json={"model": model, "max_tokens": max_tokens,
-                  "messages": [{"role": "user", "content": prompt}]},
-            timeout=timeout,
-        )
+        # `max_tokens` is rejected outright by OpenAI's current models --
+        #   "Unsupported parameter: 'max_tokens' ... Use 'max_completion_tokens'"
+        # -- and is still the only accepted spelling on most OpenAI-compatible
+        # gateways. There is no single request body that satisfies both, so send the
+        # modern one and retry once on the specific 400 that names the parameter.
+        body = {"model": model, "messages": [{"role": "user", "content": prompt}]}
+        headers = {"Authorization": f"Bearer {key}"}
+        r = httpx.post(f"{base}/chat/completions", headers=headers,
+                       json={**body, "max_completion_tokens": max_tokens}, timeout=timeout)
+        if r.status_code == 400 and "max_completion_tokens" in r.text:
+            r = httpx.post(f"{base}/chat/completions", headers=headers,
+                           json={**body, "max_tokens": max_tokens}, timeout=timeout)
         _raise_for(r)
         return r.json()["choices"][0]["message"]["content"] or ""
 
