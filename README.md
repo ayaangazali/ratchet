@@ -226,6 +226,38 @@ ratchet replay --speed 4           # the same run, in the terminal
 If the console dies mid-demo the approval still works:
 `echo '{"allow": true}' > demo-repo/.ratchet/approvals/<id>.json`.
 
+### The same run, in a browser — a pixel office 🕹️
+
+```bash
+ratchet dashboard --repo demo-repo --run <run-id>   # http://127.0.0.1:8788
+```
+
+Every subagent on the bus is a pixel character in a tiny office (art from
+[Pixel Agents](https://github.com/pixel-agents-hq/pixel-agents), MIT). Verifiers
+sit at their own labeled workstations — one agent per computer — and type while
+their monitor flickers; the screen settles **green** or goes dark with the node's
+verdict. Finished agents clock off and walk to the lounge.
+
+**When the run wants to do something irreversible, an agent walks to the ⛩ gate
+and the whole page holds** — the ask comes *before* the push or PR, never after:
+
+![The dashboard holding at the gate — approve or deny before anything ships](docs/dashboard-holding.png)
+
+Approve (or hit `a`) and the run finishes green; everyone clocks off:
+
+![The run gone green — winner starred, agents off duty in the lounge](docs/dashboard-green.png)
+
+🧭 **How to read it in ten seconds:** the top-right bar is *progress to green*
+(best verifier score, 100% when a patch passes every check) · click any character
+for a plain-English summary — repo, task, branch/node, model, workstation,
+open-PR count, DOING NOW / WAITING ON / DID · hover for a two-line brief ·
+⏸ amber = waiting on *you* · ★ = accepted · ✗ = pruned (parked, not deleted).
+
+💡 **Tips:** keys `a`/`d` answer the gate · refresh mid-run and the office
+rebuilds from byte zero (the bus is a file) · replay any old run with `--bus`.
+The dashboard code lands via [PR #14](https://github.com/ayaangazali/ratchet/pull/14);
+these screenshots are from a live run of that branch.
+
 ---
 
 ## Does the search actually beat a loop?
