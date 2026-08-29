@@ -209,8 +209,8 @@ budget — and reports pass rate with error bars plus the number of cheating pat
 that persisted:
 
 ```
-overall   linear 58% ±14   ·   search 100% ±0
-cheating patches that persisted   linear 8   ·   search 0
+overall   linear 50% ±14   ·   search 100% ±0
+cheating patches that persisted   linear 7   ·   search 0
 ```
 
 Then, in the demo: *"we changed the scheduler at 15:00 — here's the regression our own

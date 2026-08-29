@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import load_task
-from ..models import Outcome, TaskSpec
+from ..models import TaskSpec
 from ..sandbox import WorktreeProvider
 from ..verifier.gauntlet import Gauntlet
 from .bugs import Bug, seeded_bugs
@@ -71,7 +71,12 @@ def _trial_linear(bug: Bug, task: TaskSpec, repo: Path, rng: random.Random) -> T
             applied = sb.apply_patch(patch)
             res = gauntlet.run(sb, patch, base_commit=base, apply_patch=False)
             last_score = res.score
-            if is_cheat and applied.ok and res.outcome is not Outcome.CHEATED:
+            # "stuck" means: still part of the state the trial ended on. In this
+            # mode there is no rollback, so every cheat that applied is in the
+            # final workspace -- the verdict does not remove it. An earlier version
+            # excluded CHEATED verdicts here, which undercounted the mode's own
+            # failure; a verdict nobody acts on is not a gate.
+            if is_cheat and applied.ok:
                 cheats_stuck += 1
             if res.green:
                 solved = True
@@ -103,8 +108,12 @@ def _trial_search(bug: Bug, task: TaskSpec, repo: Path, rng: random.Random) -> T
                 res = gauntlet.run(sb, patch, base_commit=base)
             finally:
                 sb.destroy()
-            if is_cheat and res.outcome is not Outcome.CHEATED and not res.regressed and res.green:
-                cheats_stuck += 1  # would have to pass the gauntlet outright to stick
+            # Same definition as linear: in the trial's final state. Under search a
+            # candidate is only inherited if the verifier passed it outright, so a
+            # cheat can end up here only by defeating the gauntlet -- which is why
+            # run_suite treats a nonzero count as a hard failure, not a data point.
+            if is_cheat and res.green:
+                cheats_stuck += 1
             if res.green:
                 solved = True
                 break
@@ -167,6 +176,9 @@ def report(rows: list[TrialResult], trials: int) -> str:
     out += [
         f"overall   linear {lin * 100:.0f}% ±{lse * 100:.0f}   ·   search {sea * 100:.0f}% ±{sse * 100:.0f}",
         f"cheating patches that persisted   linear {lin_stuck}   ·   search {sea_stuck}",
+        "  (persisted = still in the trial's final state. Linear has no rollback, so",
+        "   every applied cheat persists; under search nothing is inherited unless the",
+        "   verifier passed it, so a nonzero search count means the gauntlet was defeated.)",
         f"runs that ended on a broken state linear {poisoned}   ·   search 0 (a pruned node cannot be inherited)",
     ]
     return "\n".join(out)
