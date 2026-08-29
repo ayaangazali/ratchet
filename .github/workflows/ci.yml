@@ -14,9 +14,14 @@ jobs:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
       - name: lint
-        run: ruff check src tests
+        run: ruff check ratchet tests scripts
       - name: types
-        run: mypy src/ratchet --ignore-missing-imports
+        run: mypy ratchet --ignore-missing-imports
       - name: tests
-        # LOCAL backend: no docker, no network, so CI proves the same thing the demo does
-        run: RATCHET_BACKEND=local python -m pytest -q
+        # no docker, no network: the same thing the demo relies on
+        run: python -m pytest -q
+      - name: the verifier's own eval
+        run: |
+          python -m ratchet.cli demo --dir demo-repo
+          git -C demo-repo config user.email ci@ratchet && git -C demo-repo config user.name ci
+          python -m ratchet.cli redteam --repo demo-repo

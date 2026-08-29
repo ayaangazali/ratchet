@@ -1,189 +1,184 @@
 # CLAUDE.md — project rules for Ratchet
 
-Read this before writing code in this repository. It is the contract, not a summary.
+Read this before writing code here. It is the contract, not a summary.
 
 ---
 
-## What this project is
+## What this is
 
-Ratchet is a coding-agent harness in which the agent **cannot decide it is done**.
-A verifier decides. Every step the agent takes is a git commit on a scratch branch;
-every proposed patch runs a gauntlet (integrity → apply → build → fail-to-pass →
-held-out → pass-to-pass → types → lint) before it is allowed to stick; anything that
-regresses is rolled back to the last green commit and handed back as the next
-observation; three consecutive stalls trigger a fan-out across parallel branches,
-scored by the same verifier.
+A coding agent harness where the agent **never decides it's done** — the tests do.
+Every step is a git commit plus a sandbox snapshot; every candidate patch clears a
+verifier gauntlet before it sticks; because each step is restorable, a run is a
+**tree search over repo states** with the verifier's score as the value function.
+Stalled branches fork in parallel, dead ends are pruned, and the winning path exits
+as one squashed diff at a human approval gate.
 
-It runs on **TrueForge**, which owns the agent loop, MCP tool dispatch, the sandbox,
-sub-agent threads, session persistence and the approval interrupt. Ratchet owns one
-thing only: **what counts as progress**.
+TrueForge owns sub-agents, sandboxes, approvals, session persistence and model
+routing. We own the search and the verifier. That division is the point of the
+project and of the track we are entering.
 
 ---
 
 ## Invariants — do not break these, ever
 
-1. **Only the pawl produces a green verdict.** No code path may set
-   `Decision.ACCEPTED` outside `gauntlet/score.py::decide`. If you find yourself
-   wanting a `force_accept`, you have misunderstood the project.
-2. **There is no `done` tool.** Never add one. The agent's belief about its own
-   success is not an input to anything.
-3. **Protected paths are reverted before grading.** `eval_script.build_eval_script`
-   does this with `git checkout <base> -- <protected>`. Do not add a flag that skips it.
-4. **The exit code is echoed outside the parsed region.** Anything inside the
-   `>>>>> Start/End Test Output` markers is agent-influenced and therefore untrusted.
-5. **Held-out tests never appear in any string the agent can read.** Check
-   `task_brief`, every `Verdict.to_observation()` path, and every bus event that
-   reaches a prompt. `f2p_hidden` names leaking into an observation silently destroys
-   the entire signal.
-6. **Grading runs with `--network=none`.** If a gate needs the network, it is not a
-   grading gate.
-7. **Rejected work is parked before rollback** at `refs/ratchet/rejected/<attempt>`.
-   Never `reset --hard` without parking first.
-8. **`open_pull_request` is the only tool that leaves the machine**, and it stays in
-   `require_approval_for_tools`. If you add another irreversible tool, add it there in
-   the same commit.
-9. **Every verdict is receipted.** `receipts.record` runs on the accept path and the
-   reject path alike. A verdict that skips the receipt book is a hole in the chain,
-   and the chain is the only reason anyone should believe the run history.
-10. **`make redteam` stays at 10/10 with zero false positives.** It is a test of the
-   verifier, and it is in CI. If your change breaks it, your change is the problem —
-   unless you can show the attack was mis-specified, in which case fix the attack and
-   say so in the PR.
+1. **Only the gauntlet declares success.** `green` is set in exactly one place,
+   `verifier/gauntlet.py`. If you want a `force_green`, you have misread the project.
+2. **There is no `done` tool.** Never add one. The agent's belief about its own work
+   is not an input to anything.
+3. **Protected paths are reverted before grading**, every run, with no flag to skip.
+4. **The exit code is echoed outside the parsed region.** Anything between the
+   markers is agent-influenced and therefore untrusted.
+5. **Held-out test names never appear in anything the agent can read.** Check
+   `context.assemble`, `GauntletResult.to_observation`, and every bus event that
+   could reach a prompt. A leak silently destroys the entire signal.
+6. **Pruned work is parked before it is dropped**, at `refs/ratchet/pruned/<node>`.
+   A dead end is still a node you can rewind to.
+7. **Nothing irreversible happens without the gate.** `open_pull_request` and any
+   push go through `gate.py`. Add an irreversible action, add it there in the same
+   commit.
+8. **Every graded node is receipted.** `receipts.record_result` runs on the accepted
+   path and the pruned path alike. A node that skips it is a hole in the chain.
+9. **`make redteam` stays at 10/10 with zero false positives**, and it is in CI. If
+   your change breaks it, your change is the problem — unless the attack was
+   mis-specified, in which case fix the attack and say so in the PR.
+10. **We do not orchestrate containers.** No `docker run`, no `subprocess` container
+    management, no provider SDK. Sandboxes come from the harness; the worktree
+    fallback is git, not Docker. Writing container orchestration here throws away the
+    argument for building on a harness at all.
 
 ## Conventions
 
-- Python 3.11+, `from __future__ import annotations`, dataclasses over dicts at
-  boundaries, `ruff` + `mypy` clean before you open a PR.
-- Pure functions in `gauntlet/` (`parse`, `grade`, `patchlint`, `score`) take data
-  and return data. No I/O, no subprocess, no network. That is what makes them
-  testable and it is why the demo can run with the Wi-Fi off.
-- Subprocess calls use argv lists, never `shell=True`, never f-stringed user input.
+- Python 3.11+, `from __future__ import annotations`, dataclasses at boundaries,
+  `ruff` and `mypy` clean before a PR.
+- `verifier/` holds pure functions — `parsers`, `grade`, `cheat` take data and return
+  data, no I/O, no subprocess, no network. That is why the tests run anywhere.
+- Subprocess calls take argv lists. Never `shell=True`, never an agent-influenced
+  string interpolated into a shell.
 - Comments explain *why*, especially where the code looks paranoid. Most of the
   paranoia is load-bearing and a future reader will delete it otherwise.
-- New verification rules need a test with a real patch that trips them and a real
-  patch that does not.
+- Every new verification rule ships with two tests — a patch that trips it and a
+  patch that must not — plus an entry in the red-team battery.
 
 ## Commands
 
 ```bash
-make dev            # editable install + dev deps
-make test           # pytest; runs with LOCAL backend, no docker, no network
-make lint           # ruff + mypy
-make demo           # seed demo-repo/ with the broken slugify and three patches
-make serve          # ratchet MCP server on :8931
-make console        # the TUI
+make dev              # editable install + dev deps
+make demo             # seed demo-repo/ with the broken slugify and three patches
+make test             # 41 tests; no docker, no network
+make lint             # ruff + mypy
+make redteam          # score the verifier against known cheating patterns
+make evals            # linear vs search on our own seeded bugs
+make bench            # time a sandbox fork round trip (the pre-noon decision)
+make fixture          # a recorded run, so the console builds with no model
+make console          # the TUI
+make audit            # verify the latest run's receipt chain
+
 ratchet verify --task tasks/demo-001-slugify/task.yaml --repo demo-repo \
-               --diff demo-repo/patches/cheat.diff      # grade a patch, no model
+               --diff demo-repo/patches/cheat.diff     # the gauntlet, no agent
+ratchet run --repo demo-repo --scripted demo-repo/patches/scripted.json
 ```
 
 ---
 
-## Bright Data — the data pipeline lives in the repo, not beside it
+## Sandboxes — the harness's job, not ours
 
-The docs oracle keeps the agent honest about the outside world: when a test fails
-with an import error, a missing attribute or an unexpected keyword argument, the
-orchestrator attaches the **current** upstream documentation for the **exact version
-pinned in the lockfile** to the failure observation, instead of letting the model
-guess from memory.
+`sandbox.py` is an interface with two implementations:
 
-**Configuration lives in `src/ratchet/scrapers.yaml` and is version controlled.**
-Never scrape with a one-off command in a shell; add or edit a source there so the
-change is reviewable and the repair history is auditable.
+- **`HarnessProvider`** — execution and snapshots come from the sandbox provider
+  TrueForge is configured with. A child inherits its parent's installed dependencies
+  and warm build cache. This is the path that makes forking cheap.
+- **`WorktreeProvider`** — the documented fallback: one git worktree per node off a
+  prebuilt base, every attempt sharing a pre-warmed virtualenv. No snapshots, same
+  search, same verifier, same demo.
 
-Setup:
+**Decide between them with `ratchet bench-snapshot`, and decide early.** Under ~5s
+round trip, run the full tree search on snapshots. Over it, take the fallback and
+stop touching it — the search is the product, snapshotting is an optimisation of it.
+
+---
+
+## Bright Data — the pipeline lives in the repo, not beside it
+
+The docs oracle keeps the agent honest about the outside world: when a failure looks
+like an import error, a missing attribute or an unexpected keyword argument, the
+current upstream documentation for the **exact version in the lockfile** is attached
+to the next prompt instead of letting the model guess from memory.
+
+**Configuration lives in `ratchet/scrapers.yaml` and is version controlled.** Never
+scrape with a one-off shell command; add a source there so the change is reviewable
+and the repair history is auditable.
 
 ```bash
-npx -p @brightdata/cli brightdata login          # or: export BRIGHTDATA_API_KEY=...
+npx -p @brightdata/cli brightdata login
 npx -p @brightdata/cli brightdata add mcp --agent claude-code --global
 npx -p @brightdata/cli brightdata skill add scraper-studio
 ```
 
-Rules of the pipeline:
-
 - **Fetch order is CLI → Web Unlocker REST.** `brightdata scrape <url> -f markdown`
-  first; on failure, `POST https://api.brightdata.com/request` with
-  `{"zone": "$BRIGHTDATA_UNLOCKER_ZONE", "url": ..., "format": "raw", "data_format": "markdown"}`.
-  Two surfaces, one config.
+  first; on failure `POST https://api.brightdata.com/request` with
+  `{"zone": …, "url": …, "format": "raw", "data_format": "markdown"}`.
 - **Extract by heading, not by CSS selector.** Headings survive redesigns; class
-  names do not. This is the single cheapest source of scraper resilience available.
-- **Every fetch is validated** against the source's `expect` block: `min_chars`,
-  `must_contain`, and the blocked-page markers in `must_not_contain`. An unvalidated
-  fetch is not a fetch, it is a guess.
-- **Repair is a diff.** When validation fails, the oracle relocates the section by
-  heading similarity, writes the new selector back into `scrapers.yaml`, and appends
-  to that source's `history` with a timestamp and the reason. Commit that file.
+  names do not. Cheapest resilience available.
+- **Every fetch is validated** against the source's `expect` block. An unvalidated
+  fetch is a guess, not a fetch.
+- **Repair is a diff.** On validation failure the oracle relocates the section by
+  heading similarity, rewrites `scrapers.yaml` and appends to that source's `history`
+  with a timestamp and a reason. Commit it — that diff is the evidence.
 - **Escalate to Bright Data's own self-healing** when a source has a `collector_id`:
-  `bdata scraper heal <id> "<what broke>"`. Leave `auto_approve: false` unless you
-  want repairs landing unreviewed — the approval gate showing a `diff_summary` is a
-  feature, and it is the same gate the pull request uses.
-- **Cache** to `.ratchet/docs-cache/`, keyed on `sha256(url + extractor)`, 24h TTL.
-  Never commit the cache.
-
-To prove the pipeline repairs itself, point a source at a page whose structure has
-changed (or edit `scrapers.yaml` to name a section that no longer exists) and run a
-lookup. You should see a `docs.heal` event, a rewritten `section:` in the YAML, and a
-new `history` entry. That is the demo.
+  `bdata scraper heal <id> "<what broke>"`. Keep `auto_approve: false`; its approval
+  gate showing a `diff_summary` is a feature, and it is the same gate the PR uses.
 
 ---
 
 ## Qodo — every change goes through a reviewed pull request
 
-The submission requires a Qodo review trail, and this project's entire thesis is
-that unverified agent output should not merge. Direct pushes to `main` contradict
-the pitch.
+The submission requires the review trail, and the project's thesis is that unverified
+agent output should not merge. Direct pushes to `main` contradict the pitch.
 
-1. Branch. `git switch -c feat/<thing>`.
-2. Open a PR. The Qodo GitHub App reviews it automatically; if it does not, comment
-   `/agentic_review` (hosted v2) or `/review` (v1/OSS).
-3. **Deal with what it finds before merging.** Use the *Apply this suggestion*
-   button for at least the ones you agree with, so the fix is attributable in the
-   commit trail.
-4. Configuration lives in `.pr_agent.toml` and `best_practices.md` at the repo root.
-   Both are committed on purpose: a reviewer that is configured deliberately beats a
-   reviewer that is running on defaults.
-5. Record merged PR links under `## Qodo Code Review Evidence` in `README.md` as you
-   go. Doing it at 17:55 is how teams lose that prize.
-
-Run `/config` in a PR comment once at the start to confirm whether the installation
-speaks v1 or v2 command names.
+1. Branch: `git switch -c feat/<thing>`.
+2. Open a PR. Qodo reviews automatically; if not, comment `/agentic_review` (hosted
+   v2) or `/review` (v1/OSS). Run `/config` once to find out which you have.
+3. **Deal with what it finds before merging.** Use *Apply this suggestion* for the
+   ones you agree with so the fix is attributable in the commit trail.
+4. `.pr_agent.toml` and `best_practices.md` are committed on purpose: a reviewer
+   configured deliberately beats one running on defaults.
+5. Add the merged PR to the README table as you go, not at 17:55.
 
 ---
 
 ## TrueForge — what the harness owns
 
-Do not reimplement any of this in Ratchet:
-
-| Concern | Owner |
+| concern | owner |
 |---|---|
-| model calls, retries, streaming | TrueForge |
+| model calls, retries, multi-provider routing | TrueForge |
 | context management and compaction | TrueForge |
 | MCP connections, OAuth, tool dispatch | TrueForge |
-| sandboxed execution | TrueForge |
-| sub-agent threads and parallelism | TrueForge (`create_sub_agent`, 5 at a time) |
+| sandboxed execution and snapshots | TrueForge |
+| sub-agent threads and parallelism | TrueForge |
 | session persistence, resume after reconnect | TrueForge |
-| the approval interrupt | TrueForge (`tool.approval_required`) |
+| the approval interrupt | TrueForge |
 | **what counts as progress** | **Ratchet** |
 
 Wire facts that cost hours if you learn them the hard way:
 
 - SSE frames carry **no `event:` name**. Dispatch on `json.loads(data)["type"]`.
-- The SSE `id` is a monotonic per-turn sequence number. Persist it; reconnect with
-  `?after_sequence_number=N`.
-- A finished turn's live stream is garbage-collected minutes later; reconnecting then
-  returns **412**. Hydrate from `/turns/{id}/events` first, then attach.
-- Approvals are **not** a callback. The turn ends with `state.required_actions`, and
-  you resume by starting a *new* turn whose input items are `user.tool_approval`.
-  **Never mix approval items with a user message in one turn.**
-- `thread_id` is `"main"` for the root agent, a unique id per sub-agent, `null` for
-  run-level events.
-- Local mode: SQLite, no auth, `npx @truefoundry/trueforge@latest`, Node >= 22.14.
+- The SSE `id` is a monotonic per-turn sequence number; reconnect with
+  `?after_sequence_number=N`. A finished turn's stream is collected minutes later and
+  then returns **412** — hydrate from `/turns/{id}/events` first, then attach.
+- Approvals are **not** a callback. The turn ends with `state.required_actions` and
+  you resume with a *new* turn whose items are `user.tool_approval`. **Never mix
+  approval items with a user message.**
+- Sub-agents share the parent's sandbox and see none of the conversation. Restate
+  the task and the branch label in full.
+- Compaction key is `compaction_threshold_tokens`, not the shape in the docs.
+- Local sandbox egress is allowlisted to PyPI and GitHub only.
 
 ---
 
 ## When you are stuck
 
-Prefer, in order: read the failing test output; run `ratchet verify` on the patch by
-hand with no model in the loop; add a unit test that reproduces the failure in
-`tests/`; only then change the verifier. Changing the verifier to make a patch pass
-is exactly the behaviour this project exists to catch, and it is just as wrong when
-a human does it.
+Read the failing stage. Run `ratchet verify` on the patch by hand with no model in
+the loop. Add a test that reproduces it. Only then change the verifier.
+
+Changing the verifier to make a patch pass is exactly the behaviour this project
+exists to catch, and it is no less wrong when a human does it.

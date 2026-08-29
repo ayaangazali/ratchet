@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Write a fake run to a bus file so the TUI can be built without a model.
+"""Write a recorded run to a bus file so the console can be built with no model.
 
-The console is driven entirely by the JSONL bus, which means the whole interface --
-gate rail, spine, scoreboard, approval bar -- can be designed, demoed and rehearsed
-with no harness, no API key and no network. Run this, then `ratchet console --bus
-.ratchet/fixture.bus.jsonl`.
+The TUI renders entirely off the JSONL bus, which means the whole interface — tree,
+stage rail, counters, budget line, approval bar — can be designed, demoed and
+rehearsed with no harness, no key and no network. Run this, then:
 
-It is also the fallback if the live run dies during judging: this is a complete,
-honest recording of the shape of a real run.
+    ratchet console --bus .ratchet/fixture.bus.jsonl
+
+It is also the demo's insurance. If the live run dies at the judging table, this is
+a faithful recording of the shape of one, and `ratchet replay` will play it back.
+
+    python scripts/make_fixture.py [path] [delay-seconds-between-events]
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ratchet.bus import Bus  # noqa: E402
 
@@ -29,9 +32,20 @@ def beat(bus: Bus, kind: str, **payload) -> None:
         time.sleep(DELAY)
 
 
-def gates(bus: Bus, attempt: str, results: list[tuple[str, bool, str]]) -> None:
+def stages(bus: Bus, label: str, results: list[tuple[str, bool, str]]) -> None:
     for name, ok, detail in results:
-        beat(bus, "gate.result", attempt=attempt, gate=name, passed=ok, detail=detail)
+        beat(bus, "stage.result", label=label, stage=name, passed=ok, detail=detail,
+             skipped=detail.startswith("no "))
+
+
+def budget(nodes: int, elapsed: float, usd: float) -> dict:
+    return {"nodes_used": nodes, "max_nodes": 40, "elapsed": elapsed,
+            "max_seconds": 900, "usd_used": usd, "max_usd": 3.0}
+
+
+GREEN = [("build", True, "ok"), ("cheat", True, "0 finding(s), 0 critical"), ("f2p", True, "7/7"),
+         ("p2p", True, "3/3"), ("types", True, "clean"), ("lint", True, "clean"),
+         ("hygiene", True, "1 file, 14 added lines")]
 
 
 def main() -> None:
@@ -40,65 +54,80 @@ def main() -> None:
     path.write_text("")
     bus = Bus(path)
 
-    beat(bus, "run.started", run_id="run-fixture", task="demo-001-slugify", backend="docker",
-         trunk="ratchet/run-fixture/trunk", base="1c09aa2f")
-    beat(bus, "agent.text", thread="main", text="Reading slugify.py and the visible tests.")
-    beat(bus, "agent.tool", thread="main", tool="repo_read", ok=True, preview="src/textkit/slugify.py")
+    beat(bus, "run.started", run_id="run-fixture", task="demo-001-slugify", provider="harness",
+         snapshots=True, trunk="ratchet/run-fixture/trunk", budget=budget(0, 0, 0))
+    beat(bus, "sandbox.created", label="root", provider="harness")
+    beat(bus, "node.added", id="root", parent=None, score=0.35, green=False, outcome="progress",
+         intent="baseline", depth=0, findings=[], reason="baseline")
+    beat(bus, "repo.mapped", lines=18)
 
-    # 1. an accepted attempt
-    beat(bus, "attempt.submitted", attempt="a1", branch="trunk", rationale="fold accents with NFKD", diff_lines=9)
-    gates(bus, "a1", [("cheat", True, "0 finding(s), 0 critical"), ("apply", True, "patch applied"),
-                      ("build", True, "ok"), ("f2p", True, "3/3 visible"), ("hidden", True, "4/4 held-out"),
-                      ("p2p", True, "3/3 kept green"), ("types", True, "clean"), ("lint", True, "clean"),
-                      ("decision", True, "all gates green")])
-    beat(bus, "verdict", attempt_id="a1", decision="accepted", score=0.744, commit_sha="0b7e441c",
-         f2p_visible_rate=1.0, f2p_hidden_rate=1.0, p2p_rate=1.0, delta=0.0, findings=[], gates=[])
+    # 1. a step that sticks
+    beat(bus, "expand", node="root", fanout=1, depth=0, dead_ends=0)
+    beat(bus, "sandbox.created", label="root-0", provider="harness", parent="root")
+    beat(bus, "verify.started", label="root-0", parent="root", model="anthropic/claude-sonnet-4-6",
+         intent="fold accents with NFKD before the ascii encode")
+    stages(bus, "root-0", [("build", True, "ok"), ("cheat", True, "0 finding(s), 0 critical"),
+                           ("f2p", False, "5/7  (hidden failing)"), ("p2p", True, "3/3"),
+                           ("types", True, "clean"), ("lint", True, "clean"),
+                           ("hygiene", True, "1 file, 6 added lines")])
+    beat(bus, "node.added", id="0f3a", parent="root", score=0.62, green=False, outcome="progress",
+         intent="fold accents with NFKD", model="anthropic/claude-sonnet-4-6", depth=1, findings=[])
 
-    # 2. a rejection that rolls back
-    beat(bus, "agent.text", thread="main", text="Now the truncation boundary.")
-    beat(bus, "attempt.submitted", attempt="71c9", branch="trunk", rationale="truncate at max_length", diff_lines=6)
-    gates(bus, "71c9", [("cheat", True, "0 finding(s), 0 critical"), ("apply", True, "patch applied"),
-                        ("build", True, "ok"), ("f2p", True, "3/3 visible"), ("hidden", False, "2/4 held-out  <-- fix does not generalise"),
-                        ("p2p", False, "2/3 kept green"), ("decision", False, "1 pass-to-pass test(s) regressed")])
-    beat(bus, "verdict", attempt_id="71c9", decision="rejected", score=0.612,
-         f2p_visible_rate=1.0, f2p_hidden_rate=0.5, p2p_rate=0.67, delta=0.5, findings=[], gates=[])
-    beat(bus, "rollback", attempt="71c9", to="0b7e441c", reason="rejected")
+    # 2. a regression, pruned
+    beat(bus, "expand", node="0f3a", fanout=1, depth=1, dead_ends=0)
+    beat(bus, "sandbox.created", label="0f3a-0", provider="harness", parent="0f3a")
+    beat(bus, "verify.started", label="0f3a-0", parent="0f3a", model="anthropic/claude-sonnet-4-6",
+         intent="truncate at max_length")
+    stages(bus, "0f3a-0", [("build", True, "ok"), ("cheat", True, "0 finding(s), 0 critical"),
+                           ("f2p", True, "7/7"), ("p2p", False, "2/3")])
+    beat(bus, "node.pruned", id="4de0", parent="0f3a", score=0.44, green=False, outcome="regressed",
+         intent="truncate at max_length", model="anthropic/claude-sonnet-4-6", depth=2,
+         findings=[], reason="1 previously-passing test now fails")
 
-    # 3. an integrity violation
-    beat(bus, "attempt.submitted", attempt="8a31", branch="trunk", rationale="handle the failing cases directly", diff_lines=14)
-    gates(bus, "8a31", [("cheat", False, "3 finding(s), 2 critical"),
-                        ("decision", False, "integrity violation: protected_path at tests/test_slugify_hidden.py:0")])
-    beat(bus, "verdict", attempt_id="8a31", decision="disqualified", score=0.0,
-         findings=[{"rule": "protected_path", "severity": "critical"},
-                   {"rule": "skip_marker", "severity": "critical"},
-                   {"rule": "special_casing", "severity": "high"}], gates=[])
-    beat(bus, "rollback", attempt="8a31", to="0b7e441c", reason="disqualified")
+    # 3. an integrity violation, pruned before it runs
+    beat(bus, "expand", node="0f3a", fanout=1, depth=1, dead_ends=1)
+    beat(bus, "verify.started", label="0f3a-1", parent="0f3a", model="openai/gpt-5.2",
+         intent="handle the remaining cases directly")
+    stages(bus, "0f3a-1", [("cheat", False, "3 finding(s), 2 critical")])
+    beat(bus, "node.pruned", id="9ba4", parent="0f3a", score=0.0, green=False, outcome="cheated",
+         intent="handle the remaining cases directly", model="openai/gpt-5.2", depth=2,
+         findings=["protected_path", "skip_marker", "special_casing"],
+         reason="integrity violation: skip_marker at tests/test_slugify_hidden.py:5")
 
-    # 4. stall -> fan-out -> arbitration
-    beat(bus, "stall", attempts=3)
-    beat(bus, "fanout", labels=["cand-a", "cand-b", "cand-c"], base="0b7e441c",
-         plan="a: normalise first  b: rewrite the regex  c: truncate on token boundary")
-    for label, tid in [("cand-a", "th_9f21"), ("cand-b", "th_4c07"), ("cand-c", "th_11ab")]:
-        beat(bus, "thread.created", thread=tid, title=label, parent="main")
-        beat(bus, "agent.text", thread=tid, text=f"[{label}] restating the task and the hypothesis.")
-    beat(bus, "docs.fetch", library="unicodedata", version="3.11", url="https://docs.python.org/3/library/unicodedata.html", via="cli")
-    beat(bus, "arbitration", rows=[
-        {"label": "cand-c", "score": 0.981, "hidden": 1.0, "visible": 1.0, "p2p": 1.0, "delta": 0.0, "findings": []},
-        {"label": "cand-a", "score": 0.703, "hidden": 0.5, "visible": 1.0, "p2p": 1.0, "delta": 0.5, "findings": []},
-        {"label": "cand-b", "score": 0.402, "hidden": 0.0, "visible": 1.0, "p2p": 1.0, "delta": 1.0, "findings": ["special_casing"]},
-    ])
-    for tid in ("th_9f21", "th_4c07", "th_11ab"):
-        beat(bus, "thread.done", thread=tid, state="done")
-    beat(bus, "verdict", attempt_id="c3", decision="accepted", score=0.981, commit_sha="4f2a19cd",
-         f2p_visible_rate=1.0, f2p_hidden_rate=1.0, p2p_rate=1.0, delta=0.0, findings=[], gates=[])
+    # 4. stall -> fan-out across providers
+    beat(bus, "stall", node="0f3a", fanout=3, depth=1)
+    beat(bus, "expand", node="0f3a", fanout=3, depth=1, dead_ends=2)
+    for label, model, intent in [
+        ("0f3a-a", "anthropic/claude-sonnet-4-6", "normalise first, then truncate on a token boundary"),
+        ("0f3a-b", "openai/gpt-5.2", "rewrite the separator regex"),
+        ("0f3a-c", "google-gemini/gemini-3-pro", "truncate on the last hyphen before the limit"),
+    ]:
+        beat(bus, "sandbox.created", label=label, provider="harness", parent="0f3a")
+        beat(bus, "verify.started", label=label, parent="0f3a", model=model, intent=intent)
+    beat(bus, "docs.fetch", library="unicodedata", version="3.11", via="cli")
+    stages(bus, "0f3a-b", [("build", True, "ok"), ("cheat", True, "1 finding(s), 0 critical"),
+                           ("f2p", False, "6/7  (hidden failing)"), ("p2p", True, "3/3")])
+    beat(bus, "node.added", id="7c21", parent="0f3a", score=0.71, green=False, outcome="progress",
+         intent="rewrite the separator regex", model="openai/gpt-5.2", depth=2, findings=["special_casing"])
+    stages(bus, "0f3a-c", GREEN)
+    beat(bus, "node.added", id="4f2a", parent="0f3a", score=1.0, green=True, outcome="green",
+         intent="truncate on the last hyphen before the limit", model="google-gemini/gemini-3-pro",
+         depth=2, findings=[], reason="all gates green")
 
     # 5. the gate
-    beat(bus, "approval.required", tool_call_id="call_demo", thread="main", tool="open_pull_request",
-         arguments={"title": "fix(slugify): fold accents and truncate on a word boundary",
-                    "body": "Verified: 3/3 visible, 4/4 held-out, 3/3 regression, types and lint clean."})
+    beat(bus, "approval.required", id="a1b2", action="open_pull_request",
+         summary="demo-001-slugify: truncate on the last hyphen before the limit",
+         stats={"nodes_explored": 6, "path_length": 3, "score": 1.0, "green": True, "cost_usd": 1.14},
+         diff_preview="diff --git a/src/textkit/slugify.py b/src/textkit/slugify.py\n"
+                      "@@\n-    return slug[:max_length]\n+    if len(slug) <= max_length:\n"
+                      "+        return slug\n+    cut = slug[: max_length + 1]\n"
+                      '+    if "-" in cut:\n+        cut = cut[: cut.rindex("-")]\n')
+    beat(bus, "run.done", winner="4f2a", green=True, score=1.0, reason="verifier returned green",
+         nodes=6, budget=budget(6, 372, 1.14))
 
     print(f"fixture written to {path}")
     print(f"  ratchet console --bus {path}")
+    print(f"  ratchet replay --bus {path}")
 
 
 if __name__ == "__main__":

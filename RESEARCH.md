@@ -357,19 +357,49 @@ Split edit-phase (network allowed, proxied) from grade-phase (no network at all)
 
 ---
 
+## 5b. Tree search, rollback and selection — the parts this build uses directly
+
+| system | mechanism worth copying | numbers | url |
+|---|---|---|---|
+| **Agentless** | localize → repair (40 candidate patches) → validate → rank by *fewest regression failures*, then AST-normalised majority vote (parse, unparse, strip docstrings, vote on the canonical diff) | Lite 32.0% at $0.70/instance; Verified 50.8% with Claude 3.5 | https://arxiv.org/html/2407.01489v2 |
+| **SWE-Search / moatless-tree-search** | MCTS with a modified UCT that adds an early-exploration bonus and a late-depth penalty; the value agent emits **(score, natural-language critique)** and the critique is fed back into the next action | +23% relative average over five models; value fn alone picks correct 73%, discriminator raises it to 84% | https://arxiv.org/abs/2410.20285 |
+| **SWE-Gym** | outcome-supervised verifier over the whole trajectory; best@k is log-linear in k | pass@1 20.6 → best@8 29.8 → best@16 32.0 | https://arxiv.org/html/2412.21139v2 |
+| **Agentic rubrics as contextual verifiers** | four weighted axes — file change, spec alignment, **integrity (no test weakening, no mass refactor)**, runtime | best@16 40.6% vs 37.1% for a plain LLM judge | https://arxiv.org/html/2601.04171v1 |
+| **container-use** (dagger) | container **and** git branch per agent, every agent action auto-committed | — | https://github.com/dagger/container-use |
+| **mini-swe-agent** | ~100 LOC, one bash tool, no tool-calling API; evidence that scaffolding complexity is not where the value is | >74% on Verified | https://github.com/SWE-agent/mini-swe-agent |
+| **Aider** | `--auto-test` / `--auto-lint`: non-zero exit → stderr fed back to the model → repair loop; auto-commit every edit, `/undo` to revert | — | https://aider.chat/docs/usage/lint-test.html |
+| **AlphaEvolve** | evolutionary loop over a program database; the hard requirement is a *machine-checkable* score, which is exactly what the gauntlet produces | — | https://arxiv.org/abs/2506.13131 |
+
+**How this maps onto Ratchet.** The selection score
+(`score + 0.3·novelty − 0.05·depth + 0.1·untried`) is the SWE-Search shape with the
+learned value function replaced by the gauntlet's scalar — which we can afford
+because our verifier is cheap and exact where theirs was a model. Novelty is the
+Agentless diversity argument made explicit rather than left to temperature. The
+integrity axis of the rubric paper is `verifier/cheat.py`. Normalised majority vote
+is on the stretch list (S3) precisely because it is ~20 lines and well evidenced.
+
+**Sandboxing.** Ratchet does not orchestrate containers, so the standard hardening
+recipe (`--network=none --pids-limit --cap-drop=ALL --memory` and a wall-clock
+timeout inside *and* outside) is the harness's concern and appears here only as the
+thing to check the provider actually does. The one number to keep: SWE-bench uses a
+**1800s** default per-instance timeout and `--open_file_limit 4096`.
+
 ## 6. What this repo already implements from the above
 
-| Idea | Where |
+| idea | where |
 |---|---|
-| F2P/P2P vocabulary, skip asymmetry, missing-test-is-failure | `gauntlet/grade.py` |
-| Test reset before grading, markers, exit code outside the parsed region | `gauntlet/eval_script.py` |
-| `SUITE_RAN` sentinel, exit-code cross-check | `gauntlet/parse.py` |
-| Escalating apply chain with clean-up between attempts | `gauntlet/eval_script.py` |
-| Held-out tests and the `Δ` penalty | `models.py`, `gauntlet/score.py` |
-| Integrity axis as both a gate and a score term | `gauntlet/patchlint.py` |
-| Impossible-task canary | `tasks/canary-impossible/task.yaml` |
-| Container flags, network off during grading | `gauntlet/runner.py` |
-| Commit-per-step, park-then-rollback | `ledger.py` |
-| Cryptographic receipts over verdicts | `receipts.py` |
-| An eval of the verifier itself | `redteam.py` |
-| Not implemented (deliberately): learned verifiers, MCTS, majority vote | see `BUILD_PLAN.md` P2 |
+| F2P/P2P vocabulary, skip asymmetry, missing-test-is-failure | `verifier/grade.py` |
+| test reset before grading, markers, exit code outside the parsed region | `verifier/eval_script.py` |
+| suite-ran sentinel, exit-code cross-check, per-framework parsers | `verifier/parsers.py` |
+| escalating apply chain with clean-up between attempts | `sandbox.py` |
+| held-out tests pooled into `f2p_ratio`, `delta` reported | `verifier/grade.py`, `verifier/gauntlet.py` |
+| integrity axis as a hard gate plus a graded warning tier | `verifier/cheat.py` |
+| impossible-task canary | `tasks/canary-impossible/task.yaml` |
+| tree search over restorable states | `node.py`, `loop.py` |
+| selection score with novelty and a depth penalty; stall → shallow fan-out | `scheduler.py` |
+| negative-sibling injection | `context.py` |
+| commit per node, park before prune, squash the winning path | `gitstate.py` |
+| cryptographic receipts over graded results | `receipts.py` |
+| an eval of the verifier itself | `redteam.py` |
+| a controlled experiment on our own machinery | `evals/` |
+| deliberately not implemented: learned verifiers, MCTS, majority vote | `BUILD_PLAN.md` §stretch |

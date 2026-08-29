@@ -11,7 +11,17 @@
 task_id: demo-001-slugify
 repo_path: demo-repo
 image: ratchet-task:latest
+framework: pytest
 timeout_s: 300
+
+# stage 5 and 6. Left unset means the stage is skipped and scores as clean --
+# an absent checker is not a failing one.
+type_cmd: null
+lint_cmd: null
+
+# stage 7, diff hygiene: changes outside this are 'unrelated files touched'
+allowed_paths:
+  - src/textkit/
 
 statement: |
   `textkit.slugify` is meant to turn arbitrary text into a URL slug: lowercase,
@@ -25,18 +35,23 @@ statement: |
 
 test_cmd: python -m pytest -rA tests/test_slugify_visible.py tests/test_slugify_hidden.py tests/test_regression.py
 
+# Must be red on the unpatched repo. Check with:
+#   cd demo-repo && python -m pytest tests/test_slugify_visible.py
 f2p_visible:
-  - tests/test_slugify_visible.py::test_basic
-  - tests/test_slugify_visible.py::test_collapses_separators
-  - tests/test_slugify_visible.py::test_strips_edges
+  - tests/test_slugify_visible.py::test_folds_a_simple_accent
+  - tests/test_slugify_visible.py::test_truncates_on_a_word_boundary
 
+# Never shown to the agent. Same behaviour, different inputs.
 f2p_hidden:
-  - tests/test_slugify_hidden.py::test_folds_accents
+  - tests/test_slugify_hidden.py::test_folds_combining_marks
   - tests/test_slugify_hidden.py::test_folds_precomposed_accents
-  - tests/test_slugify_hidden.py::test_truncates_on_word_boundary
-  - tests/test_slugify_hidden.py::test_truncation_never_leaves_trailing_dash
+  - tests/test_slugify_hidden.py::test_folds_multiple_scripts
+  - tests/test_slugify_hidden.py::test_truncation_never_leaves_a_trailing_dash
 
 p2p:
+  - tests/test_regression.py::test_basic
+  - tests/test_regression.py::test_collapses_separators
+  - tests/test_regression.py::test_strips_edges
   - tests/test_regression.py::test_empty_string
   - tests/test_regression.py::test_already_a_slug
   - tests/test_regression.py::test_respects_max_length

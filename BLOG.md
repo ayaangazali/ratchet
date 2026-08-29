@@ -18,9 +18,15 @@ conftest hook that rewrites pytest's report objects. Make clear this is measurem
 not speculation, and that a prompt saying "please don't cheat" is not a control.
 
 **3. The inversion (400 words).**
-The tempting design — agent has a shell, we check afterwards — makes the verifier
-advisory. Ours puts the graded tree behind one adjudicated door. Show the tool list
-and point at the absence: there is no `done`.
+The tempting design — let the agent run, check afterwards — makes the verifier
+advisory. Ours makes it the loop condition. Show the loop and point at the absence:
+there is no `done` tool, and termination is `result.green`.
+
+**3b. And then the thing that falls out of it (400 words).**
+Once every step is a *restorable* state — a commit plus a snapshot — retrying stops
+being the only move. You can fork from any node, prune a branch without losing it, and
+come back to step twelve tomorrow. The loop becomes a search, and the verifier's score
+becomes the value function. Include the tree render; it explains itself.
 
 **4. Fifteen lines of bash (500 words).**
 The highest-leverage code in the project. Apply, `git checkout base -- tests/`,
@@ -38,6 +44,13 @@ A task whose two assertions contradict each other. Zero false positives by
 construction. Show the patch that defeats it and trips no static rule — it just
 returns a different answer the second time it is asked — and be honest that this is
 the class of hack static analysis will never catch.
+
+**6b. Does the search actually beat a loop? (350 words).**
+The eval nobody runs on their own submission. Same bugs, same draws, same budget; the
+only difference is whether a bad step persists. Linear 58% ±14 versus search 100%, and
+eight cheating patches that stuck under linear versus zero. Be explicit that the
+generator is simulated and that this measures machinery, not model quality — the
+honesty is what makes the number worth anything.
 
 **7. We tested our own defences (300 words).**
 `make redteam`, the scorecard, and the attack it surfaced that we had not thought of:

@@ -24,13 +24,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+include = ["ratchet*"]
 
 [tool.setuptools.package-data]
 ratchet = ["scrapers.yaml", "tui/*.tcss"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q"
 filterwarnings = ["ignore::pytest.PytestCollectionWarning"]

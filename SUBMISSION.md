@@ -14,41 +14,48 @@ or the README, so writing them here first means you are not composing prose at 1
 
 ## The write-up (paste into the README and the form)
 
-> **What it does.** Ratchet is a coding agent that cannot decide it is done. It is
-> given a defect and a repository it cannot write to directly. It reads freely,
-> experiments in a sandbox, and submits patches to a verifier it does not control.
-> Every accepted patch is a git commit; every rejected one is rolled back to the
-> last green commit and handed back as the agent's next observation. When it stalls,
-> sub-agents fan out across parallel branches and the verifier keeps the highest
-> scoring one. The only action that leaves the machine — opening a pull request —
-> waits for a human.
+> **What it does.** Ratchet is a coding agent harness in which the agent never
+> decides it is done — the tests do. Every step it takes becomes a git commit plus a
+> sandbox snapshot, and every candidate patch must clear a verifier gauntlet — build,
+> cheat check, fail-to-pass, pass-to-pass, types, lint, diff hygiene — before it is
+> allowed to stick. Because each step is a restorable node, a run is not a linear loop
+> with retries: it is a tree search over repo states, with the verifier's score as the
+> value function and a scheduler deciding where to spend the next unit of compute.
+> Stalled branches fork in parallel across sandboxes, dead ends are pruned and fed
+> back as one-line warnings to their siblings, and the winning path exits as a single
+> clean squashed diff sitting at a human approval gate.
 >
 > **How it uses TrueForge.** The harness runs everything except the definition of
-> progress. It owns the agent loop and the model calls, context management and
-> compaction, MCP tool dispatch including OAuth, the sandbox the agent experiments
-> in, the sub-agent threads that fan out on a stall, session persistence across
-> reconnects, and the approval interrupt that holds the pull request. Ratchet
-> registers one custom MCP server carrying the tools that touch the graded tree, and
-> declares `open_pull_request` in `require_approval_for_tools` so the harness — not
-> our prompt — is what stops it. The console is a client of TrueForge's SSE stream:
-> every sub-agent thread, sandbox creation and approval pause you see on screen is
-> a harness event, mirrored onto a local bus. We wrote no agent loop, no context
-> manager, no OAuth dance and no approval machinery, and spent the day on the only
-> question the harness cannot answer for us.
+> progress: model calls and multi-provider routing, context management and compaction,
+> sandboxed execution and the snapshots that make forking cheap, the sub-agent threads
+> that fan out on a stall, session persistence that makes rewind and reconnect real,
+> and the approval interrupt that holds the pull request. Three roles run on three
+> different providers on purpose — a cheap cartographer that maps the repo once, the
+> generators that write patches, and a reviewer — so branch diversity is structural
+> rather than a sampling artefact. There is no container orchestration and no provider
+> SDK anywhere in the repository; `grep -r "docker run"` returns nothing, which is a
+> deliberate design property rather than an omission. We wrote the search and the
+> verifier and deleted a week of plumbing by not writing it.
 >
 > **Why it matters.** Give an agent a repository and a test command and it will
 > eventually find that the cheapest way to make tests pass is to change what "pass"
-> means. That is measured, not hypothetical. So we took the decision away, and then
-> tested our own defences: `make redteam` fires ten published reward-hacking patterns
-> at the verifier and reports how many got through, alongside a control patch that
-> must not be caught.
+> means. That is measured, not hypothetical. So we took the decision away — and then
+> tested our own defences. `make redteam` fires ten published reward-hacking patterns
+> at the verifier and reports how many got through, alongside two control patches that
+> must *not* be caught. It has already earned its keep: it found an attack we had not
+> thought of, where patched source rewrites a graded test file at import time, after
+> the revert. And `make evals` runs a controlled experiment on our own machinery —
+> same bugs, same draws, same call budget, linear loop versus verified search.
 
 ## Numbers to quote
 
 - `make redteam` → caught `__/10`, false positives `__`
-- tests: `__` passing, runtime `__`, no network required
-- verdict receipts: hash-chained and signed; `ratchet audit` verifies a run
-- lines of Python: `__`
+- `make evals` → linear `__%` ±`__` · search `__%` ±`__`; cheating patches that
+  persisted: linear `__`, search `__`
+- `make bench` → fork round trip `__`s, so we ran on `snapshots / worktrees`
+- tests: `__` passing in `__`s, no docker and no network
+- nodes explored in the demo run: `__`; cost `$__`
+- receipts: hash-chained and signed; `ratchet audit` verifies a whole run
 
 ## Qodo evidence table (copy into the README)
 

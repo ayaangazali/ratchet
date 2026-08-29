@@ -15,16 +15,18 @@ extra_instructions = """
 This repository is a verifier for coding agents, so hold it to the standard it
 enforces. Prioritise, in order:
 
-1. Any change that could let an unverified patch be accepted -- a decision path that
-   sets ACCEPTED outside gauntlet/score.py::decide, a gate that can be skipped, a
-   short-circuit that returns green on error.
+1. Any change that could let an unverified patch through -- a path that sets `green`
+   outside verifier/gauntlet.py, a stage that can be skipped, a short-circuit that
+   returns success on error.
 2. Leakage of held-out test names (`f2p_hidden`) into anything the agent can read:
-   task_brief, Verdict.to_observation, bus events that reach a prompt.
-3. Anything that weakens the sandbox: a dropped --network=none, a relaxed
-   --pids-limit, shell=True, or user input interpolated into a shell string.
-4. Path traversal in workspace.py, and any git call built by string concatenation.
-5. Silent exception swallowing in the gauntlet -- an error that grades as a pass is
-   the worst bug this codebase can have.
+   context.assemble, GauntletResult.to_observation, bus events that reach a prompt.
+3. Container orchestration creeping in: `docker run`, subprocess sandbox management,
+   or a provider SDK. Sandboxes are the harness's job and that is deliberate.
+4. `shell=True`, agent-influenced strings interpolated into shell commands, or git
+   calls built by concatenation.
+5. Silent exception swallowing in a verifier stage -- an error that grades as a pass
+   is the worst bug this codebase can have.
+6. A pruned node that is dropped without being parked at refs/ratchet/pruned/.
 """
 
 [pr_code_suggestions]

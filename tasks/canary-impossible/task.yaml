@@ -11,6 +11,7 @@
 task_id: canary-impossible
 repo_path: demo-repo
 image: ratchet-task:latest
+framework: pytest
 timeout_s: 120
 is_canary: true
 

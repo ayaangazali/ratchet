@@ -1,0 +1,98 @@
+/* Ratchet console theme.
+   Two rules govern everything here: the gauntlet is never scrolled off screen,
+   and the approval bar is the only thing allowed to take the full width. */
+
+Screen {
+    background: #0d1117;
+    color: #c9d1d9;
+}
+
+#main {
+    height: 1fr;
+}
+
+#left {
+    width: 1fr;
+    min-width: 34;
+    border-right: solid #21262d;
+}
+
+#right {
+    width: 1fr;
+    min-width: 46;
+}
+
+.pane-title {
+    background: #161b22;
+    color: #8b949e;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#log {
+    height: 1fr;
+    padding: 0 1;
+    background: #0d1117;
+}
+
+#tree-scroll {
+    height: 1fr;
+    padding: 0 1;
+}
+
+#tree {
+    height: auto;
+}
+
+#counters {
+    height: auto;
+    padding: 1;
+    background: #161b22;
+    border-top: solid #21262d;
+}
+
+#budget {
+    height: 1;
+    padding: 0 1;
+    background: #161b22;
+    color: #8b949e;
+}
+
+#stages {
+    height: auto;
+    padding: 1;
+    background: #0d1117;
+}
+
+#approval {
+    display: none;
+    height: auto;
+    max-height: 18;
+    padding: 1 2;
+    background: #2d2400;
+    border: heavy #d29922;
+}
+
+#approval.armed {
+    display: block;
+}
+
+#approval-title {
+    width: 100%;
+    padding-bottom: 1;
+}
+
+#approval-body {
+    height: auto;
+    max-height: 10;
+    color: #e3b341;
+}
+
+#approval-buttons {
+    height: auto;
+    padding-top: 1;
+}
+
+#approval-buttons Button {
+    margin-right: 2;
+}

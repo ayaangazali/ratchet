@@ -1,285 +1,230 @@
 # Ratchet — the build plan
 
-Everything decided, everything to build, in the order to build it. Written to be
-handed to Claude Code and executed.
+What is decided, what is built, what is left, and the order to do it in. Written to
+be handed to Claude Code and executed.
 
 ---
 
-## 0. The one-liner, and why it wins
+## 0. The pitch, and why it isn't another wrapper
 
-> A coding agent that cannot decide it is done. Every step is a git commit, every
-> patch runs a verifier gauntlet, anything that regresses is rolled back to the last
-> green commit and fed back as the next observation, and the only action that leaves
-> the machine waits for a human.
+Ratchet is a coding agent harness where the agent never decides it's done — the tests
+do. Every step is a git commit plus a sandbox snapshot, and every candidate patch
+clears a verifier gauntlet (build, cheat check, fail-to-pass, pass-to-pass, types,
+lint, diff hygiene) before it sticks. Because each step is a restorable node, the run
+is a **tree search over repo states**, with the verifier's score as the value function
+and a scheduler deciding where to spend the next unit of compute. Stalled branches
+fork in parallel, dead ends are pruned, and the winning path exits as one clean
+squashed diff at a human approval gate.
 
-The brief asks for an agent that can **reach your tools**, **run its own code
-safely**, and **be stopped before it does damage**. Most submissions will do the
-third with a prompt. This does it with a `git reset --hard` the model cannot argue
-with. That is the whole pitch and every design decision below serves it.
+Three claims, each demonstrable in under thirty seconds:
 
----
-
-## 1. Confirmed facts about the event
-
-Verified from the hackathon pages on 29 Aug 2026:
-
-- Online submission deadline: **Aug 30, 8:00 PM London** (= 12:00 PDT Aug 30).
-  The in-person agenda you were given says submissions at **18:00 local**. These are
-  not the same clock — **confirm which one binds you** and work to the earlier.
-- Team size 1–4. Repo must be public. Deliverables: repo, README with setup, ~3 min
-  demo video, a write-up on how it uses TrueForge, and a
-  `## Qodo Code Review Evidence` section in the README linking merged PRs.
-- Every submission is considered for all tracks; a team wins at most one.
-- **Best Code Quality is judged on the Qodo review trail every submission carries.**
-  Direct pushes to `main` do not count. This is the cheapest prize to lose by
-  accident and the cheapest to secure: branch, PR, review, apply, merge, log it.
-- The official online track list is Best Use of TrueForge / Best Code Quality / Best
-  UI plus a blog prize; the in-person sheet you have adds a Bright Data track. Build
-  for both lists — the Bright Data work is load-bearing here anyway, not bolted on.
-
-### Tool facts worth knowing before you start
-
-**TrueForge** — `github.com/truefoundry/trueforge`, MIT, TypeScript. `npx
-@truefoundry/trueforge@latest` gives you local mode on `:8790` with SQLite and no
-login; Node ≥ 22.14 required. No TrueFoundry cloud account needed.
-
-- **Transport is SSE, and frames carry no `event:` name.** Dispatch on
-  `json.loads(data)["type"]`. The SSE `id` is a monotonic per-turn sequence number;
-  reconnect with `?after_sequence_number=N`. A finished turn's stream is collected
-  ~5 minutes later and returns **412** after that — hydrate from
-  `/turns/{id}/events` (durable) then attach.
-- **Approvals are a pause/resume, not a callback.** Declared per MCP server via
-  `require_approval_for_tools` (`@write`, `@destructive`, `@all`, or literal tool
-  names). The turn ends with `state.required_actions`; you resume by creating a
-  *new* turn whose input items are `user.tool_approval`. **Approval items and user
-  messages may not be mixed in one turn.**
-- **Sub-agents** are the built-in `create_sub_agent` tool (`{name, input}`).
-  Multiple calls in one assistant message run under `Promise.all`; the orchestrator
-  runs up to **5** in parallel. Results return as a single `tool.response` carrying
-  only the sub-agent's final message. Sub-agents **share the parent's sandbox** and
-  cannot see the parent conversation — restate everything.
-- **The sandbox** exposes exactly one tool, `exec`, and persists across turns within
-  a session. Pre-installed: Python 3.13, git, curl, jq, ripgrep. `pip install`
-  persists. Local sandbox egress is allowlisted to PyPI + GitHub only.
-- **There is no built-in web search.** It comes from MCP connectors; the shipped
-  catalog includes `bright-data`, `exa`, `tavily`, `github`, `deepwiki` and others.
-- Context: `compaction_threshold_tokens` (default 50000) — the docs show a different
-  key shape than the shipped schema; trust the schema. `iteration_limit` default 100,
-  server execution timeout 600s.
-- **No API-key auth in local mode.** Fine on localhost; a trap if you add OIDC.
-
-**Qodo** — hosted GitHub App via `app.qodo.ai/signin` → Integrations → GitHub, ~5
-minutes. The free open-source plan needs 200+ stars, so a fresh hackathon repo does
-**not** qualify — use the 14-day trial. Hosted v2 responds to `/agentic_review`,
-`/agentic_describe`, `/ask`, `/config`; v1/OSS speaks `/review`, `/improve`,
-`/implement`. Run `/config` in a PR comment once to find out which you have. Commit
-`.pr_agent.toml` and `best_practices.md`. Land at least one commit from the *Apply
-this suggestion* button so Qodo's contribution is visible in the commit trail.
-
-**Bright Data** — free tier is 5,000 requests/month, no card. CLI:
-`npx -p @brightdata/cli brightdata login`, then `brightdata add mcp --agent
-claude-code --global` and `brightdata skill add scraper-studio`. Scraper Studio has a
-**first-party self-healing feature** with an approval gate (`bdata scraper heal <id>
-"<what broke>"`, showing `preview_result` and `diff_summary`) — use it rather than
-claiming to have invented self-repair. For docs and changelogs the right surface is
-Web Unlocker with `data_format: "markdown"` (`POST https://api.brightdata.com/request`),
-plus SERP to find the page. There is no official `CLAUDE.md` template; the official
-mechanism is their skills repo, and putting the config in `scrapers.yaml` +
-`CLAUDE.md` is the version-controlled answer the track asks for.
+1. **The verifier is the loop condition, not the model's opinion.** Termination is
+   `result.green`, never a `<done>` token. Partial credit is a scalar so the search
+   can hill-climb instead of flipping a boolean.
+2. **Forking is cheap because we snapshot the sandbox, not just the repo.** A branch
+   inherits its parent's dependencies and warm cache. Everyone else re-runs
+   `pip install` per attempt; we explore ten nodes while they explore two.
+3. **The harness carries the weight.** Sub-agents, sandboxes, approvals, session
+   persistence, multi-provider routing — all TrueForge. We built the search and the
+   verifier. There is no container orchestration and no provider SDK in this repo.
 
 ---
 
-## 2. Architecture, and the one decision that matters
+## 1. What is already built
 
-The tempting design is: let the agent run shell in a sandbox, and check its work
-afterwards. **Do not.** If the agent has a shell in the graded tree, the verifier is
-advisory and every anti-tamper control becomes a suggestion.
+`make dev && make demo && make test` → 41 tests, ~40s, no Docker, no network.
 
-The design here inverts that:
+| piece | state |
+|---|---|
+| the seven-stage gauntlet with the exact score formula | **done**, `verifier/gauntlet.py` |
+| the fifteen lines of bash (test reset, markers, exit code outside them) | **done**, `verifier/eval_script.py` |
+| cheat detector: 12 rules, severity-graded, hard gate on critical | **done**, `verifier/cheat.py` |
+| test parsers: pytest, jest, vitest, go, cargo, with anti-spoof guards | **done**, `verifier/parsers.py` |
+| held-out test split, pooled into `f2p_ratio`, `delta` reported | **done** |
+| Node + Tree: restorable states, atomic persistence, rendering | **done**, `node.py` |
+| scheduler: score + novelty − depth + untried, budgets, stall rule | **done**, `scheduler.py` |
+| the search loop with parallel fan-out and pruning | **done**, `loop.py` |
+| negative-sibling injection | **done**, `context.py` |
+| git state: commit per node, park, restore, squash | **done**, `gitstate.py` |
+| sandbox interface + worktree fallback + `bench-snapshot` | **done**, `sandbox.py` |
+| three sub-agent roles with per-role model routing | **done**, `subagents.py` |
+| approval gate with a file fallback | **done**, `gate.py` |
+| signed hash-chained receipts + `ratchet audit` | **done**, `receipts.py` |
+| red-team battery: 10 attacks, 2 controls | **done**, `redteam.py` |
+| linear-vs-search eval suite with error bars | **done**, `evals/` |
+| the TUI: tree, stage rail, counters, budget, approval bar | **done**, `tui/` |
+| CLI: run, tree, rewind, diff, verify, ship, replay, bench, redteam, audit, evals | **done** |
+| offline everything: `--scripted` run, fixture, replay | **done** |
+| **harness sandbox provider wired to a real snapshot backend** | **left**, T2 |
+| **live model calls through TrueForge** | **left**, T3 (offline path proves the loop) |
+| **one live approval pause and denial** | **left**, T4 |
+| **docs oracle against a real page + a live repair** | **left**, T6 |
 
-```
-TrueForge  (owns the loop, context, MCP dispatch, sandbox, sub-agents, approvals)
-    │  tool calls                                    ▲ tool.approval_required
-    ▼                                                │
-Ratchet MCP server  — the only door into the graded tree
-    ├── repo_read / repo_grep / repo_tree   unrestricted reads
-    ├── dry_run                             grade without consequence
-    ├── propose_patch  ──►  THE PAWL  ──►  commit (green) | rollback (red)
-    ├── docs_lookup    ──►  Bright Data, pinned to the lockfile
-    ├── fan_out / arbitrate                 parallel branches, scored not voted
-    └── open_pull_request                   ← human-gated, the only egress
+---
+
+## 2. The loop, as built
+
+```python
+root = Node(commit, image=sandbox.snapshot(), score=gauntlet.run())
+while budget.ok() and not any(n.green for n in tree.frontier()):
+    node = scheduler.select(tree)                 # score + 0.3·novelty − 0.05·depth + 0.1·untried
+    if scheduler.stalled:                         # 3 expansions with no improvement
+        node, fanout = scheduler.stall_target(tree), 3   # highest-scoring SHALLOW node
+    ctx = context.assemble(repo_map, node.last_failure, diff_so_far, dead_ends)
+    for patch in subagents.generate(ctx, n=fanout):      # n>1 → n different providers
+        child_env = provider.fork(node.image)            # warm cache inherited
+        result = gauntlet.run(child_env, patch)
+        prune_and_park(child) if result.regressed else tree.add(child)
+    scheduler.observe(tree)
+gate.request(git.squash(root, tree.best()))
 ```
 
-Consequences, all good:
+Three details that are easy to get wrong and are worth defending in review:
 
-- The agent still gets the TrueForge sandbox for scratch work — reproduce the bug,
-  prototype, run throwaway scripts — and none of it is graded, so it is free to be
-  messy there. That is a *better* story than denying it a shell.
-- The graded worktree is on the host, so the pawl can revert test files, run with
-  `--network=none`, and commit or roll back atomically.
-- Everything the agent can do is an MCP tool, which means TrueForge's approval
-  machinery, sub-agent threading and context management all apply for free.
-- Candidate branches key off an explicit `branch` argument the parent assigns, so
-  fan-out needs no undocumented thread metadata.
-
-**There is no `done` tool.** This is the design, stated as an absence.
+- **Fork from the node, not from HEAD**, or you have a loop wearing a tree costume.
+- **Fan out from a shallow node when stuck.** Expanding the deepest node when you are
+  stuck is how a search tunnels into a dead branch and calls it progress.
+- **Pruned work is parked, never destroyed** (`refs/ratchet/pruned/<node>`), and its
+  one-line summary goes into its siblings' next prompt.
 
 ---
 
-## 3. Feature list
+## 3. The gauntlet
 
-### P0 — without these there is no submission (build first, in this order)
+| # | stage | fails how | weight |
+|---|-------|-----------|--------|
+| 1 | build / install | non-zero exit | hard gate, score 0 |
+| 2 | cheat check (static, on the diff) | any critical pattern | hard gate, score 0 |
+| 3 | fail-to-pass | target tests still failing | 0.5 |
+| 4 | pass-to-pass | a previously-green test is now red | hard gate — regression |
+| 5 | types | new type errors | 0.2 |
+| 6 | lint | new violations only | 0.1 |
+| 7 | diff hygiene | unrelated files, size blowup | 0.2 |
 
-| # | Feature | Notes |
-|---|---------|-------|
-| 1 | `TaskSpec` with `f2p_visible` / `f2p_hidden` / `p2p` / `protected_paths` | the held-out split is the differentiator; get it right first |
-| 2 | Eval script: apply → `git checkout base -- tests/` → re-apply pristine tests → markers → exit code outside the markers | ~15 lines of bash, the highest-leverage code in the repo |
-| 3 | Log parser + `suite_ran` sentinel + exit-code cross-check | empty log must never grade as a pass |
-| 4 | Grader with the SWE-bench skip asymmetry | skipped F2P ≠ pass; skipped P2P ≠ regression; missing = failure |
-| 5 | `patchlint` cheat detector | path lint, deleted tests, skip markers, `sys.exit(0)`, always-`__eq__`, weakened assertions, special-casing via literal overlap |
-| 6 | Verifier score with the `visible − hidden` gap penalty | makes it a verifier, not a test runner |
-| 7 | Git ledger: commit per accepted step, park rejected at `refs/ratchet/rejected/*`, `reset --hard` to last green | rollback + audit trail + time travel, free |
-| 8 | Ratchet MCP server over streamable-http | the whole tool surface |
-| 9 | TrueForge session + SSE pump + observation feedback | the loop |
-| 10 | Approval gate on `open_pull_request` | `require_approval_for_tools`, resumed with `user.tool_approval` |
-| 11 | Demo repo + honest/cheat/canary patches + `ratchet verify` CLI | the demo must work with no model and no network |
-| 12 | Qodo installed, `.pr_agent.toml` committed, first PR reviewed | do this at hour 1, not hour 7 |
-
-### P1 — these win tracks (build second)
-
-| # | Feature | Track |
-|---|---------|-------|
-| 13 | The TUI: stream + gate rail + ratchet spine + scoreboard + full-width approval bar | Best UI |
-| 14 | Stall detection → `fan_out` → `create_sub_agent` → `arbitrate` | Best Use of TrueForge |
-| 15 | Docs oracle: lockfile-pinned fetch, schema validation, heading-based repair, `scrapers.yaml` in git | Bright Data |
-| 16 | Failure-triggered docs: import/attribute/kwarg errors auto-attach current docs to the observation | Bright Data — proves the data is *used*, not decorative |
-| 17 | The canary task | the demo moment nobody else has |
-| 18 | Self-repair demo: break `scrapers.yaml` on purpose, show the `docs.heal` event and the resulting git diff | Bright Data judging criterion #5 |
-| 19 | Sub-agent threads rendered inline in the TUI with their own thread ids | Best UI + Best Use of TrueForge in one widget |
-| 20 | Qodo *Apply this suggestion* commit landed and linked in the README table | Best Code Quality |
-
-### P2 — only if you are ahead (and each is a genuine upgrade, not filler)
-
-| # | Feature | Why |
-|---|---------|-----|
-| 21 | Dogfood run: point Ratchet at its own repo with a seeded bug; the PR it opens is reviewed by Qodo | "the harness kept building itself" stops being a tagline |
-| 22 | AST-normalised majority vote across candidates (strip docstrings, `ast.unparse`, vote on canonical diffs) | Agentless's ranking signal, ~20 lines |
-| 23 | Reproduction-test generation: agent writes a failing test first, verifier confirms it fails pre-patch | high-precision signal, and it demos beautifully |
-| 24 | Per-candidate container (not just worktree) with a hard memory cap | stronger isolation story |
-| 25 | `ratchet replay <run>` — re-render a finished run from the bus file | judges love a replay; also saves you if the live run dies |
-| 26 | LLM integrity judge as a *score term only*, never a gate | rubric axis from the agentic-rubrics work |
-| 27 | Coverage-greedy P2P subset selection for speed | only if the suite is slow enough to matter |
-
-### Explicitly not building
-
-Learned trajectory verifiers, MCTS, a custom model, a web UI, auth, multi-repo
-support, a plugin system. Every one of these is a day of work that no judge will see.
-
----
-
-## 4. Schedule (the 09:00–18:00 in-person day)
-
-Times assume two people. Solo: cut P2 entirely and start the video at 15:30.
-
-| Time | Work | Done means |
-|------|------|-----------|
-| 09:00–10:00 | Breakfast, accounts: TrueForge running locally, Qodo app installed on the repo, Bright Data key in `.env`, repo created **public** with the first empty PR open | three green checkmarks, `npx @truefoundry/trueforge` serving on :8790 |
-| 10:00–11:00 | Workshops. One person listens for approval + sub-agent details; the other starts P0 #1–#4 | `parse`/`grade` unit tests passing |
-| 11:00–12:00 | P0 #2–#7: eval script, patchlint, score, ledger | `ratchet verify` disqualifies the cheat patch with no model in the loop |
-| 12:00–13:00 | P0 #8–#10: MCP server, TrueForge session, first real agent loop | one honest patch accepted end to end |
-| 13:00–14:00 | P0 #11–#12 + **first Qodo review dealt with**; merge PR #1 | README has a real row in the Qodo table |
-| 14:00–15:00 | Pizza; P1 #13 the TUI (this is a whole person's afternoon — assign it now) | gate rail and spine render off the bus file |
-| 15:00–16:00 | P1 #14 fan-out + #17 canary | stall → three sub-agents → scoreboard, on screen |
-| 16:00–16:45 | P1 #15/#16/#18 docs oracle and the break-it-on-purpose demo | `docs.heal` event + `scrapers.yaml` diff |
-| 16:45–17:15 | **Freeze.** No new features. Run the demo three times start to finish | it works three times |
-| 17:15–17:45 | Record the video, write the README write-up, fill the Qodo table | video uploaded |
-| 17:45–18:00 | Submit. Then, and only then, write the blog post | submitted with 15 minutes spare |
-
-**Hard rules.** Feature freeze at 16:45 regardless of what is unfinished. The video
-gets recorded even if a feature is missing — an unrecorded demo scores zero. Merge a
-PR every 90 minutes so the Qodo trail is real rather than retrofitted.
-
----
-
-## 5. Judging map — what to point at, per track
-
-**Best Use of TrueForge** ("the harness is doing the work rather than sitting under a
-thin wrapper"). Show, in this order: `agent/agent.json` (MCP servers with per-tool
-approval policy, sandbox on, sub-agents on, compaction configured) → a live
-`tool.approval_required` pause → three sub-agent threads with distinct `thread_id`s
-in the stream → the bus file proving every one of those events came off TrueForge's
-SSE stream rather than being simulated. Then the argument: *we deleted the loop, the
-context manager, the OAuth dance and the approval interrupt from our codebase, and
-spent the day on the only thing the harness cannot know — what counts as progress.*
-
-**Best Code Quality.** The Qodo table in the README with merged PR links, at least
-one commit authored by *Apply this suggestion*, `.pr_agent.toml` with real
-`extra_instructions` (not defaults), `best_practices.md`, CI running ruff + mypy +
-pytest on every PR, and 22 tests that run with no network. Say the line: *we ship a
-tool whose thesis is that unverified agent output shouldn't merge, so nothing merges
-here unreviewed either.*
-
-**Best UI** ("an interface a stranger could pick up and drive; shows what the agent
-is doing, what it is waiting on, what it did, and asks before the irreversible step
-rather than after"). Map it literally: the stream, the gate rail, the spine, and an
-approval bar that takes the full width and blocks. Mention the crash path — an
-approval can still be granted with `echo '{"allow":true}' > .ratchet/approvals/<id>.json`.
-
-**Bright Data.** Config in `scrapers.yaml`, in git, referenced from `CLAUDE.md`;
-lockfile-pinned versions so the fetch is specific rather than generic; validation on
-every fetch; break the extractor live and show the repair as a diff plus a `history`
-entry; escalation to `bdata scraper heal` for collector-backed sources with the
-approval gate wired to the same human gate as the PR. Close with the criterion they
-published: the data is fresh, structured, and actually used — it lands in the
-failure observation the agent reads next.
-
-**Blog post.** Title: *"The agent doesn't get a vote."* Structure: the reward-hacking
-evidence (ImpossibleBench ~50%, Anthropic's production RL findings) → the design
-inversion (verifier outside the agent) → the fifteen lines of bash that do most of
-the work → the canary and why it has zero false positives → what TrueForge gave us
-for free → what broke on the day. Publish the same evening; the writing is easier
-while it still hurts.
-
----
-
-## 6. Risk register
-
-| Risk | Likelihood | Mitigation, already built |
-|---|---|---|
-| Venue Wi-Fi or model API dies | high | `ratchet verify` demos the entire verification story offline; `Backend.LOCAL` needs no Docker |
-| Docker Desktop not working on the demo laptop | medium | automatic fallback to `Backend.LOCAL`, labelled as less safe in the UI |
-| TrueForge rejects our custom MCP server URL in the agent spec | medium | register it in Settings → Connectors and reference by name instead; keep both shapes in `agent/agent.json` comments |
-| SSE stream drops mid-demo | medium | hydrate from `/turns/{id}/events`, then re-attach with `after_sequence_number` |
-| The model refuses to cheat, so the DQ demo never fires naturally | **high** | never rely on it: `patches/cheat.diff` and `patches/canary_hack.diff` are pre-built and fed deliberately |
-| Held-out test names leak into a prompt | medium | invariant #5 in `CLAUDE.md`; grep for `f2p_hidden` in every observation path before freeze |
-| Qodo trial not active / OSS plan rejected (needs 200+ stars) | medium | use the 14-day trial, set it up in hour 1, verify a review appears on PR #1 |
-| Fan-out eats the whole time budget | medium | cap at 3 candidates, `MAX_PARALLEL_SUB_AGENTS` is 5 anyway; arbitrate on a timer |
-| Run takes longer than the video | high | record the beats separately and cut; the spine makes non-linear editing legible |
-
----
-
-## 7. Handing this to Claude Code
-
-The repository already contains the working core. Verify first, then extend:
-
-```bash
-make dev && make demo && make test     # 22 tests, ~10s, no network
+```
+score = 0.5·f2p_ratio + 0.2·types_clean + 0.1·lint_clean + 0.2·diff_hygiene
+green = f2p_ratio == 1.0 and p2p_intact and cheat_clean and build_ok
 ```
 
-Suggested task order, one PR each so the Qodo trail builds itself:
+Cheat rules currently shipping: `protected_path`, `test_deleted`,
+`test_file_emptied`, `skip_marker`, `assertion_removed`, `assertion_weakened`,
+`assertion_downgraded`, `hard_exit`, `always_equal`, `report_hook_tamper`,
+`runtime_test_write`, `mocked_in_source`, `config_loosened`, `env_bypass`,
+`monkeypatch_assert`, `special_casing`, `broad_except_pass`, `mass_refactor`,
+`log_spoofed`, `canary_passed`.
 
-1. **Wire the live loop.** `make serve`, `make run`, confirm `task_brief` and
-   `propose_patch` round-trip against a real TrueForge session. Fix whatever the
-   agent-spec schema rejects; keep `agent/agent.json` in sync.
-2. **Docker task image.** `make image`, then flip `RATCHET_BACKEND=docker` and make
-   the end-to-end tests pass through the container path.
-3. **TUI polish.** Run `make console` against a recorded bus file first; the widgets
-   are already driven entirely by the bus, so this needs no model.
-4. **Docs oracle against a real page.** Pick one dependency you actually use, set its
-   source in `scrapers.yaml`, run a lookup, then break the `section:` on purpose and
-   watch it repair. Commit the resulting diff — it is the Bright Data evidence.
-5. **Dogfood (P2 #21).** Seed a bug in `parse.py`, point Ratchet at its own repo, let
-   it open the PR, and let Qodo review the agent's own patch.
+`runtime_test_write` exists because our own red team found it: reverting test files
+before the run does nothing if the *source* rewrites them at import time, after the
+revert. That is the value of shipping an eval of your own verifier.
 
-Every one of these is independently demoable, so stopping after any of them still
-leaves a submission.
+---
+
+## 4. The day, hour by hour
+
+Workshops end at 11:00; submission at 18:00. Seven hours, four lanes.
+
+| time | work | lane |
+|------|------|------|
+| pre-event | 3 target repos picked, base images built, parsers verified on each | all |
+| 11:00–11:15 | **`make bench` — the snapshot decision** | B |
+| 11:00–13:00 | verifier hardening on a real repo; second task file | A |
+| 11:00–13:00 | wire `HarnessProvider` **or** prebuild the fallback base + warm venv | B |
+| 13:00–15:00 | live models through the harness; prompt tuning until diffs parse | C |
+| 13:00–15:00 | docs oracle against a real page; break it on purpose | A |
+| 15:00–16:00 | the approval gate live, both paths; multi-provider fan-out on screen | C |
+| 15:00–17:00 | the console | D |
+| 16:00–16:45 | self-eval run on the real repos; record the numbers | A |
+| 16:45–17:15 | **record the backup demo video** | D |
+| 17:15–17:45 | Qodo pass on our own PRs, README, blog draft | all |
+| **17:45** | **code freeze. Nothing merges after this.** | — |
+
+**Rules.** Headless first, always — the TUI wraps a working loop, and if it is
+half-done at 17:30 you ship headless and still demo. Merge a PR every ninety minutes
+so the Qodo trail is real rather than retrofitted. The snapshot decision is timeboxed
+to 45 minutes total; the fallback is a first-class path, not an apology.
+
+---
+
+## 5. Sponsor mapping
+
+**TrueForge.** Three distinct sub-agent roles, not one: the cartographer (cheap
+model, maps the repo once at startup so no later prompt pays to re-read the tree),
+the generators (strong models, one per branch during fan-out, deliberately on
+*different providers* so diversity is structural rather than temperature noise), and
+the reviewer (runs over each candidate; advisory, because a model that can veto is a
+model that can be argued with). Sandboxes give per-branch isolation so candidates
+execute simultaneously without colliding. Approvals are the final node in the state
+machine — no push, no PR, no destructive git op without a human seeing one squashed
+diff. Session persistence is what makes `rewind` and reconnect real.
+
+> The anti-pattern that loses this track is shelling out to Docker. If you are
+> writing subprocess orchestration, stop: that is the harness's job, and doing it
+> yourself throws away the argument. `grep -r "docker run" ratchet/` returns nothing,
+> and that is a deliberate design property.
+
+**Qodo.** Required for the code-quality track and thematically free: we ship a tool
+whose thesis is that unverified agent output shouldn't merge, so every PR here goes
+through Qodo and is dealt with before merge. `.pr_agent.toml` carries real review
+instructions — leakage of held-out test names, paths that could set `green` outside
+the gauntlet, weakened sandbox flags — not defaults.
+
+**Bright Data.** The agent writes against APIs that changed six months ago. The docs
+oracle pins versions from the lockfile, fetches through the CLI with a Web Unlocker
+fallback, validates every fetch against an `expect` block, and repairs itself by
+relocating sections by heading when a site restructures — writing the fix back into
+`scrapers.yaml` with a timestamp and a reason, so the repair is a reviewable diff.
+Sources with a `collector_id` escalate to Bright Data's own self-healing, whose
+approval gate is wired to the same human gate as the pull request.
+
+**OpenAI.** Cartographer and reviewer roles, plus one of the fan-out providers. Show
+the cost-per-solve line from the budget bar; judges like a number.
+
+---
+
+## 6. Risks and cut lines
+
+| risk | mitigation |
+|---|---|
+| snapshot forking slow or flaky | decided by `make bench` before noon; worktree fallback already built and tested |
+| test parsing is per-framework and fiddly | five parsers already ship with tests; verify each target repo **before** the day, add no sixth on the day |
+| the tree UI eats the afternoon | it renders off the bus and there is a fixture; headless works without it |
+| no repo ready at demo time | `make demo` seeds one in two seconds, and it is in CI |
+| budget runaway during the demo | hard caps on nodes, wall clock and dollars, visible in the TUI |
+| a stale demo repo makes the verifier look broken | `redteam` refuses to run when the target tests already pass at HEAD |
+| the model refuses to cheat, so the DQ never fires live | never rely on it — both cheating patches are pre-built and fed deliberately |
+| venue Wi-Fi dies | six offline commands demonstrate every claim (`DEMO.md` §6) |
+
+**If behind at 16:00, cut in this order:** deterministic replay → novelty bonus →
+negative-sibling injection → the TUI (fall back to `ratchet tree` and stdout).
+**Never cut the verifier.** Without the gauntlet this is a wrapper and the pitch
+collapses.
+
+---
+
+## 7. The flex
+
+Ship the harness with its own eval suite and run it on itself. `make evals` holds the
+generator fixed and varies only the machinery — same bugs, same draws, same call
+budget — and reports pass rate with error bars plus the number of cheating patches
+that persisted:
+
+```
+overall   linear 58% ±14   ·   search 100% ±0
+cheating patches that persisted   linear 8   ·   search 0
+```
+
+Then, in the demo: *"we changed the scheduler at 15:00 — here's the regression our own
+harness caught."* No hackathon team shows a controlled experiment on its own
+submission, and it proves the verifier is real because you pointed it at yourselves.
+
+---
+
+## 8. Handing it to Claude Code
+
+`HANDOFF.md` is the briefing, `TASKS.md` the ordered backlog with acceptance criteria
+and lanes, `CLAUDE.md` the contract, `RESEARCH.md` every verified tool fact and URL so
+nobody searches twice. Four slash commands live in `.claude/commands/`:
+`/verify`, `/harden`, `/ship`, `/demo`.
+
+Start by running §1 of `HANDOFF.md`. If `make redteam` does not print 10/10, that is
+the only thing that matters until it does.

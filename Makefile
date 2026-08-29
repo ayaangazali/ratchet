@@ -1,46 +1,58 @@
-.PHONY: dev test lint fmt demo redteam serve run console replay audit clean image fixture
+.PHONY: dev test lint fmt demo redteam evals bench serve run console replay audit clean image fixture
 
 dev:
 	pip install -e ".[dev]"
 
 test:
-	RATCHET_BACKEND=local python -m pytest -q
+	python -m pytest -q
 
 lint:
-	ruff check src tests && mypy src/ratchet --ignore-missing-imports
+	ruff check ratchet tests scripts && mypy ratchet --ignore-missing-imports
 
 fmt:
-	ruff check --fix src tests
+	ruff check --fix ratchet tests scripts
 
 demo:
 	python -m ratchet.cli demo --dir demo-repo
 
+# The verifier's own eval. Ten known cheating patterns, two controls that must pass.
 redteam:
 	python -m ratchet.cli redteam --repo demo-repo
 
-serve:
-	RATCHET_REPO=demo-repo RATCHET_TASK=tasks/demo-001-slugify/task.yaml python -m ratchet.cli serve
+# Linear vs search on our own seeded bugs, with error bars.
+evals:
+	python -m ratchet.cli evals --repo demo-repo --trials 6
+
+# The pre-noon decision: real snapshots, or the worktree fallback.
+bench:
+	python -m ratchet.cli bench-snapshot --repo demo-repo
+
+# A complete search with no model, no key and no network.
+run-offline:
+	python -m ratchet.cli run --repo demo-repo --scripted demo-repo/patches/scripted.json
 
 run:
-	RATCHET_REPO=demo-repo RATCHET_TASK=tasks/demo-001-slugify/task.yaml python -m ratchet.cli run
+	python -m ratchet.cli run --repo demo-repo
 
 console:
 	python -m ratchet.cli console --repo demo-repo
 
 fixture:
 	python scripts/make_fixture.py .ratchet/fixture.bus.jsonl
-	@echo 'now: python -m ratchet.cli console --bus .ratchet/fixture.bus.jsonl'
-
-image:
-	docker build -t ratchet-task:latest -f Dockerfile.task .
+	@echo "now: python -m ratchet.cli console --bus .ratchet/fixture.bus.jsonl"
 
 replay:
 	python -m ratchet.cli replay --bus .ratchet/fixture.bus.jsonl
 
 audit:
-	@ls .ratchet/*.receipts.jsonl >/dev/null 2>&1 || (echo "no run to audit yet"; exit 1)
-	python -m ratchet.cli audit --receipts $$(ls -t .ratchet/*.receipts.jsonl | head -1)
+	python -m ratchet.cli audit --repo demo-repo
+
+tree:
+	python -m ratchet.cli tree --repo demo-repo
+
+image:
+	docker build -t ratchet-task:latest -f Dockerfile.task .
 
 clean:
-	rm -rf .ratchet demo-repo .pytest_cache .ruff_cache .mypy_cache
+	rm -rf .ratchet demo-repo .pytest_cache .ruff_cache .mypy_cache .ratchet-wt-*
 	git worktree prune

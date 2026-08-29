@@ -1,15 +1,20 @@
-"""The receipt chain is only worth having if it actually breaks when tampered with."""
+"""The receipt chain is only worth having if it breaks when someone edits history.
+
+Each of these tests is a specific way to fake a run: rewrite a past result, append a
+forged green one, drop a receipt from the middle. All three have to be detectable
+without trusting anything the agent could reach.
+"""
 
 from __future__ import annotations
 
 import json
 
-from ratchet.models import Decision, Verdict
+from ratchet.models import GauntletResult, Outcome
 from ratchet.receipts import ReceiptBook
 
 
-def _v(attempt: str, decision: Decision, score: float) -> Verdict:
-    return Verdict(attempt_id=attempt, task_id="t", branch="trunk", decision=decision, score=score)
+def _r(outcome: Outcome, score: float) -> GauntletResult:
+    return GauntletResult(outcome=outcome, score=score, green=outcome is Outcome.GREEN)
 
 
 def _book(tmp_path) -> ReceiptBook:
@@ -18,21 +23,23 @@ def _book(tmp_path) -> ReceiptBook:
 
 def test_chain_verifies_when_untouched(tmp_path):
     book = _book(tmp_path)
-    book.record(_v("a1", Decision.ACCEPTED, 0.9))
-    book.record(_v("a2", Decision.REJECTED, 0.4))
-    book.record(_v("a3", Decision.ACCEPTED, 0.99))
+    book.record_result("root", _r(Outcome.PROGRESS, 0.3))
+    book.record_result("0f3a", _r(Outcome.REGRESSED, 0.4))
+    book.record_result("4f2a", _r(Outcome.GREEN, 1.0))
     ok, problems = book.verify()
     assert ok, problems
     assert book.summary()["receipts"] == 3
+    assert book.summary()["chain"] == "intact"
 
 
-def test_editing_a_past_verdict_breaks_the_chain(tmp_path):
+def test_rewriting_a_past_result_breaks_the_chain(tmp_path):
     book = _book(tmp_path)
-    book.record(_v("a1", Decision.REJECTED, 0.2))
-    book.record(_v("a2", Decision.ACCEPTED, 0.95))
+    book.record_result("0f3a", _r(Outcome.REGRESSED, 0.2))
+    book.record_result("4f2a", _r(Outcome.GREEN, 0.95))
+
     lines = book.path.read_text().splitlines()
     first = json.loads(lines[0])
-    first["decision"] = "accepted"          # rewrite history: the red one was green all along
+    first["outcome"] = "green"  # "that pruned node was fine all along"
     lines[0] = json.dumps(first, separators=(",", ":"))
     book.path.write_text("\n".join(lines) + "\n")
 
@@ -42,13 +49,12 @@ def test_editing_a_past_verdict_breaks_the_chain(tmp_path):
     assert any("chain broken" in p for p in problems)
 
 
-def test_appending_a_forged_verdict_fails_signature(tmp_path):
+def test_appending_a_forged_green_fails_the_signature(tmp_path):
     book = _book(tmp_path)
-    real = book.record(_v("a1", Decision.REJECTED, 0.1))
+    real = book.record_result("0f3a", _r(Outcome.REGRESSED, 0.1))
     forged = {
-        "seq": 1, "prev": real.digest(), "attempt_id": "fake", "task_id": "t", "branch": "trunk",
-        "decision": "accepted", "score": 1.0, "commit_sha": "deadbeef", "verdict_digest": "0" * 64,
-        "findings": [], "ts": 0.0, "sig": "f" * 64,
+        "seq": 1, "prev": real.digest(), "node_id": "fake", "outcome": "green", "score": 1.0,
+        "green": True, "result_digest": "0" * 64, "findings": [], "ts": 0.0, "sig": "f" * 64,
     }
     with book.path.open("a") as fh:
         fh.write(json.dumps(forged, separators=(",", ":")) + "\n")
@@ -61,9 +67,18 @@ def test_appending_a_forged_verdict_fails_signature(tmp_path):
 def test_dropping_a_receipt_is_detected(tmp_path):
     book = _book(tmp_path)
     for i in range(3):
-        book.record(_v(f"a{i}", Decision.REJECTED, 0.1 * i))
+        book.record_result(f"n{i}", _r(Outcome.PROGRESS, 0.1 * i))
     lines = book.path.read_text().splitlines()
-    book.path.write_text("\n".join([lines[0], lines[2]]) + "\n")   # drop the middle one
+    book.path.write_text("\n".join([lines[0], lines[2]]) + "\n")  # drop the middle
     ok, problems = book.verify()
     assert not ok
     assert any("sequence number" in p or "chain broken" in p for p in problems)
+
+
+def test_the_key_is_not_readable_from_the_repo_tree(tmp_path):
+    """The agent never has a path to the key. Check the mode anyway — defence in
+    depth is free, and someone will eventually run this on a shared machine."""
+    book = _book(tmp_path)
+    book.record_result("root", _r(Outcome.PROGRESS, 0.1))
+    mode = book.key_path.stat().st_mode & 0o777
+    assert mode == 0o600

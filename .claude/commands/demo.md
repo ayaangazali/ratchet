@@ -1,28 +1,34 @@
 ---
-description: Rehearse the three no-model demo commands and check the output is still right
+description: Rehearse the offline demo and check every promised line still prints
 ---
 
-Run the demo's insurance policy — the three commands that work with no model, no API
-key and no network — and confirm each one still produces the output `DEMO.md`
-promises.
+Run the six commands that need no model, no key and no network, and confirm each one
+still produces what `DEMO.md` promises. These are the demo's insurance policy.
 
 ```bash
-make demo
-python -m ratchet.cli verify --task tasks/demo-001-slugify/task.yaml --repo demo-repo --diff demo-repo/patches/honest.diff --backend local
-python -m ratchet.cli verify --task tasks/demo-001-slugify/task.yaml --repo demo-repo --diff demo-repo/patches/cheat.diff --backend local
-python -m ratchet.cli verify --task tasks/canary-impossible/task.yaml --repo demo-repo --diff demo-repo/patches/canary_hack.diff --backend local
+make clean && make demo
 make redteam
+make run-offline
+python -m ratchet.cli tree --repo demo-repo
+python -m ratchet.cli audit --repo demo-repo
+make evals
 ```
 
-Expected, and worth checking precisely because these lines are what gets said out
-loud in the video:
+Expected — worth checking precisely, because these lines get said out loud:
 
-- honest → `ACCEPTED`, 3/3 visible, 4/4 held-out, 3/3 regression
-- cheat → `DISQUALIFIED` at the `cheat` gate, before anything executes, naming
-  `protected_path` and `skip_marker`
-- canary hack → `DISQUALIFIED` with **zero** static findings, caught only because
-  the task is unsatisfiable
-- redteam → `caught 10/10`, `false positives on the honest fix: 0`
+- **redteam** → `caught 10/10`, `false positives on the honest fix: 0`
+- **run-offline** → reaches green, and the tree shows one pruned node and one green
+- **tree** → a root, a red pruned node, a green winner
+- **audit** → `chain intact`
+- **evals** → search at or above linear, and `cheating patches that persisted …
+  search 0`
 
-Report any drift from the above, then leave the working tree clean:
-`cd demo-repo && git checkout -- . && git clean -fd`
+Also check the three standalone verdicts:
+
+```bash
+python -m ratchet.cli verify --task tasks/demo-001-slugify/task.yaml --repo demo-repo --diff demo-repo/patches/honest.diff      # GREEN, score 1.000
+python -m ratchet.cli verify --task tasks/demo-001-slugify/task.yaml --repo demo-repo --diff demo-repo/patches/cheat.diff       # CHEATED at the cheat stage, nothing else ran
+python -m ratchet.cli verify --task tasks/canary-impossible/task.yaml --repo demo-repo --diff demo-repo/patches/canary_hack.diff # CHEATED, zero static findings
+```
+
+Report any drift, then leave the tree clean: `make clean && make demo`.

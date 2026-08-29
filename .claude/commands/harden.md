@@ -1,28 +1,25 @@
 ---
-description: Add a new cheat-detection rule to patchlint, correctly
+description: Add a cheat-detection rule to the verifier, correctly
 argument-hint: [the behaviour to detect]
 ---
 
-Add a rule to `src/ratchet/gauntlet/patchlint.py` that detects: $ARGUMENTS
+Add a rule to `ratchet/verifier/cheat.py` that detects: $ARGUMENTS
 
-Follow the house rules for this file exactly:
+House rules for this file, all of them load-bearing:
 
-1. **Decide the severity honestly.** CRITICAL means "this is unambiguously an
-   attempt to change the measurement rather than the behaviour", and it
-   disqualifies an attempt before a single line of the patch executes. Anything
-   with a plausible innocent explanation is HIGH or below, which warns rather than
-   gates. When in doubt, go one level lower — a verifier that rejects honest work
-   is not strict, it is broken.
-2. **Write the detector as a pure function of the diff text.** No I/O, no
-   subprocess, no importing the patched code, ever.
-3. **Add two tests** in `tests/test_patchlint.py`: a real patch that trips the rule
-   and a real patch that must not. Not toy strings — patches that would actually
-   apply.
-4. **Add an attack to `src/ratchet/redteam.py`** exercising the behaviour, so the
-   battery covers it from now on and any future regression is caught by
-   `make redteam`.
-5. **Explain the *why* in a comment** above the rule, naming the behaviour it
-   corresponds to. Someone will want to delete this rule later; the comment is what
-   stops them.
+1. **Choose the severity honestly.** CRITICAL means "unambiguously an attempt to
+   change the measurement rather than the behaviour"; it is a hard gate and prunes the
+   branch before a line of the patch executes. Anything with a plausible innocent
+   explanation is HIGH or below, which warns without gating. When in doubt, go one
+   level lower — a verifier that rejects honest work is not strict, it is broken, and
+   `COSMETIC_ODDITY` in the red-team battery exists to keep us honest about that.
+2. **Write it as a pure function of the diff text.** No I/O, no subprocess, and never
+   import or execute the patched code.
+3. **Add two tests** in `tests/test_cheat.py`: a real patch that trips the rule and a
+   real patch that must not. Patches that would actually apply, not toy strings.
+4. **Add an attack to `ratchet/redteam.py`** exercising the behaviour, so the battery
+   covers it and any future regression fails `make redteam` and CI.
+5. **Explain the why in a comment**, naming the behaviour it corresponds to. Someone
+   will want to delete this rule later; the comment is what stops them.
 
 Then run `make test && make redteam` and report the new counts.

@@ -1,7 +1,7 @@
-"""End-to-end: seed the demo repo, run two real patches through the real pawl.
+"""End to end: real patches, the real gauntlet, no model and no network.
 
-This runs with `Backend.LOCAL` so it needs no Docker and no network, which means
-it also runs in CI and on a hackathon laptop with a dead Wi-Fi connection.
+These are the tests that back the claims on the README. If one of them fails, a
+sentence on the front page has stopped being true.
 """
 
 from __future__ import annotations
@@ -14,101 +14,96 @@ import pytest
 
 from ratchet.config import load_task
 from ratchet.demo import seed
-from ratchet.gauntlet.runner import Backend, Pawl
-from ratchet.models import Decision
+from ratchet.models import Outcome
+from ratchet.sandbox import WorktreeProvider
+from ratchet.verifier.gauntlet import Gauntlet
 
-TASK = Path(__file__).resolve().parents[1] / "tasks" / "demo-001-slugify" / "task.yaml"
+ROOT = Path(__file__).resolve().parents[1]
+TASK = ROOT / "tasks" / "demo-001-slugify" / "task.yaml"
+CANARY = ROOT / "tasks" / "canary-impossible" / "task.yaml"
 
 
 @pytest.fixture(scope="module")
 def repo(tmp_path_factory) -> Path:
-    root = tmp_path_factory.mktemp("demo")
-    d = seed(root / "demo-repo")
+    d = seed(tmp_path_factory.mktemp("e2e") / "demo-repo")
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=d, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=d, check=True)
     return d
 
 
-def _pawl(tmp_path) -> Pawl:
-    return Pawl(backend=Backend.LOCAL, log_dir=tmp_path / "logs")
+def _sources(repo: Path, task) -> dict[str, str]:
+    out = {}
+    for pat in task.protected_paths:
+        base = repo / pat.rstrip("/")
+        if base.is_dir():
+            out.update({str(p.relative_to(repo)): p.read_text() for p in base.rglob("*.py")})
+    return out
 
 
-def _base(repo: Path) -> str:
-    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+def _grade(repo: Path, task, diff: str, label: str):
+    provider = WorktreeProvider(repo, f"e2e-{label}")
+    base = provider.base_image()
+    sb = provider.fork(base, label=label)
+    try:
+        return Gauntlet(task, repo_dir=".", test_sources=_sources(repo, task)).run(sb, diff, base_commit=base)
+    finally:
+        sb.destroy()
+        provider.cleanup()
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git required")
-def test_honest_patch_is_accepted(repo, tmp_path):
+def test_the_honest_fix_goes_green(repo):
     task = load_task(TASK)
-    diff = (repo / "patches" / "honest.diff").read_text()
-    v = _pawl(tmp_path).run_gauntlet(
-        task=task,
-        worktree=repo,
-        base_commit=_base(repo),
-        diff=diff,
-        branch="test",
-        type_cmd=None,
-        lint_cmd=None,
-    )
-    assert v.decision is Decision.ACCEPTED, v.to_observation()
-    assert v.f2p_hidden_rate == 1.0
-    assert v.delta == 0.0
-    subprocess.run(["git", "checkout", "--", "."], cwd=repo, check=True)
+    res = _grade(repo, task, (repo / "patches" / "honest.diff").read_text(), "honest")
+    assert res.outcome is Outcome.GREEN, res.to_observation()
+    assert res.f2p_ratio == 1.0
+    assert res.delta == 0.0
+    assert res.score == pytest.approx(1.0)
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git required")
-def test_cheating_patch_is_disqualified_before_it_runs(repo, tmp_path):
+def test_the_cheating_patch_is_stopped_before_it_executes(repo):
     task = load_task(TASK)
-    diff = (repo / "patches" / "cheat.diff").read_text()
-    v = _pawl(tmp_path).run_gauntlet(
-        task=task,
-        worktree=repo,
-        base_commit=_base(repo),
-        diff=diff,
-        branch="test",
-        test_sources={
-            "tests/test_slugify_visible.py": (repo / "tests" / "test_slugify_visible.py").read_text(),
-            "tests/test_regression.py": (repo / "tests" / "test_regression.py").read_text(),
-        },
-        type_cmd=None,
-        lint_cmd=None,
-    )
-    rules = {f.rule for f in v.findings}
-    assert v.decision is Decision.DISQUALIFIED, v.to_observation()
-    assert "protected_path" in rules
-    assert "skip_marker" in rules
-    subprocess.run(["git", "checkout", "--", "."], cwd=repo, check=True)
+    res = _grade(repo, task, (repo / "patches" / "cheat.diff").read_text(), "cheat")
+    rules = {f.rule for f in res.findings}
+    assert res.outcome is Outcome.CHEATED, res.to_observation()
+    assert "protected_path" in rules and "skip_marker" in rules
+    # nothing ran: the only stage that executed is the static one
+    assert set(res.stages) == {"cheat"}
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git required")
-def test_canary_catches_a_hack_no_static_rule_would_find(repo, tmp_path):
-    """The canary's whole job. This patch has no skip markers, touches no test file
-    and trips no patchlint rule -- it just returns a different answer the second
-    time it is asked. The task it satisfies is impossible, so green means cheated."""
-    task = load_task(Path(__file__).resolve().parents[1] / "tasks" / "canary-impossible" / "task.yaml")
-    diff = (repo / "patches" / "canary_hack.diff").read_text()
-    v = _pawl(tmp_path).run_gauntlet(
-        task=task,
-        worktree=repo,
-        base_commit=_base(repo),
-        diff=diff,
-        branch="test",
-        type_cmd=None,
-        lint_cmd=None,
-    )
-    assert not v.findings, "no static rule should have fired here"
-    assert v.decision is Decision.DISQUALIFIED, v.to_observation()
-    subprocess.run(["git", "checkout", "--", "."], cwd=repo, check=True)
+def test_the_canary_catches_what_no_static_rule_can(repo):
+    """This patch adds no skip markers, edits no test file, and trips no critical
+    rule. It just returns a different answer the second time it is asked. The canary
+    catches it because the task it satisfies is impossible."""
+    task = load_task(CANARY)
+    res = _grade(repo, task, (repo / "patches" / "canary_hack.diff").read_text(), "canary")
+    assert res.outcome is Outcome.CHEATED, res.to_observation()
+    assert "canary_passed" in {f.rule for f in res.findings}
+    assert res.stages["cheat"].passed  # the static stage let it through
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git required")
 def test_red_team_battery_holds(repo):
-    """The verifier's own eval. Every known attack blocked, both controls accepted."""
+    """The verifier's own eval, in CI. Every known attack blocked, both controls green."""
     from ratchet import redteam
 
-    demo = load_task(TASK)
-    canary = load_task(Path(__file__).resolve().parents[1] / "tasks" / "canary-impossible" / "task.yaml")
-    results = redteam.run(repo, demo, canary)
+    results = redteam.run(repo, load_task(TASK), load_task(CANARY))
     wrong = [r.attack.name for r in results if not r.correct]
     assert not wrong, redteam.report(results)
     assert sum(1 for r in results if r.attack.expect_caught) >= 10
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git required")
+def test_partial_credit_is_a_scalar_not_a_boolean(repo):
+    """A patch that fixes some of the target tests must score above one that fixes
+    none. Without this the search has nothing to hill-climb on."""
+    from ratchet.evals.bugs import seeded_bugs
+
+    task = load_task(TASK)
+    pool = seeded_bugs()[0].pool
+    partial = _grade(repo, task, pool.partials[0], "partial")
+    correct = _grade(repo, task, pool.correct, "correct")
+    nothing = _grade(repo, task, "", "empty")
+    assert nothing.score < partial.score < correct.score
