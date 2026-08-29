@@ -293,3 +293,62 @@ def test_outcome_reports_the_delta_it_measured() -> None:
     assert out.delta == pytest.approx(1.0)
     assert out.to_trial().verdict == ADOPTED
     assert "delta +1.00" in out.report()
+
+
+# --------------------------------------------------------------------------- #
+# the loop, closed
+# --------------------------------------------------------------------------- #
+
+
+def test_an_adopted_skill_reaches_the_generator_prompt_through_a_real_run(tmp_path: Path) -> None:
+    """The end-to-end seam: a file in `skills/` becomes text in the model's prompt.
+
+    Everything here is the real thing except the model. `expand()` does exactly two
+    things with skills -- calls `_skills_for(node)` and hands the result to
+    `context.assemble` -- so this exercises the whole path from library to rendered
+    prompt, and checks the gating on the way: `proposed` never travels, and neither
+    does a skill scoped to another framework.
+    """
+    from ratchet import context as ctx_mod
+    from ratchet.bus import Bus
+    from ratchet.loop import SearchRun
+    from ratchet.models import TaskSpec
+    from ratchet.node import Node
+    from ratchet.subagents import Subagents
+
+    body = "Assume some of the tests grading you are ones you cannot see."
+
+    def rendered(status: str, applies_to: list[str]) -> str:
+        lib = SkillLibrary(tmp_path)
+        lib.skills = [Skill(name="Assume half the tests are hidden", body=body,
+                            source="arXiv:2510.20270", triggers=["always", "start"],
+                            applies_to=applies_to, status=status)]
+        run = SearchRun(
+            task=TaskSpec(task_id="t", repo_path=str(tmp_path), statement="fix it", framework="pytest"),
+            repo=tmp_path, provider=None, subagents=Subagents(ScriptedBackend([])),
+            run_id="unit", bus=Bus(tmp_path / "bus.jsonl"), skills=lib,
+        )
+        node = Node(id="root", parent_id=None, commit="c", image="i", patch="")
+        chosen = run._skills_for(node, stalled=False)
+        return ctx_mod.assemble(task=run.task.statement, node=node, tree=run.tree,
+                                repo_map="", diff_so_far="", skills=chosen).render()
+
+    live = rendered(ADOPTED, ["pytest"])
+    assert body in live, "an adopted, matching skill must reach the model"
+    assert "arXiv:2510.20270" in live, "and it must carry the citation with it"
+
+    assert body not in rendered(PROPOSED, ["pytest"]), "unproven skills never travel"
+    assert body not in rendered(ADOPTED, ["jest"]), "a jest skill must not reach a pytest run"
+
+
+def test_expand_is_the_only_thing_between_the_library_and_the_model() -> None:
+    """Guards the wiring the test above depends on. If `expand` stops feeding
+    `_skills_for` into `assemble`, or stops sending the rendered context, the test
+    above still passes while the feature is dead."""
+    import inspect
+
+    from ratchet.loop import SearchRun
+
+    src = inspect.getsource(SearchRun.expand)
+    assert "_skills_for" in src and "skills=skill_texts" in src
+    assert "self.agents.generate(ctx.render()" in src
