@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import time
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +44,22 @@ SAFE_ID = re.compile(r"^[0-9a-f]{1,32}$")
 MAX_BODY = 4096
 
 
+def _remote_url(repo: Path) -> str:
+    """The repo's browseable origin URL, or "" — so the page can link where a
+    PR will land. Read-only; a repo with no remote just gets no link."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True, timeout=3,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if out.startswith("git@") and ":" in out:
+        host, _, rest = out.removeprefix("git@").partition(":")
+        out = f"https://{host}/{rest}"
+    return out.removesuffix(".git")
+
+
 def _page(bus_path: Path, repo: Path) -> bytes:
     """The page, with the palette and the mascot injected from the TUI's module."""
     html = (HERE / "index.html").read_text()
@@ -53,6 +70,7 @@ def _page(bus_path: Path, repo: Path) -> bytes:
         .replace("<!--__DOLPHIN_TINY__-->", m.to_svg(m.FIN_TINY, scale=1))
         .replace("__RUN__", bus_path.stem.replace(".bus", ""))
         .replace("__REPO__", repo.name)
+        .replace("__REPO_URL__", _remote_url(repo))
     ).encode()
 
 
