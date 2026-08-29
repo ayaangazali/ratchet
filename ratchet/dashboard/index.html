@@ -2,6 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ratchet · __RUN__</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13' fill='%234d9fe8'>✻</text></svg>">
 <style>
     :root {
 /*__PALETTE__*/
@@ -10,32 +11,33 @@
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0; padding: 18px; gap: 14px;
+      margin: 0 auto; padding: 12px; gap: 10px; max-width: 1240px;
       display: flex; flex-direction: column;
       background: var(--bg); color: var(--text);
-      font: 13px/1.55 var(--mono);
+      font: 12.5px/1.5 var(--mono);
     }
     a { color: var(--accent); }
 
     /* ---------------------------------------------------------------- hero -- */
     .hero {
-      display: flex; align-items: center; gap: 22px;
-      padding: 16px 20px; border: 1px solid var(--accentDim); border-radius: 10px;
+      display: flex; align-items: center; gap: 16px;
+      padding: 10px 16px; border: 1px solid var(--accentDim); border-radius: 8px;
       background: var(--panel);
     }
     /* The sprite is drawn at one unit per pixel and scaled here, so it stays
        crisp at any size instead of shipping three copies of the same drawing. */
-    .hero svg { width: 96px; height: auto; flex: none; }
-    .hero h1 { margin: 0; font-size: 17px; letter-spacing: .02em; }
+    .hero svg { width: 52px; height: auto; flex: none; }
+    .hero h1 { margin: 0; font-size: 15px; letter-spacing: .02em; display: inline; }
     .hero h1 .mark { color: var(--accent); }
-    .tag { margin: 2px 0 10px; color: var(--muted); }
-    .meta { margin: 0; color: var(--dim); }
+    .tag { display: inline; margin: 0 0 0 10px; color: var(--dim); }
+    .meta { margin: 3px 0 0; color: var(--dim); }
     .meta b { color: var(--text); font-weight: 600; }
+    .meta .sep { margin: 0 7px; color: var(--border); }
     .grow { flex: 1; }
 
     .pill {
       flex: none; display: flex; align-items: center; gap: 8px;
-      padding: 7px 14px; border-radius: 999px;
+      padding: 6px 13px; border-radius: 999px;
       border: 1px solid var(--border); background: var(--bg); color: var(--muted);
       white-space: nowrap;
     }
@@ -50,25 +52,25 @@
     /* The one component that is allowed to shout. Nothing irreversible happens
        until somebody presses a button in here. */
     .gate {
-      border: 1px solid var(--accent); border-radius: 10px;
-      background: var(--panelWarm); padding: 18px 20px;
+      border: 1px solid var(--accent); border-radius: 8px;
+      background: var(--panelWarm); padding: 14px 16px;
     }
     .gate[hidden] { display: none; }
-    .gate h2 { margin: 0 0 4px; font-size: 15px; }
+    .gate h2 { margin: 0 0 4px; font-size: 14px; }
     .gate h2 .mark { color: var(--accent); }
     .gate .action { color: var(--accent); }
-    .gate .summary { margin: 10px 0 2px; color: var(--text); }
-    .gate .stats { margin: 0 0 12px; color: var(--dim); }
+    .gate .summary { margin: 8px 0 2px; color: var(--text); }
+    .gate .stats { margin: 0 0 10px; color: var(--dim); }
     .gate pre {
-      margin: 0 0 14px; padding: 12px 14px; max-height: 220px; overflow: auto;
-      border-radius: 8px; background: var(--bg); border: 1px solid var(--border);
+      margin: 0 0 12px; padding: 10px 12px; max-height: 180px; overflow: auto;
+      border-radius: 6px; background: var(--bg); border: 1px solid var(--border);
     }
     .gate pre .add { color: var(--green); }
     .gate pre .del { color: var(--red); }
     .gate pre .ctx { color: var(--dim); }
     .buttons { display: flex; gap: 10px; align-items: center; }
     button {
-      font: inherit; padding: 9px 18px; border-radius: 7px; cursor: pointer;
+      font: inherit; padding: 8px 16px; border-radius: 6px; cursor: pointer;
       border: 1px solid var(--border); background: var(--bg); color: var(--text);
     }
     button:hover { border-color: var(--muted); }
@@ -78,18 +80,32 @@
     .hint { color: var(--dim); }
 
     /* ---------------------------------------------------------------- grid -- */
-    main { display: grid; grid-template-columns: 320px minmax(0, 1fr) 320px; gap: 14px; align-items: start; }
-    @media (max-width: 1180px) { main { grid-template-columns: 1fr; } }
+    /* Two rows that read top-down: state first (tree + gauntlet + stats),
+       then a compact log underneath. */
+    main {
+      display: grid; gap: 10px; align-items: stretch;
+      grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+      grid-template-areas:
+        "tree side"
+        "log  log";
+    }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-areas: "tree" "side" "log"; } }
+    .area-tree { grid-area: tree; display: flex; flex-direction: column; }
+    .area-side { grid-area: side; display: flex; flex-direction: column; gap: 10px; }
+    .area-log  { grid-area: log; }
 
-    .panel { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+    .panel { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); min-width: 0; }
+    .area-tree .panel, .area-side .panel:first-child { flex: 1; display: flex; flex-direction: column; }
     .panel > h2 {
-      margin: 0; padding: 9px 14px; font-size: 11px; font-weight: 600;
+      margin: 0; padding: 7px 12px; font-size: 10.5px; font-weight: 600;
       letter-spacing: .11em; text-transform: uppercase;
       color: var(--muted); border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between;
     }
-    .panel > .body { padding: 12px 14px; max-height: 460px; overflow: auto; }
-    .stack { display: flex; flex-direction: column; gap: 14px; }
-    .empty { color: var(--dim); }
+    .panel > h2 .count { color: var(--dim); letter-spacing: 0; text-transform: none; }
+    .panel > .body { padding: 10px 12px; overflow: auto; }
+    .area-tree .body { max-height: 380px; flex: 1; }
+    .empty { color: var(--dim); margin: 0; }
 
     /* ---------------------------------------------------------------- tree -- */
     .node { display: flex; align-items: baseline; gap: 8px; padding: 1px 0; white-space: nowrap; }
@@ -106,8 +122,9 @@
 
     /* ------------------------------------------------------------ activity -- */
     /* One bullet per step, one elbow per result -- the same shape the terminal
-       console draws, so a screenshot of either reads the same way. */
-    .step { margin-top: 12px; }
+       console draws. Kept deliberately small: it is the log, not the headline. */
+    .area-log .body { max-height: 230px; font-size: 12px; line-height: 1.45; }
+    .step { margin-top: 7px; }
     .step:first-child { margin-top: 0; }
     .step .bullet { color: var(--accent); }
     .step .verb { color: var(--text); font-weight: 600; }
@@ -129,28 +146,37 @@
     .stage { display: flex; align-items: baseline; gap: 10px; padding: 2px 0; }
     .stage .g { width: 12px; color: var(--border); }
     .stage .name { flex: 1; color: var(--dim); }
-    .stage .detail { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stage .detail { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
     .stage.pass .g { color: var(--green); } .stage.pass .name { color: var(--text); }
     .stage.fail .g, .stage.fail .name { color: var(--red); font-weight: 600; }
     .stage.skip .g, .stage.skip .name { color: var(--dim); }
-    .candidate { color: var(--muted); margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .candidate { color: var(--muted); margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-    /* --------------------------------------------------------------- meters -- */
-    .row { display: flex; justify-content: space-between; padding: 2px 0; }
-    .row .k { color: var(--dim); } .row .v { color: var(--blue); }
+    /* ------------------------------------------------- run stats & meters -- */
+    /* Harness counters and the budget live in one panel: what the run is
+       spending, in one glance -- counts on the left, cost bars on the right. */
+    .stats-body { display: grid; grid-template-columns: 1fr 1.4fr; gap: 4px 18px; padding: 10px 12px; }
+    @media (max-width: 520px) { .stats-body { grid-template-columns: 1fr; } }
+    .stats-body > div { min-width: 0; }
+    .row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; }
+    .row .k { color: var(--dim); }
+    .row .v { color: var(--blue); font-variant-numeric: tabular-nums; }
     .row .v.hot { color: var(--amber); font-weight: 600; }
-    .meter { height: 5px; border-radius: 3px; background: var(--border); margin: 6px 0 12px; overflow: hidden; }
+    .meter { height: 4px; border-radius: 2px; background: var(--border); margin: 3px 0 8px; overflow: hidden; }
     .meter > span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
 </style>
 
 <header class="hero">
   <!--__DOLPHIN__-->
-  <div>
-    <h1><span class="mark">✻</span> ratchet</h1>
-    <p class="tag">the agent doesn't decide it's done. the tests do.</p>
-    <p class="meta"><b id="task">—</b> · <span id="provider">—</span> · <span id="run">—</span> · <span>__REPO__</span></p>
+  <div class="grow">
+    <h1><span class="mark">✻</span> ratchet</h1><span class="tag">the agent doesn't decide it's done — the tests do</span>
+    <p class="meta">
+      task <b id="task">—</b><span class="sep">·</span>
+      provider <b id="provider">—</b><span class="sep">·</span>
+      run <b id="run">—</b><span class="sep">·</span>
+      repo <b>__REPO__</b>
+    </p>
   </div>
-  <div class="grow"></div>
   <div class="pill" id="pill" data-state="idle"><span class="glyph">·</span><span id="pill-text">connecting…</span></div>
 </header>
 
@@ -167,28 +193,31 @@
 </section>
 
 <main>
-  <section class="panel">
-    <h2>search tree</h2>
-    <div class="body" id="tree"><p class="empty">waiting for the root node…</p></div>
-  </section>
+  <div class="area-tree">
+    <section class="panel">
+      <h2>search tree</h2>
+      <div class="body" id="tree"><p class="empty">waiting for the root node…</p></div>
+    </section>
+  </div>
 
-  <section class="panel">
-    <h2>activity</h2>
-    <div class="body" id="activity"><p class="empty">nothing on the bus yet.</p></div>
-  </section>
-
-  <div class="stack">
+  <div class="area-side">
     <section class="panel">
       <h2>gauntlet</h2>
       <div class="body" id="gauntlet"></div>
     </section>
     <section class="panel">
-      <h2>harness</h2>
-      <div class="body" id="harness"></div>
+      <h2>run stats <span class="count">counts · budget</span></h2>
+      <div class="stats-body">
+        <div id="harness"></div>
+        <div id="budget"></div>
+      </div>
     </section>
+  </div>
+
+  <div class="area-log">
     <section class="panel">
-      <h2>budget</h2>
-      <div class="body" id="budget"></div>
+      <h2>activity <span class="count" id="activity-count"></span></h2>
+      <div class="body" id="activity"><p class="empty">nothing on the bus yet.</p></div>
     </section>
   </div>
 </main>
@@ -225,7 +254,7 @@ const state = {
   stages: new Map(), candidate: "",
   subagents: 0, live_sandboxes: 0, sandboxes: 0, approvals: 0,
   budget: null, status: "idle", note: "waiting for a run", started: null,
-  pending: null, tick: 0, verb: 0, cleared: false,
+  pending: null, tick: 0, verb: 0, cleared: false, steps: 0,
 };
 
 /* ------------------------------------------------------------------- header -- */
@@ -296,6 +325,11 @@ function drawTree() {
 
 /* ----------------------------------------------------------------- activity -- */
 
+function bumpCount() {
+  state.steps++;
+  $("activity-count").textContent = `${state.steps} events`;
+}
+
 function step(verb, arg, kind) {
   const box = $("activity");
   if (!state.cleared) { box.textContent = ""; state.cleared = true; }
@@ -305,6 +339,7 @@ function step(verb, arg, kind) {
   if (arg) line.append(el("span", "arg", `(${arg})`));
   box.append(line);
   box.scrollTop = box.scrollHeight;
+  bumpCount();
 }
 
 function note(body, kind) {
