@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ratchet — docs, getting started &amp; FAQ</title>
+<meta name="description" content="How Ratchet works, a 10-minute getting-started guide, and FAQs on product, billing, security, and troubleshooting.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14' fill='%23f5a623'>▸</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+
+<nav class="nav" aria-label="Main">
+  <div class="wrap">
+    <a class="wordmark" href="index.html">RATCHET<span class="tick">▸</span></a>
+    <div class="nav-links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="docs.html" aria-current="page">Docs</a>
+      <a href="pricing.html">Pricing</a>
+      <a href="https://github.com/ayaangazali/ratchet">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="dash-head wrap">
+  <span class="eyebrow">Docs · help · FAQ</span>
+  <h1>Ratchet documentation</h1>
+  <p class="lede" style="margin-bottom:22px">Search everything on this page — guides and FAQs together.</p>
+  <input class="docs-search" id="q" type="search" placeholder="Search docs — try “billing”, “hidden tests”, “docker”, “API limits”…" aria-label="Search docs and FAQs">
+  <p class="no-results" id="no-results">No matches. Try a broader term, or <a href="https://github.com/ayaangazali/ratchet/issues/new">ask on GitHub</a>.</p>
+</header>
+
+<main class="wrap" style="padding-bottom:70px">
+
+<section id="how-it-works" style="border-top:none;padding-top:36px">
+  <span class="eyebrow">How it works</span>
+  <h2>The high-level picture</h2>
+  <div class="doc-block card" style="margin-bottom:12px">
+    <p>
+      You give Ratchet a repo and a task file. An agent proposes patches; Ratchet never asks the
+      agent whether it's finished. Instead, every candidate patch runs a seven-stage
+      <strong>verifier gauntlet</strong> — build, cheat check, hidden fail-to-pass tests,
+      pass-to-pass regressions, types, lint, diff hygiene. Only the gauntlet can declare
+      success, and it does so in exactly one place in the code.
+    </p>
+  </div>
+  <div class="doc-block card" style="margin-bottom:12px">
+    <p>
+      Every step is a git commit plus a sandbox snapshot, so a run is a <strong>tree search over
+      repo states</strong> with the verifier's score as the value function. Stalled branches fork
+      in parallel, dead ends are pruned (and parked, so they're still restorable), and the
+      winning path exits as one squashed diff at a <strong>human approval gate</strong>. Every
+      graded node is signed into a tamper-evident <strong>receipt chain</strong> you can audit.
+    </p>
+  </div>
+</section>
+
+<section id="getting-started">
+  <span class="eyebrow">Getting started</span>
+  <h2>Up and running in 10 minutes</h2>
+  <div class="doc-block">
+    <h3>1. Install (2 min)</h3>
+    <p style="color:var(--ink-2)">You need Python 3.11+ and git. Node 22.14+ only if you want the live TrueForge path.</p>
+    <pre>git clone https://github.com/ayaangazali/ratchet &amp;&amp; cd ratchet
+make dev          # editable install + dev deps</pre>
+  </div>
+  <div class="doc-block">
+    <h3>2. Seed the demo and run the suite (3 min)</h3>
+    <pre>make demo         # seeds demo-repo/: a broken slugify, three prepared patches
+make test         # the whole suite; no docker, no network
+make redteam      # the published reward-hacking battery fired at the verifier</pre>
+  </div>
+  <div class="doc-block">
+    <h3>3. Get your first three verdicts (3 min)</h3>
+    <p style="color:var(--ink-2)">The honest fix goes green; the cheat is blocked before a line of it runs; the canary hack is caught with zero static findings.</p>
+    <pre>ratchet verify --task tasks/demo-001-slugify/task.yaml --repo demo-repo \
+               --diff demo-repo/patches/honest.diff    # GREEN, score 1.000
+ratchet verify --task tasks/demo-001-slugify/task.yaml --repo demo-repo \
+               --diff demo-repo/patches/cheat.diff     # CHEATED
+ratchet verify --task tasks/canary-impossible/task.yaml --repo demo-repo \
+               --diff demo-repo/patches/canary_hack.diff  # CHEATED, zero static findings</pre>
+  </div>
+  <div class="doc-block">
+    <h3>4. Run a full search, offline (2 min)</h3>
+    <pre>make run-offline  # a complete search: root, a real prune, a green node, the gate
+make proof        # exercise every claim on the site and keep the evidence
+make console      # the TUI
+make audit        # verify the latest run's receipt chain</pre>
+    <p style="color:var(--ink-2)">macOS note: the eval script uses GNU <code>timeout</code> — <code>brew install coreutils</code> and put <code>gtimeout</code> on PATH as <code>timeout</code>.</p>
+  </div>
+</section>
+
+<section id="faq">
+  <span class="eyebrow">FAQ</span>
+  <h2>Frequently asked questions</h2>
+
+  <h3 style="margin-top:26px">Product</h3>
+  <details class="doc-block"><summary>What models does Ratchet work with?</summary>
+    <div class="body">Model calls, retries, and multi-provider routing belong to the TrueForge
+    harness Ratchet runs on. Ratchet owns what counts as progress — it is model-agnostic by
+    construction, and the whole verifier runs with no model at all.</div></details>
+  <details class="doc-block"><summary>Does it need Docker?</summary>
+    <div class="body">No. Ratchet never orchestrates containers. Sandboxes come from the harness;
+    the documented fallback is one git worktree per node off a prebuilt base, with a shared
+    pre-warmed virtualenv.</div></details>
+  <details class="doc-block"><summary>What are the API limits?</summary>
+    <div class="body">Ratchet itself imposes none — the offline paths (<code>make test</code>,
+    <code>make proof</code>, <code>ratchet verify</code>) make zero API calls. Live runs inherit
+    whatever limits your TrueForge model providers have, and the search budget
+    (nodes, wall-clock, dollars) is set per run and enforced by the scheduler.</div></details>
+  <details class="doc-block"><summary>Can I add my own verification rules?</summary>
+    <div class="body">Yes. Every new rule ships with two tests — a patch that trips it and a
+    patch that must not — plus an entry in the red-team battery, so the perfect catch score
+    stays honest. See "Extending Ratchet" in the README.</div></details>
+  <details class="doc-block"><summary>Is there a Slack or CI integration?</summary>
+    <div class="body">Not yet. Today the integration points are the CLI, the TUI console, and
+    the receipt chain (auditable in CI via <code>make audit</code>). The red team already runs
+    in CI on the repo itself.</div></details>
+
+  <h3 style="margin-top:26px">Billing</h3>
+  <details class="doc-block"><summary>How much does Ratchet cost?</summary>
+    <div class="body">Nothing. Ratchet is MIT-licensed open source — every feature on this site
+    is in the public repo. You pay only your own model providers for live runs.
+    See <a href="pricing.html">pricing</a> for planned hosted tiers.</div></details>
+  <details class="doc-block"><summary>Is there a trial, refund, or contract?</summary>
+    <div class="body">No trial needed — the full product is free. Hosted plans, when they ship,
+    will be monthly with no long-term contract.</div></details>
+
+  <h3 style="margin-top:26px">Security</h3>
+  <details class="doc-block"><summary>Can the agent see the held-out tests?</summary>
+    <div class="body">No. Held-out test names never appear in anything the agent can read — the
+    context assembly, the observations, and every bus event are all scrubbed, and there are
+    tests asserting it. A leak would silently destroy the signal, so this is invariant #5 of
+    the project.</div></details>
+  <details class="doc-block"><summary>What stops the agent from editing the tests or the verifier?</summary>
+    <div class="body">Protected paths are reverted before grading on every run with no skip
+    flag; runtime writes to graded paths are a cheat finding; and the verdict's exit code is
+    echoed outside the region the agent can influence.</div></details>
+  <details class="doc-block"><summary>Can a run's results be forged after the fact?</summary>
+    <div class="body">Every graded node is signed into a hash-linked receipt chain.
+    <code>make audit</code> re-verifies it; edit one verdict and the chain reports BROKEN with
+    the exact receipt that fails. The tamper demo runs in <code>make proof</code>.</div></details>
+  <details class="doc-block"><summary>What can the sandbox reach on the network?</summary>
+    <div class="body">On the live harness path, local sandbox egress is allowlisted to PyPI and
+    GitHub only. The offline paths make no network calls at all.</div></details>
+
+  <h3 style="margin-top:26px">Troubleshooting</h3>
+  <details class="doc-block"><summary>`make evals` fails on macOS with a timeout error</summary>
+    <div class="body">The eval script uses GNU <code>timeout</code>. Run
+    <code>brew install coreutils</code> and expose <code>gtimeout</code> on your PATH as
+    <code>timeout</code> — a symlink into your venv's <code>bin/</code> works.</div></details>
+  <details class="doc-block"><summary>A patch I believe is honest gets flagged as a cheat</summary>
+    <div class="body">Run <code>ratchet verify</code> on the diff by hand with no model in the
+    loop and read the failing stage — it names the exact rule and location. If you still think
+    the rule is wrong, open an issue with the diff; the verifier only changes with a
+    reproducing test, never to make a specific patch pass.</div></details>
+  <details class="doc-block"><summary>The search never goes green</summary>
+    <div class="body">Read the failing stage first. Scores below 1.0 tell you which stage is
+    holding the line (f2p means hidden tests still fail). Check the budget line — a run that
+    exhausts its node budget parks its best branch rather than forcing a verdict.</div></details>
+  <details class="doc-block"><summary>Where did my pruned branch go?</summary>
+    <div class="body">Pruned work is parked before it is dropped, at
+    <code>refs/ratchet/pruned/&lt;node&gt;</code>. A dead end is still a node you can rewind to.</div></details>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="fine">Can't find it? <a href="https://github.com/ayaangazali/ratchet/issues/new">Open an issue</a> — that's the support channel, and it's read.</p>
+  </div>
+</footer>
+
+<script>
+// Client-side search: filters every .doc-block (guides + FAQs) by text match.
+const q = document.getElementById("q");
+const blocks = [...document.querySelectorAll(".doc-block")];
+const sections = [...document.querySelectorAll("main section")];
+const noRes = document.getElementById("no-results");
+q.addEventListener("input", () => {
+  const term = q.value.trim().toLowerCase();
+  let hits = 0;
+  blocks.forEach((b) => {
+    const show = !term || b.textContent.toLowerCase().includes(term);
+    b.style.display = show ? "" : "none";
+    if (show) hits++;
+    if (term && show && b.tagName === "DETAILS") b.open = true;
+    if (!term && b.tagName === "DETAILS") b.open = false;
+  });
+  // hide section headers whose blocks are all hidden
+  sections.forEach((s) => {
+    const any = [...s.querySelectorAll(".doc-block")].some((b) => b.style.display !== "none");
+    s.style.display = any ? "" : "none";
+  });
+  noRes.style.display = term && hits === 0 ? "block" : "none";
+});
+</script>
+</body>
+</html>

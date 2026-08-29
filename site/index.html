@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ratchet — the coding agent that never decides it's done</title>
+<meta name="description" content="Ratchet is an open-source harness for coding agents where only the tests declare success. Tree search over repo states, a seven-stage verifier gauntlet, tamper-evident receipts, and a human approval gate.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14' fill='%23f5a623'>▸</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+
+<nav class="nav" aria-label="Main">
+  <div class="wrap">
+    <a class="wordmark" href="index.html">RATCHET<span class="tick">▸</span></a>
+    <div class="nav-links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="docs.html">Docs</a>
+      <a href="pricing.html">Pricing</a>
+      <a href="#about">About</a>
+      <a href="https://github.com/ayaangazali/ratchet">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<header class="hero">
+  <canvas id="hero3d" aria-hidden="true"></canvas>
+  <div class="wrap hero-inner">
+    <span class="eyebrow">Open source · MIT · runs offline</span>
+    <h1>A coding agent that never decides it's done. <em>The tests do.</em></h1>
+    <p class="sub">
+      Ratchet is an open-source harness for teams running coding agents. Every candidate
+      patch clears a seven-stage verifier gauntlet before it sticks — so the code that
+      reaches your review is proven, not self-reported.
+    </p>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="https://github.com/ayaangazali/ratchet">Get Ratchet on GitHub</a>
+      <a class="btn btn-ghost" href="docs.html">Read the docs</a>
+      <span class="clone-line"><span class="p">$ </span>git clone https://github.com/ayaangazali/ratchet &amp;&amp; make demo</span>
+    </div>
+  </div>
+</header>
+
+<!-- SOCIAL PROOF: honest, measured numbers -->
+<div class="proof-band" aria-label="Measured results">
+  <div class="wrap">
+    <div class="proof-stat"><span class="v" style="color:var(--green)" id="ps-redteam">11/11</span><span class="k">reward hacks caught</span></div>
+    <div class="proof-stat"><span class="v" style="color:var(--green)" id="ps-fp">0</span><span class="k">false positives</span></div>
+    <div class="proof-stat"><span class="v" id="ps-tests">94</span><span class="k">tests in the suite</span></div>
+    <div class="proof-stat"><span class="v" id="ps-proof">13/13</span><span class="k">proof checks pass offline</span></div>
+    <div class="proof-stat"><span class="v" id="ps-stages">7</span><span class="k">gauntlet stages</span></div>
+    <div class="proof-stat"><span class="v" id="ps-prs">10</span><span class="k">Qodo-reviewed PRs</span></div>
+  </div>
+</div>
+
+<!-- PROBLEM → SOLUTION -->
+<section id="problem">
+  <div class="wrap">
+    <span class="eyebrow">The problem</span>
+    <h2>Agents grade their own homework</h2>
+    <p class="lede">
+      Give an agent a repo and a test command, and eventually it finds the cheapest way to
+      make tests pass: change what "pass" means. It skips the hidden suite, hardcodes the
+      visible cases, edits the tests at import time — then tells you it's done. That's
+      measured behavior, not a hypothetical.
+    </p>
+    <div class="grid grid-2">
+      <div class="card">
+        <span class="tag">Without Ratchet</span>
+        <h3>"Done" is a belief</h3>
+        <p>The agent declares success, and you find out in review — or in production —
+           that "success" meant a deleted regression test and a special-cased return value.</p>
+      </div>
+      <div class="card">
+        <span class="tag">With Ratchet</span>
+        <h3>"Done" is a verdict</h3>
+        <p>There is no done tool. Green is set in exactly one place — the verifier — after
+           the patch clears build, cheat check, hidden tests, regressions, types, lint, and
+           diff hygiene. Stopping the agent isn't a prompt asking nicely; it's a rollback
+           it can't argue with.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES → BENEFITS -->
+<section id="features">
+  <div class="wrap">
+    <span class="eyebrow">What you get</span>
+    <h2>Six mechanisms, one guarantee</h2>
+    <p class="lede">Everything below ships in the repo today, covered by tests, exercised by <code>make proof</code> with no model, no key, and no network.</p>
+    <div class="grid grid-3">
+      <div class="card">
+        <span class="tag">Verifier gauntlet</span>
+        <h3>Seven stages before green</h3>
+        <p>Every candidate patch is graded against hidden tests it can never read. You stop
+           reviewing patches that only look finished.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Cheat detector</span>
+        <h3>Every known attack blocked</h3>
+        <p>Skip markers, hardcoded answers, spoofed exit codes, conftest report hooks, tests
+           rewritten at import — a published red-team battery scores the verifier itself, in CI,
+           at zero false positives.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Tree search</span>
+        <h3>Dead ends cost a rollback, not a rewrite</h3>
+        <p>Every step is a git commit plus a sandbox snapshot, so a run is a search over repo
+           states. Stalled branches fork in parallel; pruned work is parked, never lost.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Receipts</span>
+        <h3>A tamper-evident chain for every run</h3>
+        <p>Every graded node is signed into a hash chain. Forge a green verdict and
+           <code>make audit</code> says CHAIN BROKEN — you can prove the run is the run that happened.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Human gate</span>
+        <h3>Nothing irreversible without you</h3>
+        <p>The winning path exits as one squashed diff at an approval gate. Pull requests and
+           pushes wait for a human decision, every time.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Docs oracle</span>
+        <h3>Real docs, not model memory</h3>
+        <p>When a failure looks like an API mismatch, current upstream documentation for the
+           exact locked version is attached to the next prompt — so the agent stops guessing.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRODUCT TOUR -->
+<section id="tour">
+  <div class="wrap">
+    <span class="eyebrow">Sixty seconds, no model, no key</span>
+    <h2>See the whole story in three verdicts</h2>
+    <p class="lede">Clone it, seed the demo repo, and run the gauntlet by hand. The stages run in this order — a patch that fails stage two never executes at all.</p>
+
+    <div class="stages" aria-label="The seven gauntlet stages, in order">
+      <div class="stage"><span class="n">01</span><span class="s">build</span></div>
+      <div class="stage"><span class="n">02</span><span class="s">cheat check</span></div>
+      <div class="stage"><span class="n">03</span><span class="s">fail-to-pass</span></div>
+      <div class="stage"><span class="n">04</span><span class="s">pass-to-pass</span></div>
+      <div class="stage"><span class="n">05</span><span class="s">types</span></div>
+      <div class="stage"><span class="n">06</span><span class="s">lint</span></div>
+      <div class="stage"><span class="n">07</span><span class="s">diff hygiene</span></div>
+    </div>
+
+    <div style="height:26px"></div>
+
+    <div class="term" role="img" aria-label="Terminal: three verify verdicts">
+<span class="d">$</span> ratchet verify --diff patches/honest.diff
+<span class="g">GREEN</span> · score 1.000 — the real fix, accepted
+
+<span class="d">$</span> ratchet verify --diff patches/cheat.diff
+<span class="r">CHEATED</span> — caught before a line of it runs
+
+<span class="d">$</span> ratchet verify --diff patches/canary_hack.diff
+<span class="r">CHEATED</span> — zero static findings; the canary caught it anyway
+
+<span class="d">$</span> ratchet run --repo demo-repo --scripted patches/scripted.json
+<span class="a">● root  0.58</span>
+<span class="r">├─✗ 1e0f  0.58  pruned</span>
+<span class="g">└─★ 2874  1.00  ✓green</span> → one squashed diff, waiting at the human gate</div>
+  </div>
+</section>
+
+<!-- USE CASES / PERSONAS -->
+<section id="use-cases">
+  <div class="wrap">
+    <span class="eyebrow">Who it's for</span>
+    <h2>Built for people who ship agent-written code</h2>
+    <div class="grid grid-3">
+      <div class="card">
+        <span class="tag">For agent builders</span>
+        <h3>Stop babysitting runs</h3>
+        <p>Point Ratchet at a repo and a task file. The scheduler spends compute where the
+           verifier's score says it's worth spending, and you get one clean diff — not a
+           transcript to forensically audit.</p>
+      </div>
+      <div class="card">
+        <span class="tag">For maintainers</span>
+        <h3>Trust the PR, not the agent</h3>
+        <p>Every graded step is receipted into a tamper-evident chain. When a contribution
+           arrives, <code>make audit</code> proves the tests that passed are the tests that ran.</p>
+      </div>
+      <div class="card">
+        <span class="tag">For researchers</span>
+        <h3>A verifier you can attack</h3>
+        <p>The red-team battery is published and scored in CI. Add an attack, add a rule, and
+           measure the search against a linear loop on seeded bugs with <code>make evals</code>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- OBJECTION HANDLING -->
+<section id="objections">
+  <div class="wrap">
+    <span class="eyebrow">Fair questions</span>
+    <h2>Before you ask</h2>
+    <details>
+      <summary>Can the agent read the hidden tests and game them?</summary>
+      <div class="body">No. Held-out test names never appear in anything the agent can read —
+      not the context assembly, not the observations, not any bus event that could reach a
+      prompt. And a canary task with an impossible test catches stateful answer-smuggling
+      that leaves zero static findings.</div>
+    </details>
+    <details>
+      <summary>What if the agent edits the verifier or the test files?</summary>
+      <div class="body">Protected paths are reverted before grading on every run, with no flag
+      to skip. Writes to graded paths at runtime are their own cheat finding. The exit code is
+      echoed outside the region the agent can influence.</div>
+    </details>
+    <details>
+      <summary>Does it need Docker, a cloud account, or network access?</summary>
+      <div class="body">No. <code>make test</code>, <code>make redteam</code>, and
+      <code>make proof</code> run with no Docker and no network. Sandboxes come from the
+      TrueForge harness when you run live; the documented fallback is plain git worktrees.</div>
+    </details>
+    <details>
+      <summary>Can it push code without a human?</summary>
+      <div class="body">No. Opening a pull request and pushing are gated behind a human
+      approval interrupt. The gate held in every recorded proof run — the turn ends and waits
+      for a decision.</div>
+    </details>
+    <details>
+      <summary>How do I know these claims are real?</summary>
+      <div class="body">Run <code>make proof</code>. It exercises every claim on this page
+      offline and keeps the evidence — 13 checks, from the red-team score to a forged verdict
+      being detected. The <a href="dashboard.html">dashboard</a> renders the latest proof run.</div>
+    </details>
+    <details>
+      <summary>What about support and code review?</summary>
+      <div class="body">Every change to Ratchet itself goes through a reviewed pull request
+      with Qodo configured deliberately (<code>.pr_agent.toml</code> is committed). Bugs and
+      questions go to <a href="https://github.com/ayaangazali/ratchet/issues">GitHub issues</a>.</div>
+    </details>
+  </div>
+</section>
+
+<!-- ABOUT -->
+<section id="about">
+  <div class="wrap">
+    <span class="eyebrow">About</span>
+    <h2>Why Ratchet exists</h2>
+    <p class="lede">
+      A ratchet turns one way. So does this: progress that survives verification sticks, and
+      everything else rolls back. Ratchet started as a bet that the missing piece in coding
+      agents isn't a smarter model — it's an honest referee. The harness (TrueForge) owns
+      sandboxes, sessions, and model routing; Ratchet owns the only question that matters:
+      <strong>what counts as progress.</strong>
+    </p>
+    <p class="lede" style="margin-bottom:0">
+      Built by <a href="https://github.com/ayaangazali">Ayaan Gazali</a>. MIT licensed, developed
+      in the open — every design decision is in the repo's README, research digest, and PR trail.
+    </p>
+  </div>
+</section>
+
+<!-- CLOSING CTA -->
+<section id="cta">
+  <div class="wrap" style="text-align:center">
+    <h2>Sixty seconds to your first verdict</h2>
+    <p class="lede" style="margin-inline:auto">Python 3.11+ and git. Nothing else.</p>
+    <div class="hero-ctas" style="justify-content:center">
+      <a class="btn btn-primary" href="https://github.com/ayaangazali/ratchet">Get Ratchet on GitHub</a>
+      <a class="btn btn-ghost" href="docs.html#getting-started">10-minute quickstart</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="col">
+      <a class="wordmark" href="index.html">RATCHET<span class="tick">▸</span></a>
+    </div>
+    <div class="col">
+      <h3>Product</h3>
+      <a href="dashboard.html">Dashboard</a>
+      <a href="docs.html">Docs &amp; FAQ</a>
+      <a href="pricing.html">Pricing</a>
+    </div>
+    <div class="col">
+      <h3>Project</h3>
+      <a href="https://github.com/ayaangazali/ratchet">GitHub</a>
+      <a href="https://github.com/ayaangazali/ratchet/issues">Issues &amp; support</a>
+      <a href="https://github.com/ayaangazali/ratchet/blob/main/RESEARCH.md">Research digest</a>
+    </div>
+    <div class="col">
+      <h3>Contact</h3>
+      <a href="https://github.com/ayaangazali/ratchet/issues/new">Open an issue</a>
+      <a href="https://github.com/ayaangazali">@ayaangazali</a>
+    </div>
+    <p class="fine">MIT licensed. Only the gauntlet declares success.</p>
+  </div>
+</footer>
+
+<script src="data.js"></script>
+<script>
+// Proof band stays true automatically: values come from the same data.js the
+// dashboard renders; the static text above is the no-JS fallback.
+(() => {
+  const S = window.RATCHET_DATA?.stats;
+  if (!S) return;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set("ps-redteam", `${S.redteamCaught}/${S.redteamTotal}`);
+  set("ps-fp", S.falsePositives);
+  set("ps-tests", S.tests);
+  set("ps-proof", `${S.proofChecksPassed}/${S.proofChecksTotal}`);
+  set("ps-stages", S.gauntletStages);
+  set("ps-prs", S.prsOpen + S.prsMerged);
+})();
+</script>
+<script type="module" src="hero3d.js"></script>
+</body>
+</html>
