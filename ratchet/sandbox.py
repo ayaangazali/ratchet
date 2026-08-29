@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -76,17 +77,29 @@ class Provider(Protocol):
 
 
 # --------------------------------------------------------------------------- #
+def _runs(exe: str | None) -> bool:
+    """Does this interpreter actually start? Existence is not the same as working."""
+    if not exe:
+        return False
+    try:
+        return subprocess.run([exe, "-c", "import sys"], capture_output=True, timeout=15).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 # fallback: git worktrees off a prebuilt base, sharing one warm venv
 # --------------------------------------------------------------------------- #
 
 
 class WorktreeSandbox:
-    def __init__(self, repo: Path, workdir: Path, sha: str, label: str, venv: Path | None) -> None:
+    def __init__(self, repo: Path, workdir: Path, sha: str, label: str, venv: Path | None,
+                 shim: Path | None = None) -> None:
         self.repo = repo
         self.workdir = workdir
         self.sha = sha
         self.id = label
         self.venv = venv
+        self.shim = shim
 
     def _env(self) -> dict[str, str]:
         env = dict(os.environ)
@@ -95,6 +108,9 @@ class WorktreeSandbox:
             # reason the fallback is fast enough to search with
             env["VIRTUAL_ENV"] = str(self.venv)
             env["PATH"] = f"{self.venv / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+        if self.shim is not None:
+            # Behind the venv, so a real environment always wins.
+            env["PATH"] = f"{env.get('PATH', '')}{os.pathsep}{self.shim}"
         env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
         return env
 
@@ -155,6 +171,43 @@ class WorktreeProvider:
         self.root = self.repo.parent / f".ratchet-wt-{run_id}"
         self.root.mkdir(parents=True, exist_ok=True)
         self.venv = venv or self._warm_venv()
+        self.shim = self._python_shim()
+
+    def _python_shim(self) -> Path | None:
+        """Make `python` resolve when only `python3` exists.
+
+        macOS ships `python3` and no `python`, and a task whose `test_cmd` starts
+        with `python` -- which is most of them -- then fails inside the sandbox with
+        "command not found". The gauntlet reads that as a failed build, so no patch
+        can ever go green and the search explores a repository where nothing works.
+
+        The shim sits at the *end* of PATH, so a warm venv or a real `python` always
+        wins; it only fills a hole that would otherwise be fatal.
+        """
+        if _runs(shutil.which("python")):
+            return None
+        # Not "does it exist" but "does it work": macOS ships /usr/bin/python as a
+        # stub that exits non-zero with "requires the command line developer tools",
+        # so `which` finds it, the shim never fires, and every graded command dies
+        # on a binary that was never real.
+        # `sys.executable` first, not `python3`: the interpreter running Ratchet is
+        # the one that demonstrably has pytest and the project installed, whereas a
+        # system python3 is typically bare and would fail at "no module named pytest"
+        # -- which the gauntlet reads as a failed build, one layer removed from the
+        # real cause.
+        target = sys.executable if _runs(sys.executable) else shutil.which("python3")
+        if not target:
+            return None
+        d = self.repo / ".ratchet" / "shim"
+        d.mkdir(parents=True, exist_ok=True)
+        link = d / "python"
+        try:
+            if link.is_symlink() or link.exists():
+                link.unlink()
+            link.symlink_to(target)
+        except OSError:
+            return None
+        return d
 
     def _warm_venv(self) -> Path | None:
         """One environment, built once, shared by every node. If it isn't there we
@@ -172,7 +225,7 @@ class WorktreeProvider:
         branch = f"ratchet/{self.run_id}/{label}"
         git("branch", "-f", branch, image, cwd=self.repo)
         git("worktree", "add", "--force", str(path), branch, cwd=self.repo)
-        return WorktreeSandbox(self.repo, path, image, label, self.venv)
+        return WorktreeSandbox(self.repo, path, image, label, self.venv, self.shim)
 
     def cleanup(self) -> None:
         git("worktree", "prune", cwd=self.repo, check=False)
