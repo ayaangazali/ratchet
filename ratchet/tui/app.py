@@ -25,11 +25,12 @@ import time
 from pathlib import Path
 
 from rich.text import Text
-from textual import on
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, RichLog, Static
+from textual.widgets import Button, Input, RichLog, Static
+from textual.worker import Worker
 
 from ..bus import Bus
 from . import mascot as m
@@ -441,6 +442,8 @@ class RatchetApp(App):
         self.follow = True
         self.seen_any = False
         self._short = False
+        self._chat = None                                    # lazy ChatSession
+        self._chat_worker: Worker | None = None              # the running background turn, if any
 
     # ----------------------------------------------------------------- layout --
 
@@ -454,6 +457,10 @@ class RatchetApp(App):
             with Vertical(id="activity-box"):
                 yield RichLog(id="activity", wrap=True, markup=False, highlight=False,
                               auto_scroll=True, min_width=16)
+                yield Input(
+                    id="chat",
+                    placeholder="ask for code — Enter runs it in the background · Esc interrupts · /model groq",
+                )
             with Vertical(id="right"):
                 yield GauntletRail()
                 yield WaitingOn()
@@ -541,6 +548,11 @@ class RatchetApp(App):
 
         for ev in self.bus.tail():
             p, k = ev.payload, ev.kind
+            if k.startswith("chat."):
+                # chat turns already narrate themselves into the activity pane from
+                # the worker; their bus records are for the dashboard and replay,
+                # and must not count as "the run started" (which clears the log)
+                continue
             if not self.seen_any:
                 self.seen_any = True
                 log.clear()
@@ -691,6 +703,57 @@ class RatchetApp(App):
         t.append(body, style=style or m.MUTED)
         log.write(t)
 
+    # ------------------------------------------------------------------ chat --
+    # The input box turns the console into the front door of a coding session: a
+    # prompt runs on a worker thread, the activity pane shows the ultra-summary
+    # (one line per step, never a raw diff), Esc interrupts mid-turn, and every
+    # completed turn is one git commit -- revertible, like everything else here.
+
+    def _chat_session(self):
+        if self._chat is None:
+            from ..chat import ChatSession
+
+            self._chat = ChatSession(self.repo, bus=self.bus)
+        return self._chat
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        prompt = event.value.strip()
+        event.input.value = ""
+        if not prompt:
+            return
+        log = self.query_one("#activity", RichLog)
+        session = self._chat_session()
+        if prompt.startswith("/model"):
+            try:
+                spec = prompt.split(None, 1)[1] if " " in prompt else ""
+                self._note(log, f"chat model -> {session.backend.switch(spec)}", m.ACCENT)
+            except Exception as e:
+                self._note(log, str(e), m.RED)
+            return
+        if self._chat_worker is not None and self._chat_worker.is_running:
+            self._note(log, "a turn is already running — Esc to interrupt it first", m.AMBER)
+            return
+        self._step(log, "chat", f"{session.backend.provider}/{session.backend.model}", m.ACCENT)
+        self._note(log, prompt[:120])
+        self._chat_worker = self._run_chat_turn(prompt)
+
+    @work(thread=True, exit_on_error=False)
+    def _run_chat_turn(self, prompt: str) -> None:
+        log = self.query_one("#activity", RichLog)
+        session = self._chat_session()
+
+        def emit(kind: str, text: str) -> None:
+            colour = {"step": "", "note": m.AMBER, "error": m.RED, "done": m.GREEN}.get(kind, "")
+            self.call_from_thread(self._note, log, text, colour)
+
+        turn = session.run_turn(prompt, emit)
+        if turn.ok:
+            where = f" · commit {turn.commit}" if turn.commit else " · not a git repo, nothing to revert to"
+            self.call_from_thread(
+                self._note, log,
+                f"done in {turn.seconds}s · {len(turn.files)} file(s){where}", m.GREEN,
+            )
+
     # ---------------------------------------------------------------- actions --
 
     def _decide(self, allow: bool) -> None:
@@ -716,6 +779,13 @@ class RatchetApp(App):
         self._decide(True)
 
     def action_deny(self) -> None:
+        # Esc first means "stop the running chat turn"; only with no turn running
+        # does it keep its original job of denying an approval.
+        if self._chat_worker is not None and self._chat_worker.is_running:
+            self._chat_session().cancel.set()
+            self._chat_worker.cancel()
+            self._note(self.query_one("#activity", RichLog), "interrupt requested", m.AMBER)
+            return
         if self._gate_armed:
             self._decide(False)
 

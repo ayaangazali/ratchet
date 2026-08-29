@@ -77,7 +77,31 @@ ratchet
 
 Bare `ratchet` opens the console — the way `claude` opens a session. On a fresh
 directory it starts on an empty bus with the quick-start splash; in a directory
-with runs it attaches to the latest one. Everything else is a subcommand:
+with runs it attaches to the latest one.
+
+**The activity pane is also a coding session.** Type into the chat box at the
+bottom — *"yo, make a website for my coffee shop"* — and Enter runs it in the
+background while the pane narrates the ultra-summary, one line per step, never a
+raw diff. Esc interrupts a running turn. Every completed turn lands as **one git
+commit** (`[ratchet chat] <intent>`), so anything it writes is one `git revert`
+away — the same bargain as the run loop, in chat shape.
+
+```
+● chat (anthropic/claude-sonnet-4-6)
+└  yo, make a website for my coffee shop
+└  asking anthropic/claude-sonnet-4-6
+└  scaffold a landing page with a menu section
+└  wrote index.html (64 lines)
+└  wrote style.css (41 lines)
+└  done in 6.2s · 2 file(s) · commit 3f9c2a1
+```
+
+Providers are a wire call, not an SDK: **Claude** (default), **OpenAI**, **Groq**,
+**Kimi** — set `RATCHET_CHAT_PROVIDER` / `RATCHET_CHAT_MODEL`, or switch live with
+`/model groq` typed straight into the box. With no key at all, the offline `demo`
+provider still scaffolds real files, so the flow works on a fresh laptop.
+
+Everything else is a subcommand:
 
 ```bash
 ratchet demo --dir demo-repo        # seed a playground: a broken slugify, three patches
