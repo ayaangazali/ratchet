@@ -44,6 +44,14 @@ export async function getQodo(): Promise<QodoFeed> {
   return (await res.json()) as QodoFeed;
 }
 
+export async function getQodoFindings(
+  pr: number,
+): Promise<import("./types").QodoPrFindings> {
+  const res = await fetch(`/api/qodo/findings/${pr}`);
+  if (!res.ok) throw new Error(`findings failed (${res.status})`);
+  return await res.json();
+}
+
 export async function requestQodoRereview(pr: number): Promise<string> {
   const res = await fetch("/api/qodo/rereview", {
     method: "POST",

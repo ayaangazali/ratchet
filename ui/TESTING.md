@@ -76,6 +76,22 @@ Each Qodo panel row has a ↻ button → `POST /api/qodo/rereview` → `gh pr co
 - The gateway drops `qodo_cache.json` on trigger so the panel's next fetch shows the
   fresh pass. **pass**
 
+## Scenario 13 — /qodo status page
+
+`#/qodo` (linked from the topbar) lists every PR with Qodo's latest headline counts;
+expanding a PR parses the bot's newest review comment into individual findings — title,
+tags, description, and the **"what qodo told the agent"** block (Qodo embeds a
+ready-to-use agent prompt per finding; the page surfaces it verbatim). Buttons:
+re-review now (the `/review` trigger) and open on github.
+
+Browser-verified on PR #12: 10 unique findings parsed, all 10 with agent prompts,
+headline `8 bugs · 2 rule violations` matching the 23:22Z review pass. Console:
+`[qodo] status page: 13 PRs loaded`, `[qodo] PR #12: 10 findings parsed`, 0 errors.
+Parser fixes found while testing: the review body repeats finding summaries in a later
+section (dedupe by title, first wins) and repeats `<code>N (x)</code>` counts deeper in
+the body (headline = first match per category). Terminal twin: the `/qodo` skill at
+`~/.claude/skills/qodo/SKILL.md` reports the same status via `gh`. **pass**
+
 ## Known limitations
 
 - Qodo reviews shown are the bot's real findings on this repo's PRs — the "external

@@ -338,8 +338,11 @@ def _fetch_qodo() -> dict:
             body = c.get("body", "")
             kind = "review" if "Code Review by Qodo" in body else (
                 "summary" if "PR Summary by Qodo" in body else "comment")
-            counts = {m.group(1).strip().lower(): int(m.group(2))
-                      for m in CATEGORY_RE.finditer(body)}
+            # the headline is the first match per category; later <code>N (x)</code>
+            # occurrences deeper in the body must not overwrite it
+            counts: dict[str, int] = {}
+            for m in CATEGORY_RE.finditer(body):
+                counts.setdefault(m.group(1).strip().lower(), int(m.group(2)))
             # Qodo edits its review comment in place on /review re-runs, so the
             # updated timestamp is the one that reflects the latest review pass.
             reviews.append({
@@ -372,6 +375,84 @@ def _qodo_cached() -> dict:
 @app.get("/api/qodo")
 async def qodo():
     return await asyncio.to_thread(_qodo_cached)
+
+
+FINDING_RE = re.compile(
+    r"<summary>\s*(\d+)\.\s+(.*?)((?:\s*<code>[^<]*</code>)+)\s*</summary>", re.S
+)
+TAG_RE = re.compile(r"<code>\s*(?:[^\w<>\s]+\s*)?([^<]*?)\s*</code>")
+PRE_RE = re.compile(r"<pre>(.*?)</pre>", re.S)
+# inside the blockquoted 'Agent prompt' details, every line is '>'-prefixed
+PROMPT_RE = re.compile(r"(The issue below was found.*?)>?\s*```", re.S)
+
+
+def _clean(html: str) -> str:
+    text = re.sub(r"<[^>]+>", "", html)
+    text = re.sub(r"^>\s?", "", text, flags=re.M)
+    for ent, ch in (("&#x27;", "'"), ("&quot;", '"'), ("&lt;", "<"),
+                    ("&gt;", ">"), ("&amp;", "&")):
+        text = text.replace(ent, ch)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _parse_findings(body: str) -> list[dict]:
+    """Pull each numbered finding out of a Qodo review comment.
+
+    Qodo embeds an 'Agent prompt' per finding — the instruction it wants a coding
+    agent to follow. That is the payload the /qodo status page exists to show.
+    """
+    findings = []
+    seen: set[str] = set()
+    matches = list(FINDING_RE.finditer(body))
+    for i, m in enumerate(matches):
+        title = _clean(m.group(2))
+        # the body repeats finding summaries in a later section; first one wins
+        if title in seen:
+            continue
+        seen.add(title)
+        chunk = body[m.end(): matches[i + 1].start() if i + 1 < len(matches) else len(body)]
+        pres = PRE_RE.findall(chunk)
+        prompt = PROMPT_RE.search(chunk)
+        findings.append({
+            "n": int(m.group(1)),
+            "title": title,
+            "tags": [t for t in TAG_RE.findall(m.group(3)) if t],
+            "description": _clean(pres[0]) if pres else "",
+            "agent_prompt": re.sub(r"^>\s?", "", prompt.group(1), flags=re.M).strip()
+            if prompt else "",
+        })
+    return findings
+
+
+@app.get("/api/qodo/findings/{pr}")
+async def qodo_findings(pr: int):
+    def fetch() -> dict:
+        comments = json.loads(subprocess.run(
+            ["gh", "api", f"repos/{GH_REPO}/issues/{pr}/comments"],
+            capture_output=True, text=True, check=True, timeout=30,
+        ).stdout)
+        reviews = [c for c in comments
+                   if c.get("user", {}).get("login") == "qodo-code-review[bot]"
+                   and "Code Review by Qodo" in c.get("body", "")]
+        latest = max(reviews, key=lambda c: c.get("updated_at") or "", default=None)
+        replies = [
+            {"author": c["user"]["login"], "at": c["created_at"],
+             "text": _clean(c["body"])[:300]}
+            for c in comments
+            if "[bot]" not in c.get("user", {}).get("login", "")
+            and c.get("body", "").strip() not in ("/review", "")
+        ]
+        return {
+            "pr": pr,
+            "reviewed_at": (latest.get("updated_at") or latest.get("created_at")) if latest else None,
+            "findings": _parse_findings(latest["body"]) if latest else [],
+            "replies": replies[-3:],
+        }
+
+    try:
+        return await asyncio.to_thread(fetch)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
 
 
 @app.post("/api/qodo/rereview")

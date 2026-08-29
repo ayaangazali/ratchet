@@ -1,5 +1,5 @@
 {
-  "fetched_at": 1788045800.957375,
+  "fetched_at": 1788046670.229938,
   "repo": "ayaangazali/ratchet",
   "prs": [
     {
@@ -20,7 +20,7 @@
             "rule violations": 4,
             "skill insights": 0
           },
-          "at": "2026-08-29T23:17:25Z"
+          "at": "2026-08-29T23:35:50Z"
         }
       ]
     },
@@ -60,8 +60,8 @@
         {
           "kind": "review",
           "counts": {
-            "bugs": 2,
-            "rule violations": 0,
+            "bugs": 8,
+            "rule violations": 2,
             "skill insights": 0,
             "requirement gaps": 0,
             "ux issues": 0

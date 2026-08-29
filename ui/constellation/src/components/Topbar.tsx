@@ -6,7 +6,12 @@ export default function Topbar({ meta }: { meta?: string }) {
       <Link to="/" className="wordmark">
         RATCHET<span className="dot">.</span>
       </Link>
-      <div className="meta">{meta ?? "tests decide, not the agent"}</div>
+      <div className="topbar-right">
+        <Link to="/qodo" className="meta">
+          /qodo
+        </Link>
+        <div className="meta">{meta ?? "tests decide, not the agent"}</div>
+      </div>
     </div>
   );
 }

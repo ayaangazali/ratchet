@@ -604,6 +604,57 @@ pre.audit {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.topbar-right a.meta:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+.qodo-pr-head {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.qodo-detail {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.qodo-finding {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.qodo-finding:last-of-type {
+  border-bottom: none;
+}
+.qodo-prompt {
+  margin-top: 8px;
+}
+.qodo-prompt summary {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-dim);
+  cursor: pointer;
+}
+.qodo-replies {
+  margin-top: 14px;
+}
 .chip.qodo-go {
   padding: 2px 7px;
   font-size: 11px;

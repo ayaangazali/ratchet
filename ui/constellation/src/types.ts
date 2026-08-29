@@ -67,6 +67,21 @@ export interface QodoPr {
   reviews: QodoReview[];
 }
 
+export interface QodoFinding {
+  n: number;
+  title: string;
+  tags: string[];
+  description: string;
+  agent_prompt: string;
+}
+
+export interface QodoPrFindings {
+  pr: number;
+  reviewed_at: string | null;
+  findings: QodoFinding[];
+  replies: { author: string; at: string; text: string }[];
+}
+
 export interface QodoFeed {
   fetched_at: number;
   repo: string;

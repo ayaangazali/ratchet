@@ -18,3 +18,4 @@ ui/constellation/dist/
 ui/constellation/*.tsbuildinfo
 ui/constellation/vite.config.js
 ui/constellation/vite.config.d.ts
+uv.lock
