@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ratchet — dashboard</title>
+<meta name="description" content="Everything the Ratchet backend can prove, on one page: the red-team score, the offline proof run, the search tree, receipt chains, and the PR pipeline.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14' fill='%23f5a623'>▸</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@800;900&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+
+<nav class="nav" aria-label="Main">
+  <div class="wrap">
+    <a class="wordmark" href="index.html">RATCHET<span class="tick">▸</span></a>
+    <div class="nav-links">
+      <a href="dashboard.html" aria-current="page">Dashboard</a>
+      <a href="docs.html">Docs</a>
+      <a href="https://github.com/ayaangazali/ratchet">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="dash-head wrap">
+  <h1>Operations dashboard</h1>
+  <p class="meta" id="dash-meta"></p>
+</header>
+
+<main class="wrap" style="padding-bottom:70px">
+  <div class="kpis" id="kpis"></div>
+
+  <div class="panel">
+    <h2>Red team — the verifier vs known attacks</h2>
+    <p class="sub">Latest <code>make proof</code> run. "caught" = attack blocked, scored zero. The two honest patches at the bottom must be accepted — false positives count against the verifier.</p>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>attack</th><th>verdict</th><th>score</th><th>stopped at</th><th>findings</th></tr></thead>
+      <tbody id="redteam-body"></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="dash-cols" style="margin-top:16px">
+    <div>
+      <div class="panel">
+        <h2>Offline proof run — <span id="proof-score"></span></h2>
+        <p class="sub"><code>make proof</code>: every public claim exercised with no model, no key, no network.</p>
+        <ul class="checklist" id="proof-list"></ul>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>Latest search run</h2>
+        <p class="sub" id="search-meta"></p>
+        <div class="term" id="search-tree" role="img" aria-label="Search tree"></div>
+        <p class="sub" style="margin:12px 0 0" id="search-budget"></p>
+      </div>
+      <div class="panel">
+        <h2>Objective graph</h2>
+        <p class="sub">Goals decomposed into nodes only tests can fulfil.</p>
+        <table><tbody id="graph-body"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Pull request pipeline</h2>
+    <p class="sub">Every change goes through a reviewed PR. Bars show lines added and removed, scaled to the largest diff.</p>
+    <div class="legend" aria-hidden="true">
+      <span class="item"><span class="swatch" style="background:var(--series-1)"></span>additions</span>
+      <span class="item"><span class="swatch" style="background:var(--series-2)"></span>deletions</span>
+    </div>
+    <div id="pr-chart"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Receipt chains</h2>
+    <p class="sub">Every graded node is signed into a hash chain. The third row is the tamper demo: a forged green verdict, detected by <code>make audit</code>.</p>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>run</th><th>receipts</th><th>head</th><th>green</th><th>progress</th><th>chain</th></tr></thead>
+      <tbody id="receipts-body"></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="dash-cols" style="margin-top:16px">
+    <div>
+      <div class="panel">
+        <h2>Cheat detector — active rules</h2>
+        <p class="sub">Each rule ships with a patch that trips it and a patch that must not.</p>
+        <div class="rulegrid" id="rules"></div>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>Research digest</h2>
+        <p class="sub">Verified before the build, so nobody re-searches it on the day.</p>
+        <p style="margin:0;font-size:14px;color:var(--ink-2)">
+          <a href="https://github.com/ayaangazali/ratchet/blob/main/RESEARCH.md">RESEARCH.md</a> —
+          the TrueForge wire contract, SSE event stream, approval flow, sandbox facts,
+          all primary-sourced ·
+          <a href="https://github.com/ayaangazali/ratchet/blob/main/BLOG.md">BLOG.md</a> ·
+          <a href="https://github.com/ayaangazali/ratchet/blob/main/SUBMISSION.md">SUBMISSION.md</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="tip" id="tip" role="tooltip"></div>
+
+<footer>
+  <div class="wrap">
+    <p class="fine">Data baked from the repo and the latest <code>.ratchet-proof/</code> run — regenerate with <code>python scripts/build_site_data.py</code>.</p>
+  </div>
+</footer>
+
+<script src="data.js"></script>
+<script>
+const D = window.RATCHET_DATA;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+$("dash-meta").textContent =
+  `snapshot ${D.generated} · ${D.repo.replace("https://", "")} · latest make proof run`;
+
+// KPI tiles
+const S = D.stats;
+$("kpis").innerHTML = [
+  { v: `${S.redteamCaught}/${S.redteamTotal}`, k: "reward hacks caught", good: true },
+  { v: S.falsePositives, k: "false positives", good: true },
+  { v: `${S.proofChecksPassed}/${S.proofChecksTotal}`, k: "proof checks pass", good: true },
+  { v: S.tests, k: "tests in suite" },
+  { v: S.gauntletStages, k: "gauntlet stages" },
+  { v: S.prsOpen, k: "open reviewed PRs" },
+].map((t) => `<div class="kpi${t.good ? " good" : ""}"><span class="v">${t.v}</span><span class="k">${t.k}</span></div>`).join("");
+
+// Red team table — status always icon + label, never color alone
+const verdict = (r) => {
+  if (r.outcome === "green") return `<span class="chip good">✓ accepted</span>`;
+  if (r.outcome === "cheated") return `<span class="chip good">✓ caught</span>`;
+  return `<span class="chip warn">◼ held at ${r.stoppedAt}</span>`; // never reached green
+};
+$("redteam-body").innerHTML = D.redteam.map((r) => `
+  <tr>
+    <td class="mono">${esc(r.attack)}</td>
+    <td>${verdict(r)}</td>
+    <td class="num">${r.score.toFixed(2)}</td>
+    <td class="mono">${esc(r.stoppedAt)}</td>
+    <td class="mono" style="color:var(--muted)">${esc(r.findings) || "—"}</td>
+  </tr>`).join("");
+
+// Proof checklist
+$("proof-score").textContent = `${S.proofChecksPassed}/${S.proofChecksTotal}`;
+$("proof-list").innerHTML = D.proofChecks.map((c) => `<li>${esc(c)}</li>`).join("");
+
+// Search run
+$("search-meta").textContent =
+  `run ${D.search.run} · task ${D.search.task} · provider ${D.search.provider}`;
+$("search-tree").innerHTML = D.search.tree.map((l) =>
+  l.includes("✗") ? `<span class="r">${esc(l)}</span>`
+  : l.includes("★") ? `<span class="g">${esc(l)}</span>`
+  : `<span class="a">${esc(l)}</span>`).join("\n");
+$("search-budget").textContent =
+  `winner ${D.search.winner} · score ${D.search.score.toFixed(3)} · ${D.search.nodes} nodes, ${D.search.pruned} pruned · budget ${D.search.budget}`;
+
+// Objective graph
+$("graph-body").innerHTML = D.objectiveGraph.nodes.map((n) => `
+  <tr>
+    <td class="mono">${esc(n.name)}</td>
+    <td><span class="chip good">✓ ${esc(n.status)}</span></td>
+    <td class="num">attempts ${n.attempts}</td>
+    <td class="mono" style="color:var(--muted)">${n.escalated ? "escalated to tree search" : "—"}</td>
+  </tr>`).join("");
+
+// PR chart: two thin horizontal bars per PR, scaled to the largest value
+const maxLines = Math.max(...D.prs.flatMap((p) => [p.additions, p.deletions]));
+$("pr-chart").innerHTML = D.prs.map((p) => `
+  <div class="barrow" data-tip="#${p.number} ${esc(p.title)}&#10;+${p.additions} / −${p.deletions} · ${p.state}">
+    <span class="lbl"><a href="${p.url}">#${p.number}</a></span>
+    <span class="bars">
+      <span class="bar adds" style="width:${Math.max(0.5, p.additions / maxLines * 100)}%"></span>
+      <span class="bar dels" style="width:${Math.max(0.5, p.deletions / maxLines * 100)}%"></span>
+    </span>
+    <span class="nums">+${p.additions} / −${p.deletions}</span>
+  </div>`).join("");
+
+// Receipts
+$("receipts-body").innerHTML = D.receipts.map((r) => {
+  const broken = r.chain.startsWith("BROKEN");
+  return `<tr>
+    <td class="mono">${esc(r.run)}</td>
+    <td class="num">${r.receipts}</td>
+    <td class="mono" style="color:var(--muted)">${esc(r.head)}</td>
+    <td class="num">${r.green}</td>
+    <td class="num">${r.progress}</td>
+    <td>${broken
+      ? `<span class="chip good">✓ tamper detected</span> <span class="mono" style="color:var(--muted);font-size:12px">${esc(r.chain)}</span>`
+      : `<span class="chip good">✓ intact</span>`}</td>
+  </tr>`;
+}).join("");
+
+// Cheat rules
+$("rules").innerHTML = D.cheatRules.map((r) => `<span class="rule">${esc(r)}</span>`).join("");
+
+// Hover tooltips for the PR chart
+const tip = $("tip");
+document.querySelectorAll("[data-tip]").forEach((el) => {
+  el.addEventListener("mousemove", (e) => {
+    tip.style.display = "block";
+    tip.innerHTML = esc(el.dataset.tip).replace(/\n/g, "<br>");
+    tip.style.left = Math.min(e.clientX + 14, innerWidth - 340) + "px";
+    tip.style.top = (e.clientY + 14) + "px";
+  });
+  el.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+});
+</script>
+</body>
+</html>
