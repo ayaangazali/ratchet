@@ -604,6 +604,12 @@ pre.audit {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+.qodo-at {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted-2);
+  white-space: nowrap;
+}
 .chips {
   display: flex;
   gap: 8px;

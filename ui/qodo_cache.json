@@ -1,7 +1,51 @@
 {
-  "fetched_at": 1788044206.458424,
+  "fetched_at": 1788044943.078068,
   "repo": "ayaangazali/ratchet",
   "prs": [
+    {
+      "number": 14,
+      "state": "OPEN",
+      "title": "feat: the console \u2014 dolphin TUI, live pixel-office dashboard, installable CLI",
+      "url": "https://github.com/ayaangazali/ratchet/pull/14",
+      "reviews": [
+        {
+          "kind": "summary",
+          "counts": {},
+          "at": "2026-08-29T23:01:51Z"
+        },
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 8,
+            "rule violations": 4,
+            "skill insights": 0
+          },
+          "at": "2026-08-29T23:04:47Z"
+        }
+      ]
+    },
+    {
+      "number": 13,
+      "state": "OPEN",
+      "title": "feat(site): public landing page, docs platform, and evidence dashboard",
+      "url": "https://github.com/ayaangazali/ratchet/pull/13",
+      "reviews": [
+        {
+          "kind": "summary",
+          "counts": {},
+          "at": "2026-08-29T22:59:26Z"
+        },
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 4,
+            "rule violations": 2,
+            "skill insights": 0
+          },
+          "at": "2026-08-29T23:00:56Z"
+        }
+      ]
+    },
     {
       "number": 12,
       "state": "OPEN",
@@ -18,9 +62,16 @@
           "counts": {
             "bugs": 4,
             "rule violations": 1,
-            "skill insights": 0
+            "skill insights": 0,
+            "requirement gaps": 0,
+            "ux issues": 0
           },
-          "at": "2026-08-29T21:26:30Z"
+          "at": "2026-08-29T23:06:45Z"
+        },
+        {
+          "kind": "comment",
+          "counts": {},
+          "at": "2026-08-29T23:06:49Z"
         }
       ]
     },

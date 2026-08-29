@@ -340,7 +340,12 @@ def _fetch_qodo() -> dict:
                 "summary" if "PR Summary by Qodo" in body else "comment")
             counts = {m.group(1).strip().lower(): int(m.group(2))
                       for m in CATEGORY_RE.finditer(body)}
-            reviews.append({"kind": kind, "counts": counts, "at": c.get("created_at")})
+            # Qodo edits its review comment in place on /review re-runs, so the
+            # updated timestamp is the one that reflects the latest review pass.
+            reviews.append({
+                "kind": kind, "counts": counts,
+                "at": c.get("updated_at") or c.get("created_at"),
+            })
         if reviews:
             out.append({**pr, "reviews": reviews})
     return {"fetched_at": time.time(), "repo": GH_REPO, "prs": out}

@@ -42,6 +42,26 @@ panel is live GitHub data.
    deserves its own fix + test** — an empty candidate should count as a dead end.
 3. **Gateway re-read the whole bus every 150ms** — replaced with incremental byte reads.
 
+## Scenario 11 — live Qodo round-trip (2026-08-29, second pass)
+
+Question: is Qodo's AI actually reviewing alongside us, or are we just displaying
+history? Proven live, with timestamps:
+
+1. `gh pr comment 12 --body "/review"` posted at **23:04:44Z**.
+2. `qodo-code-review[bot]` acknowledged ("Qodo is busy working") at **23:04:50Z** — 6s.
+3. The bot **edited its review comment in place** — `created_at 21:26:30Z`,
+   `updated_at 23:06:45Z` — a fresh review pass ~2 min after the trigger, with new
+   category set (`requirement gaps`, `ux issues`) absent from the earlier pass.
+4. Gateway fetch at 23:09:03Z picked it up (`at` now uses `updated_at` for this reason).
+5. Browser console (the proof the integration runs in the UI):
+   `[qodo] live feed: 13 PRs, 20 bot comments, fetched 2026-08-29T23:09:03.078Z`
+   `[qodo] newest review: PR #12 at 2026-08-29T23:06:49Z`
+   — and note the feed grew from 11 PRs/15 comments to 13/20 during the session:
+   Qodo was reviewing other agents' fresh PRs while we watched.
+
+Qodo Command CLI (`@qodo/command` 0.36.0) is installed via npx but has no API key on
+this machine; per-diff CLI reviews need `qodo login` (interactive, owner-only).
+
 ## Known limitations
 
 - Qodo reviews shown are the bot's real findings on this repo's PRs — the "external

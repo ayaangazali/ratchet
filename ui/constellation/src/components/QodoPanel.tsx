@@ -9,7 +9,23 @@ export default function QodoPanel() {
 
   useEffect(() => {
     getQodo()
-      .then(setFeed)
+      .then((f) => {
+        setFeed(f);
+        const reviews = f.prs.reduce((n, p) => n + p.reviews.length, 0);
+        console.info(
+          `[qodo] live feed: ${f.prs.length} PRs, ${reviews} bot comments, ` +
+            `fetched ${new Date(f.fetched_at * 1000).toISOString()}` +
+            (f.stale ? " (stale cache)" : ""),
+        );
+        const latest = f.prs
+          .flatMap((p) => p.reviews.map((r) => ({ pr: p.number, ...r })))
+          .sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+        if (latest)
+          console.info(
+            `[qodo] newest review: PR #${latest.pr} at ${latest.at} — ` +
+              JSON.stringify(latest.counts),
+          );
+      })
       .catch((e) => setErr(e instanceof Error ? e.message : "qodo unavailable"));
   }, []);
 
@@ -28,7 +44,10 @@ export default function QodoPanel() {
       )}
       {feed &&
         feed.prs.map((pr) => {
-          const review = pr.reviews.find((r) => r.kind === "review");
+          // newest review comment wins — a re-triggered /review supersedes the old one
+          const review = [...pr.reviews]
+            .filter((r) => r.kind === "review")
+            .sort((a, b) => (a.at < b.at ? 1 : -1))[0];
           const counts = review?.counts ?? {};
           const entries = Object.entries(counts).filter(([, n]) => n > 0);
           return (
@@ -46,6 +65,16 @@ export default function QodoPanel() {
                     {n} {name}
                   </span>
                 ))}
+                {review && (
+                  <span className="qodo-at">
+                    {new Date(review.at).toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                )}
               </span>
             </div>
           );
