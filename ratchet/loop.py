@@ -145,6 +145,7 @@ class SearchRun:
         self.bus.emit("repo.mapped", lines=len(self.repo_map.splitlines()))
 
         stopped = ""
+        fruitless = 0  # consecutive expansions that added no child at all
         while True:
             if not self.scheduler.budget.ok():
                 stopped = self.scheduler.budget.exhausted_reason()
@@ -170,7 +171,16 @@ class SearchRun:
                     "idea; choose a materially different hypothesis about the cause."
                 )
 
-            self.expand(node, fanout=fanout, hint=hint)
+            children = self.expand(node, fanout=fanout, hint=hint)
+            # Empty candidates spend no node budget, so a generator that has gone
+            # dry (an exhausted script, a model returning prose with no diff) used
+            # to spin this loop flat out until the wall clock -- millions of bus
+            # events, zero progress. Nothing usable five times in a row is an
+            # answer: stop and say so.
+            fruitless = 0 if children else fruitless + 1
+            if fruitless >= 5:
+                stopped = "the generator produced no usable candidate five expansions in a row"
+                break
             self.scheduler.observe(self.tree)
 
         return self._finish(self.tree.best(), stopped or "budget exhausted")

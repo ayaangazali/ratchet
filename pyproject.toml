@@ -7,6 +7,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
   "mcp[cli]>=1.2.0",
+  "pytest>=8.0",  # the verifier's default framework; an installed ratchet must grade out of the box
   "httpx>=0.27",
   "textual>=0.79",
   "rich>=13.7",

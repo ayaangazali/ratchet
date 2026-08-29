@@ -276,6 +276,38 @@ def test_held_out_names_never_reach_a_prompt(repo):
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git required")
+def test_a_dry_generator_ends_the_run_instead_of_spinning(repo):
+    """Empty candidates spend no budget, so a generator with nothing to say used to
+    spin the loop until the wall clock -- 11 million bus events in one observed run.
+    Five fruitless expansions in a row must end the run with a reason."""
+    task = load_task(TASK)
+    task.repo_path = str(repo)
+    run = SearchRun(
+        task=task, repo=repo, provider=WorktreeProvider(repo, "t-dry"),
+        subagents=Subagents(ScriptedBackend(["map"])),  # nothing for the generator
+        run_id="t-dry",
+        scheduler=Scheduler(Budget(max_nodes=40, max_seconds=300, max_usd=3)), parallel=False,
+    )
+    result = run.run()
+    assert not result.green
+    assert "no usable candidate" in result.stopped_because
+
+
+def test_sandbox_env_backs_python_with_the_running_interpreter(repo):
+    """A brew/pipx install has no dev venv on PATH and macOS has no bare `python`;
+    the sandbox must resolve `python` to the interpreter running ratchet."""
+    provider = WorktreeProvider(repo, "t-env")
+    sb = provider.fork(provider.base_image(), label="env")
+    try:
+        res = sb.exec("python -c 'import sys; print(sys.version_info[0])'", timeout=60)
+    finally:
+        sb.destroy()
+        provider.cleanup()
+    assert res.ok, res.out
+    assert res.out.strip().endswith("3")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git required")
 def test_receipts_cover_every_graded_node(repo):
     task = load_task(TASK)
     task.repo_path = str(repo)
