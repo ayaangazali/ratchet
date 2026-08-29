@@ -64,7 +64,7 @@ project and of the track we are entering.
 ```bash
 make dev              # editable install + dev deps
 make demo             # seed demo-repo/ with the broken slugify and three patches
-make test             # 41 tests; no docker, no network
+make test             # the whole suite; no docker, no network
 make lint             # ruff + mypy
 make redteam          # score the verifier against known cheating patterns
 make evals            # linear vs search on our own seeded bugs

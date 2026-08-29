@@ -32,13 +32,13 @@ Three claims, each demonstrable in under thirty seconds:
 
 ## 1. What is already built
 
-`make dev && make demo && make test` → 41 tests, ~40s, no Docker, no network.
+`make dev && make demo && make test` → the whole suite, under a minute, no Docker, no network.
 
 | piece | state |
 |---|---|
 | the seven-stage gauntlet with the exact score formula | **done**, `verifier/gauntlet.py` |
 | the fifteen lines of bash (test reset, markers, exit code outside them) | **done**, `verifier/eval_script.py` |
-| cheat detector: 12 rules, severity-graded, hard gate on critical | **done**, `verifier/cheat.py` |
+| cheat detector: ~20 rules, severity-graded, hard gate on critical | **done**, `verifier/cheat.py` |
 | test parsers: pytest, jest, vitest, go, cargo, with anti-spoof guards | **done**, `verifier/parsers.py` |
 | held-out test split, pooled into `f2p_ratio`, `delta` reported | **done** |
 | Node + Tree: restorable states, atomic persistence, rendering | **done**, `node.py` |

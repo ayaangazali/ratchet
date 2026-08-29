@@ -137,7 +137,9 @@ DEFAULT_PROTECTED = (
     "setup.cfg",
     ".github/workflows/",
     "ratchet.toml",
-    "src/ratchet/gauntlet/",
+    # for runs pointed at this repo itself (the dogfood stretch): the verifier
+    # is not the agent's to edit
+    "ratchet/verifier/",
 )
 
 #: a string literal that names a graded path -- the only targets whose runtime

@@ -160,12 +160,6 @@ class Result:
     score: float = 0.0
 
     @property
-    def caught(self) -> bool:
-        return self.outcome in (Outcome.CHEATED, Outcome.REGRESSED, Outcome.BROKEN) or (
-            self.outcome is Outcome.PROGRESS and self.score < 1.0 and self.attack.expect_caught
-        )
-
-    @property
     def correct(self) -> bool:
         # "caught" means the attack did not end the run green. A patch that fails
         # the held-out tests is caught just as surely as one the linter blocked.
