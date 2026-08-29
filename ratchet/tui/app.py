@@ -29,7 +29,8 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Input, RichLog, Static
+from textual.widgets import Button, Input, OptionList, RichLog, Static
+from textual.widgets.option_list import Option
 from textual.worker import Worker
 
 from ..bus import Bus
@@ -444,6 +445,8 @@ class RatchetApp(App):
         self._short = False
         self._chat = None                                    # lazy ChatSession
         self._chat_worker: Worker | None = None              # the running background turn, if any
+        self._palette_rows = []                              # rows behind the visible options
+        self._awaiting_key: str | None = None                # /connect: which provider's key comes next
 
     # ----------------------------------------------------------------- layout --
 
@@ -457,9 +460,10 @@ class RatchetApp(App):
             with Vertical(id="activity-box"):
                 yield RichLog(id="activity", wrap=True, markup=False, highlight=False,
                               auto_scroll=True, min_width=16)
+                yield OptionList(id="palette")
                 yield Input(
                     id="chat",
-                    placeholder="ask for code — Enter runs it in the background · Esc interrupts · /model groq",
+                    placeholder="ask for code, or / for commands — Enter runs · Esc interrupts",
                 )
             with Vertical(id="right"):
                 yield GauntletRail()
@@ -475,6 +479,7 @@ class RatchetApp(App):
         self.query_one("#gauntlet").border_title = "gauntlet"
         self.query_one("#waiting").border_title = "waiting on"
         self.query_one(ApprovalGate).display = False
+        self.query_one("#palette", OptionList).display = False
         self.query_one(StatusLine).draw()
         self._short = self.size.height < 40
         self._resize_banner()
@@ -717,19 +722,196 @@ class RatchetApp(App):
         return self._chat
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        prompt = event.value.strip()
-        event.input.value = ""
-        if not prompt:
-            return
+        text = event.value.strip()
         log = self.query_one("#activity", RichLog)
+
+        # /connect key-prompt mode: this submit IS the pasted key
+        if self._awaiting_key:
+            provider, self._awaiting_key = self._awaiting_key, None
+            event.input.password = False
+            event.input.placeholder = "ask for code, or / for commands — Enter runs · Esc interrupts"
+            event.input.value = ""
+            if text:
+                self._connect_with_key(provider, text)
+            else:
+                self._note(log, "connect cancelled", m.AMBER)
+            return
+
+        # palette open with a highlighted row: Enter applies the row, not the text
+        palette = self.query_one("#palette", OptionList)
+        if palette.display and palette.highlighted is not None and self._palette_rows:
+            event.input.value = ""
+            self._apply_palette_row(self._palette_rows[palette.highlighted])
+            return
+
+        event.input.value = ""
+        if not text:
+            return
+        if text.startswith("/"):
+            self._dispatch_command(text)
+            return
+        self._start_turn(text)
+
+    # ---------------------------------------------------------------- palette --
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if self._awaiting_key:
+            return
+        from .palette import rows_for
+
+        rows = rows_for(event.value)
+        palette = self.query_one("#palette", OptionList)
+        self._palette_rows = rows
+        palette.clear_options()
+        if rows:
+            palette.add_options([Option(f"{r.label:<38} {r.meta}", id=str(i)) for i, r in enumerate(rows)])
+            palette.display = True
+            palette.highlighted = 0
+        else:
+            palette.display = False
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_list.id == "palette" and event.option.id is not None:
+            self._apply_palette_row(self._palette_rows[int(event.option.id)])
+            self.query_one("#chat", Input).value = ""
+
+    def _close_palette(self) -> None:
+        self.query_one("#palette", OptionList).display = False
+        self._palette_rows = []
+
+    def _apply_palette_row(self, row) -> None:
+        box = self.query_one("#chat", Input)
+        if row.kind == "model":
+            self._close_palette()
+            self._dispatch_command(f"/model {row.value}")
+        elif row.kind == "provider":
+            self._close_palette()
+            self._dispatch_command(f"/connect {row.value}")
+        elif row.value in ("/model", "/connect"):
+            # these want an argument: complete the text and reopen with the options
+            box.value = row.value + " "
+            box.focus()
+            box.cursor_position = len(box.value)
+        else:
+            self._close_palette()
+            self._dispatch_command(row.value)
+
+    # --------------------------------------------------------------- commands --
+
+    def _dispatch_command(self, text: str) -> None:
+        from ..providers import PROVIDERS, connected_providers
+        from .palette import COMMANDS, help_lines
+
+        log = self.query_one("#activity", RichLog)
+        self._close_palette()
+        cmd, _, arg = text.partition(" ")
+        arg = arg.strip()
         session = self._chat_session()
-        if prompt.startswith("/model"):
+
+        if cmd == "/help":
+            self._step(log, "help", "", m.ACCENT)
+            for line in help_lines():
+                self._note(log, line)
+        elif cmd == "/model":
+            if not arg:
+                box = self.query_one("#chat", Input)
+                box.value = "/model "
+                box.focus()
+                box.cursor_position = len(box.value)
+                return
             try:
-                spec = prompt.split(None, 1)[1] if " " in prompt else ""
-                self._note(log, f"chat model -> {session.backend.switch(spec)}", m.ACCENT)
+                self._note(log, f"chat model -> {session.backend.switch(arg)}", m.ACCENT)
             except Exception as e:
                 self._note(log, str(e), m.RED)
+        elif cmd == "/connect":
+            if not arg:
+                box = self.query_one("#chat", Input)
+                box.value = "/connect "
+                box.focus()
+                box.cursor_position = len(box.value)
+                return
+            provider, _, inline_key = arg.partition(" ")
+            if provider not in PROVIDERS or provider == "demo":
+                self._note(log, f"unknown provider {provider!r} — /connect then pick from the list", m.RED)
+                return
+            if inline_key:
+                self._connect_with_key(provider, inline_key.strip())
+                return
+            self._awaiting_key = provider
+            box = self.query_one("#chat", Input)
+            box.password = True
+            box.placeholder = f"paste your {provider} API key — Enter saves · empty Enter cancels"
+            box.focus()
+        elif cmd == "/providers":
+            self._step(log, "providers", "", m.ACCENT)
+            live = connected_providers()
+            for name, (_b, _key_env, default) in PROVIDERS.items():
+                mark = "connected" if live.get(name) else f"not connected — /connect {name}"
+                self._note(log, f"{name:<10} {default:<28} {mark}",
+                           m.GREEN if live.get(name) else m.MUTED)
+        elif cmd == "/undo":
+            self._undo_last_turn()
+        elif cmd == "/last":
+            turns = session.turns
+            if not turns:
+                self._note(log, "no turns yet", m.MUTED)
+            else:
+                t = turns[-1]
+                state = "ok" if t.ok else (t.error or "cancelled")
+                self._note(log, f"{t.intent or t.prompt[:60]} · {len(t.files)} file(s) · "
+                                f"commit {t.commit or '—'} · {state}")
+        elif cmd == "/clear":
+            log.clear()
+            self._idle_splash()
+        elif cmd == "/quit":
+            self.exit()
+        else:
+            self._note(log, f"unknown command {cmd!r} — /help lists everything, "
+                            f"or just type what you want built", m.AMBER)
+            _ = COMMANDS  # imported for parity with the palette
+
+    def _connect_with_key(self, provider: str, key: str) -> None:
+        self._run_connect(provider, key)
+
+    @work(thread=True, exit_on_error=False)
+    def _run_connect(self, provider: str, key: str) -> None:
+        from ..providers import PROVIDERS, ChatProviderError, save_key, validate_key
+
+        log = self.query_one("#activity", RichLog)
+        self.call_from_thread(self._note, log, f"checking {provider} key…")
+        try:
+            verdict = validate_key(provider, key)
+        except ChatProviderError as e:
+            self.call_from_thread(self._note, log, f"{provider}: {e}", m.RED)
             return
+        path = save_key(provider, key)
+        session = self._chat_session()
+        session.backend.provider = provider
+        session.backend.model = PROVIDERS[provider][2]
+        self.call_from_thread(
+            self._note, log,
+            f"{provider} {verdict} · saved to {path} · chat now on "
+            f"{session.backend.provider}/{session.backend.model}", m.GREEN,
+        )
+
+    def _undo_last_turn(self) -> None:
+        import subprocess
+
+        log = self.query_one("#activity", RichLog)
+        subject = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=self.repo,
+                                 capture_output=True, text=True).stdout.strip()
+        if not subject.startswith("[ratchet chat]"):
+            self._note(log, f"last commit is not a chat turn ({subject[:50]!r}); refusing to touch it", m.AMBER)
+            return
+        r = subprocess.run(["git", "revert", "--no-edit", "HEAD"], cwd=self.repo, capture_output=True, text=True)
+        if r.returncode == 0:
+            self._note(log, f"reverted: {subject[15:66]}", m.GREEN)
+        else:
+            self._note(log, f"revert failed: {(r.stderr or r.stdout)[-120:]}", m.RED)
+
+    def _start_turn(self, prompt: str) -> None:
+        log = self.query_one("#activity", RichLog)
+        session = self._chat_session()
         if self._chat_worker is not None and self._chat_worker.is_running:
             self._note(log, "a turn is already running — Esc to interrupt it first", m.AMBER)
             return
@@ -779,8 +961,12 @@ class RatchetApp(App):
         self._decide(True)
 
     def action_deny(self) -> None:
-        # Esc first means "stop the running chat turn"; only with no turn running
-        # does it keep its original job of denying an approval.
+        # Esc: close the palette first, then interrupt a running turn, then --
+        # with neither in play -- its original job of denying an approval.
+        palette = self.query_one("#palette", OptionList)
+        if palette.display:
+            self._close_palette()
+            return
         if self._chat_worker is not None and self._chat_worker.is_running:
             self._chat_session().cancel.set()
             self._chat_worker.cancel()
@@ -790,10 +976,18 @@ class RatchetApp(App):
             self._decide(False)
 
     def action_up(self) -> None:
+        palette = self.query_one("#palette", OptionList)
+        if palette.display:
+            palette.action_cursor_up()
+            return
         if self._gate_armed:
             self.query_one(ApprovalGate).move(-1)
 
     def action_down(self) -> None:
+        palette = self.query_one("#palette", OptionList)
+        if palette.display:
+            palette.action_cursor_down()
+            return
         if self._gate_armed:
             self.query_one(ApprovalGate).move(1)
 

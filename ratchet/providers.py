@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 
@@ -33,6 +34,86 @@ PROVIDERS: dict[str, tuple[str | None, str, str]] = {
 }
 
 
+#: the dropdown behind /model: every provider's sensible choices, curated so the
+#: picker is instant and offline. /model also accepts any free-form provider/model.
+MODEL_CATALOG: dict[str, list[tuple[str, str]]] = {
+    "anthropic": [
+        ("claude-sonnet-4-6", "fast + sharp; the default"),
+        ("claude-opus-4-6", "deepest reasoning"),
+        ("claude-haiku-4-5", "cheapest, quick edits"),
+    ],
+    "openai": [
+        ("gpt-5.2", "flagship"),
+        ("gpt-5-mini", "fast + cheap"),
+        ("gpt-4o", "solid all-rounder"),
+    ],
+    "groq": [
+        ("llama-3.3-70b-versatile", "fast open-weights"),
+        ("moonshotai/kimi-k2-instruct", "kimi k2, served fast"),
+        ("llama-3.1-8b-instant", "instant, small"),
+    ],
+    "kimi": [
+        ("kimi-k2-0905-preview", "k2 flagship"),
+        ("kimi-k2-turbo-preview", "k2, faster"),
+        ("moonshot-v1-32k", "long context"),
+    ],
+    "demo": [("demo", "offline scaffolder — no key, no network")],
+}
+
+#: where /connect keeps keys: a 0600 env file, loaded before any env lookup, so
+#: connecting once means connected next session too
+KEYS_PATH = Path.home() / ".config" / "ratchet" / "keys.env"
+
+
+def load_saved_keys() -> None:
+    """Saved keys fill only the env vars that are unset -- a live export wins."""
+    if not KEYS_PATH.exists():
+        return
+    for line in KEYS_PATH.read_text().splitlines():
+        name, _, value = line.strip().partition("=")
+        if name and value and not os.environ.get(name):
+            os.environ[name] = value
+
+
+def save_key(provider: str, key: str) -> Path:
+    if provider not in PROVIDERS or not PROVIDERS[provider][1]:
+        raise ChatProviderError(f"{provider!r} takes no key")
+    env_name = PROVIDERS[provider][1]
+    KEYS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        line for line in (KEYS_PATH.read_text().splitlines() if KEYS_PATH.exists() else [])
+        if not line.startswith(f"{env_name}=")
+    ]
+    lines.append(f"{env_name}={key.strip()}")
+    NL = chr(10)
+    KEYS_PATH.write_text(NL.join(lines) + NL)
+    KEYS_PATH.chmod(0o600)
+    os.environ[env_name] = key.strip()
+    return KEYS_PATH
+
+
+def validate_key(provider: str, key: str, *, timeout: float = 20.0) -> str:
+    """One cheap authenticated call; returns a human line or raises. This is what
+    makes /connect honest -- a saved key that never worked is worse than none."""
+    if provider == "demo":
+        return "demo needs no key"
+    base, _env, _default = PROVIDERS[provider]
+    if provider == "anthropic":
+        r = httpx.get("https://api.anthropic.com/v1/models",
+                      headers={"x-api-key": key, "anthropic-version": "2023-06-01"}, timeout=timeout)
+    else:
+        r = httpx.get(f"{base}/models", headers={"Authorization": f"Bearer {key}"}, timeout=timeout)
+    _raise_for(r)
+    n = len(r.json().get("data", []))
+    return f"connected — {n} models visible"
+
+
+def connected_providers() -> dict[str, bool]:
+    load_saved_keys()
+    return {name: (not key_env or bool(os.environ.get(key_env)))
+            for name, (_b, key_env, _m) in PROVIDERS.items()}
+
+
 class ChatProviderError(RuntimeError):
     pass
 
@@ -44,6 +125,7 @@ class ChatBackend:
 
     @classmethod
     def from_env(cls) -> ChatBackend:
+        load_saved_keys()  # /connect persists here; a fresh session picks them up
         provider = os.environ.get("RATCHET_CHAT_PROVIDER", "").strip().lower()
         if not provider:
             # pick the first provider with a key; fall back to the offline demo
