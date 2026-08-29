@@ -21,7 +21,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .context import tree_listing
+from . import debuglog
+from .context import tree_listing, walk_files
 from .providers import ChatBackend, ChatProviderError, looks_like_secret, redact
 
 FILE_FENCE = re.compile(r"```file:([^\n`]+)\n(.*?)```", re.S)
@@ -67,10 +68,22 @@ class ChatSession:
         self.bus = bus
         self.cancel = threading.Event()
         self.turns: list[Turn] = []
+        self._focus = ""  # the live prompt, so _sources_block can prefer named files
 
     # ----------------------------------------------------------------- turn --
 
     def run_turn(self, prompt: str, emit: Callable[[str, str], None]) -> Turn:
+        """Never raises. Every failure path ends as a Turn carrying `error`."""
+        try:
+            return self._run_turn(prompt, emit)
+        except BaseException as e:  # the last net; a worker swallows what escapes
+            debuglog.exception("turn crashed", e)
+            t = Turn(prompt=prompt, error=f"{type(e).__name__}: {e}")
+            emit("error", t.error)
+            self.turns.append(t)
+            return t
+
+    def _run_turn(self, prompt: str, emit: Callable[[str, str], None]) -> Turn:
         """One chat turn. `emit(kind, text)` receives the ultra-summary lines the
         activity pane shows; kinds: step, note, done, error."""
         t0 = time.time()
@@ -86,12 +99,27 @@ class ChatSession:
         self._bus("chat.turn", prompt=redact(prompt[:200]), provider=self.backend.provider, model=self.backend.model)
 
         emit("step", f"asking {self.backend.provider}/{self.backend.model}")
+        rendered = self._render(prompt)
+        debuglog.log("info", f"turn start · {self.backend.provider}/{self.backend.model} · "
+                             f"prompt {len(rendered)} chars")
+        t_req = time.time()
         try:
-            reply = self.backend.complete(self._render(prompt))
+            reply = self.backend.complete(rendered)
         except ChatProviderError as e:
             turn.error = str(e)
+            debuglog.log("error", f"provider refused: {e}")
             emit("error", turn.error)
             return self._finish(turn, t0)
+        except BaseException as e:
+            # A timeout, a dropped connection, a malformed payload -- anything not
+            # already a ChatProviderError used to escape into the worker, which
+            # swallows it, leaving the pane frozen on "asking..." forever. Never
+            # again: every failure becomes a visible error line.
+            turn.error = f"{type(e).__name__}: {e}"
+            debuglog.exception("provider call failed", e)
+            emit("error", turn.error)
+            return self._finish(turn, t0)
+        debuglog.log("info", f"reply in {time.time() - t_req:.1f}s · {len(reply)} chars")
         if self.cancel.is_set():
             turn.cancelled = True
             emit("note", "interrupted before anything was written")
@@ -163,6 +191,7 @@ class ChatSession:
             lines = [f"- {t.intent or t.prompt[:60]} -> {'ok' if t.ok else t.error or 'cancelled'}"
                      for t in self.turns[-3:]]
             history = "Recent turns:\n" + "\n".join(lines) + "\n\n"
+        self._focus = prompt
         return _PROMPT.format(
             listing=tree_listing(self.repo, [])[:4000],
             sources=self._sources_block(),
@@ -175,17 +204,18 @@ class ChatSession:
         edits what is actually there instead of hallucinating it. Capped hard --
         context is the scarcest resource, and a lockfile is not worth shipping."""
         keep = (".html", ".css", ".js", ".ts", ".py", ".md", ".json", ".yaml", ".yml", ".toml")
+        candidates = [r for r in walk_files(self.repo, limit=2000) if Path(r).suffix in keep]
+        # files the request names come first -- alphabetical order shipped
+        # AGENTS.md when you asked about index.html
+        named = [r for r in candidates if Path(r).name.lower() in (self._focus or "").lower()]
+        rest = sorted(set(candidates) - set(named),
+                      key=lambda r: -(self.repo / r).stat().st_mtime)  # then most recent
         parts: list[str] = []
         used = 0
-        for path in sorted(self.repo.rglob("*")):
+        for rel in [*named, *rest]:
             if len(parts) >= max_files or used >= max_chars:
                 break
-            if not path.is_file() or path.suffix not in keep:
-                continue
-            rel = path.relative_to(self.repo)
-            if any(seg in (".git", ".ratchet", "node_modules", ".venv") for seg in rel.parts):
-                continue
-            text = path.read_text(errors="replace")
+            text = (self.repo / rel).read_text(errors="replace")
             if len(text) > 4000:
                 continue  # big files are named in the listing; the model can ask
             parts.append(f"--- {rel} ---\n{text}")

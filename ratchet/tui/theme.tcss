@@ -129,3 +129,17 @@ Screen, VerticalScroll, RichLog {
     text-wrap: nowrap;
     text-overflow: ellipsis;
 }
+
+
+/* the debug panel: hidden until /debug, and never taller than a third of the
+   activity column -- it is a diagnostic, not the main event */
+#debug {
+    display: none;
+    height: 30%;
+    max-height: 14;
+    border: round #26323f;
+    border-title-color: #93a7bd;
+    background: #0d1219;
+    color: #5f7186;
+    padding: 0 1;
+}

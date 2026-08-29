@@ -28,7 +28,12 @@ def repo(tmp_path) -> Path:
 # -------------------------------------------------------------- providers --
 
 
-def test_no_keys_means_the_offline_demo_provider(monkeypatch):
+def test_no_keys_means_the_offline_demo_provider(monkeypatch, tmp_path):
+    import ratchet.providers as prov
+
+    # hermetic: never read (or be influenced by) the machine's real keys.env
+    monkeypatch.setattr(prov, "KEYS_PATH", tmp_path / "keys.env")
+    monkeypatch.setattr(prov, "trueforge_alive", lambda **kw: False)
     for _base, key_env, _model in PROVIDERS.values():
         if key_env:
             monkeypatch.delenv(key_env, raising=False)
@@ -358,3 +363,168 @@ def test_key_file_dir_is_git_ignored(monkeypatch, tmp_path):
     monkeypatch.setattr(prov, "KEYS_PATH", tmp_path / "cfg" / "keys.env")
     prov.save_key("groq", "gsk_test")
     assert (tmp_path / "cfg" / ".gitignore").read_text().strip() == "keys.env"
+
+
+# -------------------------------------------------------------- diagnostics --
+
+
+def test_a_raw_transport_error_becomes_a_visible_line_not_silence(repo):
+    """The bug that made the console unusable: anything that was not a
+    ChatProviderError escaped run_turn into a worker that swallows exceptions, so
+    the pane sat on "asking…" forever. Every failure must surface."""
+    import httpx
+
+    class Flaky:
+        provider, model = "flaky", "flaky"
+
+        def complete(self, prompt, **kw):
+            raise httpx.ReadTimeout("timed out waiting for the model")
+
+    turn, lines = _run(ChatSession(repo, backend=Flaky()), "make a site")
+    assert not turn.ok
+    assert "ReadTimeout" in turn.error
+    assert any(kind == "error" for kind, _t in lines)
+
+
+def test_a_crash_inside_the_turn_is_still_reported(repo):
+    class Exploding:
+        provider, model = "boom", "boom"
+
+        def complete(self, prompt, **kw):
+            raise RuntimeError("kaboom")
+
+    turn, lines = _run(ChatSession(repo, backend=Exploding()), "x")
+    assert not turn.ok and "kaboom" in turn.error
+
+
+def test_debug_channel_records_and_redacts(repo):
+    from ratchet import debuglog
+
+    path = debuglog.configure(repo)
+    debuglog.log("info", "POST https://api.example/v1 model=x")
+    debuglog.log("error", "leaked gsk_abcdef1234567890abcdef in a message")
+    text = path.read_text()
+    assert "POST https://api.example/v1" in text
+    assert "gsk_abcdef" not in text and "<redacted>" in text
+    assert any("POST" in line for _ts, _lvl, line in debuglog.lines())
+
+
+def test_restart_unsticks_a_hung_turn_and_resets_the_session(repo, monkeypatch):
+    """/restart is the escape hatch for exactly the state where a turn is wedged
+    and you cannot tell why: the worker is cancelled and the session rebuilt."""
+    import asyncio
+    import threading
+
+    from textual.widgets import Input as _Input
+    from textual.widgets import RichLog as _RichLog
+
+    monkeypatch.setenv("RATCHET_CHAT_PROVIDER", "demo")
+    (repo / ".ratchet").mkdir(exist_ok=True)
+    bus = repo / ".ratchet" / "session.bus.jsonl"
+    bus.touch()
+    release = threading.Event()
+
+    class Hanging:
+        provider, model = "hang", "hang"
+
+        def complete(self, prompt, **kw):
+            release.wait(timeout=30)  # a model that never answers
+            return "intent: never\n```file:x.txt\nx\n```"
+
+    from ratchet.tui.app import RatchetApp
+
+    async def drive():
+        app = RatchetApp(bus, repo)
+        async with app.run_test(size=(150, 46)) as pilot:
+            await pilot.pause(0.4)
+            app._chat_session().backend = Hanging()
+            box = app.query_one("#chat", _Input)
+            box.focus()
+            box.value = "build something"
+            await pilot.press("enter")
+            await pilot.pause(0.8)
+            assert app._chat_worker is not None and app._chat_worker.is_running
+            box.focus()
+            box.value = "/restart"
+            await pilot.pause(0.2)
+            app.query_one("#palette").display = False
+            await pilot.press("enter")
+            await pilot.pause(0.8)
+            text = "\n".join(str(line.text) for line in app.query_one("#activity", _RichLog).lines)
+            return app._chat_worker, app._chat, text
+
+    worker, session, text = asyncio.run(drive())
+    release.set()
+    assert worker is None and session is not None   # cancelled, then rebuilt
+    assert "restarted" in text
+
+
+def test_debug_command_toggles_the_panel(repo, monkeypatch):
+    import asyncio
+
+    from textual.widgets import Input as _Input
+    from textual.widgets import RichLog as _RichLog
+
+    monkeypatch.setenv("RATCHET_CHAT_PROVIDER", "demo")
+    (repo / ".ratchet").mkdir(exist_ok=True)
+    bus = repo / ".ratchet" / "session.bus.jsonl"
+    bus.touch()
+
+    from ratchet.tui.app import RatchetApp
+
+    async def drive():
+        app = RatchetApp(bus, repo)
+        async with app.run_test(size=(150, 46)) as pilot:
+            await pilot.pause(0.4)
+            panel = app.query_one("#debug", _RichLog)
+            before = panel.display
+            box = app.query_one("#chat", _Input)
+            box.focus()
+            box.value = "/debug"
+            await pilot.pause(0.2)
+            app.query_one("#palette").display = False
+            await pilot.press("enter")
+            await pilot.pause(0.4)
+            return before, panel.display, len(panel.lines)
+
+    before, after, n_lines = asyncio.run(drive())
+    assert after is not before
+    assert n_lines > 0  # the panel replays what already happened
+
+
+def test_the_walk_prunes_heavy_dirs_and_stays_fast(tmp_path):
+    """The real hang: `rglob("*")` descended into .venv/node_modules and filtered
+    afterwards -- 28 seconds on one ordinary home directory, which looked exactly
+    like a wedged prompt. The walk must prune as it goes and stay bounded."""
+    import time
+
+    from ratchet.context import tree_listing, walk_files
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("x")
+    for heavy in (".venv", "node_modules", ".git"):
+        d = tmp_path / heavy / "deep" / "deeper"
+        d.mkdir(parents=True)
+        for i in range(400):
+            (d / f"junk{i}.py").write_text("x")
+
+    t0 = time.time()
+    files = list(walk_files(tmp_path))
+    elapsed = time.time() - t0
+
+    assert "src/app.py" in files
+    assert not any(part in f for f in files for part in (".venv", "node_modules", ".git"))
+    assert elapsed < 1.0, f"walk took {elapsed:.1f}s"
+    assert "junk0.py" not in tree_listing(tmp_path, [])
+
+
+def test_sources_prefer_the_file_the_prompt_names(repo):
+    """Alphabetical order shipped AGENTS.md when you asked about index.html."""
+    (repo / "AAA_first.md").write_text("alphabetically first, irrelevant\n")
+    (repo / "index.html").write_text("<h1>THE PAGE YOU ASKED ABOUT</h1>\n")
+    session = ChatSession(repo, backend=ChatBackend("demo", "demo"))
+    session._focus = "change the heading in index.html"
+    sources = session._sources_block()
+    assert "THE PAGE YOU ASKED ABOUT" in sources
+    # within the attached sources, the named file leads
+    assert sources.index("index.html") < sources.index("AAA_first")

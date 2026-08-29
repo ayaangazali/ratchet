@@ -29,10 +29,12 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.timer import Timer
 from textual.widgets import Button, Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 from textual.worker import Worker
 
+from .. import debuglog
 from ..bus import Bus
 from . import mascot as m
 
@@ -451,6 +453,8 @@ class RatchetApp(App):
         self._chat_worker: Worker | None = None              # the running background turn, if any
         self._palette_rows: list = []                        # rows behind the visible options
         self._awaiting_key: str | None = None                # /connect: which provider's key comes next
+        self._heartbeat: Timer | None = None                 # ticks while a turn is in flight
+        self._turn_started = 0.0
 
     # ----------------------------------------------------------------- layout --
 
@@ -463,6 +467,8 @@ class RatchetApp(App):
                 yield Counters()
             with Vertical(id="activity-box"):
                 yield RichLog(id="activity", wrap=True, markup=False, highlight=False,
+                              auto_scroll=True, min_width=16)
+                yield RichLog(id="debug", wrap=True, markup=False, highlight=False,
                               auto_scroll=True, min_width=16)
                 yield OptionList(id="palette")
                 yield Input(
@@ -484,6 +490,13 @@ class RatchetApp(App):
         self.query_one("#waiting").border_title = "waiting on"
         self.query_one(ApprovalGate).display = False
         self.query_one("#palette", OptionList).display = False
+        dbg = self.query_one("#debug", RichLog)
+        dbg.border_title = "debug"
+        dbg.display = debuglog.enabled()
+        debuglog.configure(self.repo)
+        debuglog.install_logging()
+        debuglog.subscribe(self._on_debug_line)
+        debuglog.log("info", f"console attached · repo {self.repo} · bus {self.bus.path.name}")
         self.query_one(StatusLine).draw()
         self._short = self.size.height < 40
         self._resize_banner()
@@ -583,7 +596,9 @@ class RatchetApp(App):
             if not self.seen_any:
                 self.seen_any = True
                 log.clear()
-                status.started = ev.ts or time.time()
+                # from now, not from the event's timestamp: attaching to an
+                # existing bus file made the clock read hours (found live)
+                status.started = time.time()
             if k != "run.done" and status.state != "blocked":
                 status.state = "working"
 
@@ -736,6 +751,83 @@ class RatchetApp(App):
     # (one line per step, never a raw diff), Esc interrupts mid-turn, and every
     # completed turn is one git commit -- revertible, like everything else here.
 
+    def _restart(self) -> None:
+        """Put the console back to a known-good state without leaving it.
+
+        Cancels an in-flight turn, drops the chat session (so the provider is
+        re-read from the environment and any wedged http client is discarded),
+        rewinds the bus reader and clears the panes. The escape hatch for exactly
+        the state where something is stuck and you cannot tell what."""
+        log = self.query_one("#activity", RichLog)
+        debuglog.log("warn", "restart requested")
+        if self._chat_worker is not None:
+            try:
+                if self._chat is not None:
+                    self._chat.cancel.set()
+                self._chat_worker.cancel()
+            except Exception as e:
+                debuglog.exception("cancelling the worker", e)
+        self.workers.cancel_group(self, "default")
+        self._chat_worker = None
+        self._chat = None
+        self._awaiting_key = None
+        if self._heartbeat is not None:
+            self._heartbeat.stop()
+            self._heartbeat = None
+        box = self.query_one("#chat", Input)
+        box.password = False
+        box.value = ""
+        box.placeholder = "ask for code, or / for commands — Enter runs · Esc interrupts"
+        self._close_palette()
+        self.bus = Bus(self.bus.path)   # a fresh reader: re-drains from byte zero
+        self.seen_any = False
+        status = self.query_one(StatusLine)
+        status.state = "idle"
+        status.started = time.time()
+        status.note = "restarted"
+        status.draw()
+        log.clear()
+        self._idle_splash()
+        session = self._chat_session()
+        self._note(log, f"restarted · chat on {session.backend.provider}/{session.backend.model}", m.GREEN)
+        box.focus()
+        self.call_after_refresh(self._first_run_connect)
+
+    def _tick_turn(self) -> None:
+        """One status line while a turn runs, so a slow model reads as slow."""
+        status = self.query_one(StatusLine)
+        running = self._chat_worker is not None and self._chat_worker.is_running
+        if not running:
+            if self._heartbeat is not None:
+                self._heartbeat.stop()
+                self._heartbeat = None
+            status.draw()
+            return
+        secs = int(time.time() - self._turn_started)
+        status.state = "working"
+        status.note = f"generating… {secs}s · Esc to interrupt"
+        status.draw()
+        if secs and secs % 15 == 0:
+            debuglog.log("info", f"still waiting on the model · {secs}s")
+
+    def _on_debug_line(self, ts: float, level: str, text: str) -> None:
+        """Called from any thread -- the debug channel is written by workers."""
+        try:
+            log = self.query_one("#debug", RichLog)
+        except Exception:
+            return
+        colour = {"ERROR": m.RED, "TRACE": m.RED, "WARN": m.AMBER}.get(level, m.DIM)
+        t = Text()
+        t.append(time.strftime("%H:%M:%S ", time.localtime(ts)), style=m.BORDER)
+        t.append(f"{level:<5} ", style=colour)
+        t.append(text, style=m.MUTED if level == "INFO" else colour)
+        self.call_from_thread(log.write, t) if self._off_thread() else log.write(t)
+
+    def _off_thread(self) -> bool:
+        import threading
+
+        return threading.current_thread() is not threading.main_thread()
+
     def _chat_session(self):
         if self._chat is None:
             from ..chat import ChatSession
@@ -882,6 +974,18 @@ class RatchetApp(App):
                 state = "ok" if t.ok else (t.error or "cancelled")
                 self._note(log, f"{t.intent or t.prompt[:60]} · {len(t.files)} file(s) · "
                                 f"commit {t.commit or '—'} · {state}")
+        elif cmd == "/restart":
+            self._restart()
+        elif cmd == "/debug":
+            dbg = self.query_one("#debug", RichLog)
+            dbg.display = not dbg.display
+            if dbg.display:
+                dbg.clear()
+                for ts, level, line in debuglog.lines()[-60:]:
+                    self._on_debug_line(ts, level, line)
+                self._note(log, f"debug panel on · also tailing {self.repo}/.ratchet/debug.log", m.ACCENT)
+            else:
+                self._note(log, "debug panel off", m.MUTED)
         elif cmd == "/clear":
             log.clear()
             self._idle_splash()
@@ -943,6 +1047,11 @@ class RatchetApp(App):
         if self._chat_worker is not None and self._chat_worker.is_running:
             self._note(log, "a turn is already running — Esc to interrupt it first", m.AMBER)
             return
+        self._turn_started = time.time()
+        if self._heartbeat is None:
+            # "is it dead or just slow?" is the question that made this whole
+            # session unusable; answer it once a second, on screen
+            self._heartbeat = self.set_interval(1.0, self._tick_turn)
         self._step(log, "chat", f"{session.backend.provider}/{session.backend.model}", m.ACCENT)
         if session.backend.provider == "demo":
             self._note(log, "demo provider: this scaffolds a stub, it does not think — "

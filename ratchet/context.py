@@ -25,6 +25,37 @@ from .node import Node, Tree
 MAX_FAILURE = 2400
 MAX_LISTING = 400
 
+#: directories never worth walking into. Pruned during the walk, not filtered
+#: after it: `rglob("*")` descends into .venv and node_modules first and then
+#: throws the results away, which took 28 seconds on one ordinary home directory
+#: and looked exactly like a hung prompt.
+SKIP_DIRS = frozenset({
+    ".git", ".ratchet", "__pycache__", "node_modules", ".venv", "venv", ".env",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", "dist", "build",
+    ".next", ".nuxt", "target", ".gradle", ".idea", ".cache", "site-packages",
+})
+
+
+def walk_files(repo: Path, *, limit: int = 2000):
+    """Repo-relative file paths, pruning heavy directories as it goes.
+
+    Bounded by `limit` so the cost of assembling a prompt never depends on how
+    much unrelated junk sits under the working directory.
+    """
+    import os
+
+    repo = Path(repo)
+    seen = 0
+    for root, dirnames, filenames in os.walk(repo):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            yield str((Path(root) / name).relative_to(repo))
+            seen += 1
+            if seen >= limit:
+                return
+
 
 def tree_listing(repo: Path, f2p_hidden: Iterable[str]) -> str:
     """The file listing a mapper model is allowed to see.
@@ -35,20 +66,16 @@ def tree_listing(repo: Path, f2p_hidden: Iterable[str]) -> str:
     output is reused by every later prompt in a run.
     """
     repo = Path(repo)
-    skip = {".git", ".ratchet", "__pycache__", "node_modules", ".venv"}
     hidden_files = {t.partition("::")[0] for t in f2p_hidden}
     lines: list[str] = []
-    for p in sorted(repo.rglob("*")):
-        if any(part in skip for part in p.parts) or not p.is_file():
-            continue
-        rel = str(p.relative_to(repo))
+    for rel in walk_files(repo, limit=MAX_LISTING + 1):
         if rel in hidden_files:
             continue
         lines.append(rel)
         if len(lines) > MAX_LISTING:
             lines.append("... truncated")
             break
-    return "\n".join(lines)
+    return "\n".join(sorted(lines))
 
 MAX_DIFF = 6000
 MAX_MAP = 3000

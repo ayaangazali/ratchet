@@ -20,6 +20,8 @@ COMMANDS: dict[str, str] = {
     "/providers": "which providers are connected, and each one's default model",
     "/undo": "revert the last chat commit (git revert, nothing is lost)",
     "/last": "what the last turn did: intent, files, commit",
+    "/restart": "unstick everything: cancel the running turn, reset the session, clear the panes",
+    "/debug": "toggle the debug panel — provider calls, timings, exceptions",
     "/clear": "clear the activity pane",
     "/quit": "leave the console",
 }

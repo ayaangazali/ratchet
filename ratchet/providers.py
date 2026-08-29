@@ -229,7 +229,13 @@ class ChatBackend:
 
     # ---------------------------------------------------------------- calls --
 
-    def complete(self, prompt: str, *, max_tokens: int = 8192, timeout: float = 180.0) -> str:
+    def complete(self, prompt: str, *, max_tokens: int = 8192, timeout: float | None = None) -> str:
+        # a request that hangs past this shows up as a visible error instead of a
+        # frozen pane; RATCHET_HTTP_TIMEOUT overrides for slow local gateways
+        timeout = timeout or float(os.environ.get("RATCHET_HTTP_TIMEOUT", "120"))
+        return self._complete(prompt, max_tokens=max_tokens, timeout=timeout)
+
+    def _complete(self, prompt: str, *, max_tokens: int, timeout: float) -> str:
         if self.provider == "demo":
             return _demo_reply(prompt)
         if self.provider == "trueforge":
@@ -240,7 +246,10 @@ class ChatBackend:
             raise ChatProviderError(
                 f"{key_env} is not set; export it, or `/model demo` for the offline provider"
             )
+        from . import debuglog
+
         if self.provider == "anthropic":
+            debuglog.log("info", f"POST {ANTHROPIC_URL} model={self.model} timeout={timeout}s")
             r = httpx.post(
                 ANTHROPIC_URL,
                 headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
@@ -248,6 +257,7 @@ class ChatBackend:
                       "messages": [{"role": "user", "content": prompt}]},
                 timeout=timeout,
             )
+            debuglog.log("info", f"← {r.status_code} in {_elapsed(r):.1f}s")
             _raise_for(r)
             return "".join(part.get("text", "") for part in r.json().get("content", []))
         base = _base_for(self.provider, base)
@@ -264,6 +274,7 @@ class ChatBackend:
             if not model:
                 raise ChatProviderError(f"{self.provider} returned a model with no id")
             self.model = model  # pin it, so the activity line names something real
+        debuglog.log("info", f"POST {base}/chat/completions model={model} timeout={timeout}s")
         r = httpx.post(
             f"{base}/chat/completions",
             headers={"Authorization": f"Bearer {key}"},
@@ -271,8 +282,12 @@ class ChatBackend:
                   "messages": [{"role": "user", "content": prompt}]},
             timeout=timeout,
         )
+        debuglog.log("info", f"← {r.status_code} in {_elapsed(r):.1f}s")
         _raise_for(r)
-        return r.json()["choices"][0]["message"]["content"] or ""
+        try:
+            return r.json()["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError, ValueError) as e:
+            raise ChatProviderError(f"{self.provider} returned an unexpected payload: {e}") from e
 
 
     def _trueforge_complete(self, prompt: str, *, max_tokens: int) -> str:
@@ -303,6 +318,14 @@ class ChatBackend:
         except TrueForgeError as e:
             raise ChatProviderError(f"trueforge: {e}") from e
         return text
+
+
+def _elapsed(r) -> float:
+    """Response timing, defensively: the debug channel never breaks the call."""
+    try:
+        return r.elapsed.total_seconds()
+    except Exception:
+        return 0.0
 
 
 def _base_for(provider: str, table_base: str | None) -> str | None:
