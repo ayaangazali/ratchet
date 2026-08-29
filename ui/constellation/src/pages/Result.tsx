@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getResult } from "../api";
+import QodoPanel from "../components/QodoPanel";
 import Topbar from "../components/Topbar";
 import type { RunResult } from "../types";
 
@@ -24,7 +25,7 @@ export default function Result() {
           <div className="err">{err}</div>
           <div className="actions">
             <Link className="btn" to="/">
-              create another
+              run another
             </Link>
           </div>
         </div>
@@ -44,95 +45,75 @@ export default function Result() {
       </div>
     );
 
-  const v = r.verification;
-  const verifyOk = (v?.total ?? 0) > 0 && v.passed === v.total;
-
+  const b = r.budget ?? {};
   return (
     <div className="shell">
       <Topbar meta="result" />
       <div className="main">
         <div className="result-head">
-          <h1>Deployed</h1>
-          {r.dry_run && <span className="badge">dry run</span>}
+          <h1 style={{ color: r.green ? "var(--accent)" : "var(--danger)" }}>
+            {r.green ? "Green" : "No green"}
+          </h1>
+          <span className={`badge ${r.green ? "ok" : ""}`}>
+            {r.green ? "verifier passed" : "budget stopped the run"}
+          </span>
         </div>
         <div className="result-goal">{r.prompt}</div>
 
-        <div className="card">
-          <div className="k">deployed link</div>
-          <a
-            className="big-link"
-            href={r.deploy_url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {r.deploy_url}
-          </a>
-        </div>
-
-        <div className="card">
-          <div className="k">github repository</div>
-          <a
-            className="big-link"
-            href={r.repo_url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {r.repo_url}
-          </a>
-        </div>
-
-        <div className="card">
-          <div className="k">verification — golden tests (real)</div>
+        <div className="card" data-testid="verdict">
+          <div className="k">verdict — only the gauntlet declares success</div>
           <div className="row">
-            <span>{v?.task ?? "held-out eval"}</span>
+            <span>winner {r.winner}</span>
             <span
-              style={{ color: verifyOk ? "var(--accent)" : "var(--danger)" }}
+              style={{ color: r.green ? "var(--accent)" : "var(--danger)" }}
             >
-              {v?.passed ?? 0}/{v?.total ?? 0} passed · {v?.status ?? "n/a"}
+              score {r.score?.toFixed(2)} · {r.reason}
             </span>
           </div>
-        </div>
-
-        <div className="card">
-          <div className="k">project credentials — accounts registered</div>
-          <table className="cred-table">
-            <thead>
-              <tr>
-                <th>platform</th>
-                <th>email</th>
-                <th>password</th>
-                <th>status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {r.credentials.map((c) => (
-                <tr key={c.platform}>
-                  <td>{c.platform}</td>
-                  <td>{c.email}</td>
-                  <td>{c.password}</td>
-                  <td className="status">{c.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {r.dry_run && (
-          <div className="note">
-            Phase 0 dry run. The build + golden-test verification above is real;
-            account registration, infra provisioning and deploy are typed seams
-            (forbidden working impls this phase) — no real account was created
-            and nothing was deployed. Budget: {r.budget.mode}
-            {r.budget.mode === "budget"
-              ? ` ($${r.budget.min}–$${r.budget.max})`
-              : ""}
-            .
+          <div className="row">
+            <span>
+              {r.nodes ?? "?"} nodes explored
+              {b.max_nodes != null && ` · ${b.nodes_used}/${b.max_nodes} budget`}
+            </span>
+            <span>${(b.usd_used ?? 0).toFixed(2)} spent</span>
           </div>
-        )}
+        </div>
+
+        <div className="card" data-testid="gate">
+          <div className="k">approval gate</div>
+          <div className="row">
+            {r.decision ? (
+              <span
+                style={{
+                  color: r.decision.approved ? "var(--accent)" : "var(--danger)",
+                }}
+              >
+                {r.decision.approved ? "approved" : "denied"} —{" "}
+                {r.decision.reason}
+              </span>
+            ) : (
+              <span>never reached — no green patch to ship</span>
+            )}
+          </div>
+        </div>
+
+        <div className="card" data-testid="receipts">
+          <div className="k">receipt chain — ratchet audit</div>
+          <pre className="audit">{r.audit || "no audit output"}</pre>
+        </div>
+
+        <QodoPanel />
+
+        <div className="note">
+          Everything above is real: the run was the actual search loop and
+          verifier gauntlet executing offline against a seeded demo repo, the
+          receipts were sealed and audited, and the Qodo findings are live
+          review comments from this repository's pull requests.
+        </div>
 
         <div className="actions">
           <Link className="btn" to="/">
-            create another
+            run another
           </Link>
         </div>
       </div>

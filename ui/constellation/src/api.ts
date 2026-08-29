@@ -1,4 +1,10 @@
-import type { Budget, RunResult } from "./types";
+import type {
+  ApprovalRequest,
+  Budget,
+  QodoFeed,
+  RunResult,
+  StageRow,
+} from "./types";
 
 export async function createRun(
   prompt: string,
@@ -20,10 +26,35 @@ export async function getResult(runId: string): Promise<RunResult> {
   return (await res.json()) as RunResult;
 }
 
+export async function approveRun(
+  runId: string,
+  allow: boolean,
+): Promise<void> {
+  const res = await fetch(`/api/approve/${runId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ allow, reason: allow ? "approved in ui" : "denied in ui" }),
+  });
+  if (!res.ok) throw new Error(`approve failed (${res.status})`);
+}
+
+export async function getQodo(): Promise<QodoFeed> {
+  const res = await fetch("/api/qodo");
+  if (!res.ok) throw new Error(`qodo feed failed (${res.status})`);
+  return (await res.json()) as QodoFeed;
+}
+
 export type StreamHandlers = {
-  onStart?: (d: { run_id: string; slug: string; total: number }) => void;
-  onStage?: (d: any) => void;
+  onStart?: (d: {
+    run_id: string;
+    slug: string;
+    total: number;
+    scenario: string;
+  }) => void;
+  onStage?: (d: StageRow) => void;
   onLog?: (d: { key: string; line: string }) => void;
+  onApproval?: (d: ApprovalRequest) => void;
+  onResolved?: (d: { approved: boolean; reason: string }) => void;
   onDone?: (d: { result: RunResult }) => void;
   onError?: (e: unknown) => void;
 };
@@ -31,19 +62,15 @@ export type StreamHandlers = {
 /** Subscribe to the SSE pipeline feed. Returns a cleanup fn. */
 export function streamRun(runId: string, h: StreamHandlers): () => void {
   const es = new EventSource(`/api/stream/${runId}`);
-  es.addEventListener("start", (e) =>
-    h.onStart?.(JSON.parse((e as MessageEvent).data)),
-  );
-  es.addEventListener("stage", (e) =>
-    h.onStage?.(JSON.parse((e as MessageEvent).data)),
-  );
-  es.addEventListener("log", (e) =>
-    h.onLog?.(JSON.parse((e as MessageEvent).data)),
-  );
-  es.addEventListener("done", (e) => {
-    h.onDone?.(JSON.parse((e as MessageEvent).data));
-    es.close();
-  });
+  const on = (name: string, fn?: (d: any) => void) =>
+    es.addEventListener(name, (e) => fn?.(JSON.parse((e as MessageEvent).data)));
+  on("start", h.onStart);
+  on("stage", h.onStage);
+  on("log", h.onLog);
+  on("approval", h.onApproval);
+  on("resolved", h.onResolved);
+  on("done", h.onDone);
+  es.addEventListener("eof", () => es.close());
   es.onerror = (e) => h.onError?.(e);
   return () => es.close();
 }

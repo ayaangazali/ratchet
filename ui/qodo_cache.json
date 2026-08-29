@@ -1,0 +1,213 @@
+{
+  "fetched_at": 1788044206.458424,
+  "repo": "ayaangazali/ratchet",
+  "prs": [
+    {
+      "number": 12,
+      "state": "OPEN",
+      "title": "fix: resolve Qodo round 2 and every stale claim the recheck found",
+      "url": "https://github.com/ayaangazali/ratchet/pull/12",
+      "reviews": [
+        {
+          "kind": "summary",
+          "counts": {},
+          "at": "2026-08-29T21:24:51Z"
+        },
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 4,
+            "rule violations": 1,
+            "skill insights": 0
+          },
+          "at": "2026-08-29T21:26:30Z"
+        }
+      ]
+    },
+    {
+      "number": 11,
+      "state": "OPEN",
+      "title": "feat: wire the Bright Data docs oracle into live runs",
+      "url": "https://github.com/ayaangazali/ratchet/pull/11",
+      "reviews": [
+        {
+          "kind": "summary",
+          "counts": {},
+          "at": "2026-08-29T21:08:17Z"
+        },
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 5,
+            "rule violations": 2,
+            "skill insights": 0
+          },
+          "at": "2026-08-29T21:09:42Z"
+        }
+      ]
+    },
+    {
+      "number": 10,
+      "state": "OPEN",
+      "title": "fix: resolve every Qodo finding across PRs 1-9",
+      "url": "https://github.com/ayaangazali/ratchet/pull/10",
+      "reviews": [
+        {
+          "kind": "summary",
+          "counts": {},
+          "at": "2026-08-29T21:01:43Z"
+        },
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 5,
+            "rule violations": 1,
+            "skill insights": 0
+          },
+          "at": "2026-08-29T21:03:26Z"
+        }
+      ]
+    },
+    {
+      "number": 9,
+      "state": "OPEN",
+      "title": "feat: objective graph -- goals decomposed into nodes only tests can fulfil",
+      "url": "https://github.com/ayaangazali/ratchet/pull/9",
+      "reviews": [
+        {
+          "kind": "summary",
+          "counts": {},
+          "at": "2026-08-29T20:33:01Z"
+        },
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 6,
+            "rule violations": 4,
+            "skill insights": 0
+          },
+          "at": "2026-08-29T20:34:16Z"
+        }
+      ]
+    },
+    {
+      "number": 8,
+      "state": "OPEN",
+      "title": "docs: overhaul the README into the full reference",
+      "url": "https://github.com/ayaangazali/ratchet/pull/8",
+      "reviews": [
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 5,
+            "rule violations": 0,
+            "skill insights": 0
+          },
+          "at": "2026-08-29T20:19:42Z"
+        }
+      ]
+    },
+    {
+      "number": 6,
+      "state": "OPEN",
+      "title": "docs: make every front-page claim match the code",
+      "url": "https://github.com/ayaangazali/ratchet/pull/6",
+      "reviews": [
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 2,
+            "rule violations": 1,
+            "skill insights": 0
+          },
+          "at": "2026-08-29T20:19:50Z"
+        }
+      ]
+    },
+    {
+      "number": 5,
+      "state": "OPEN",
+      "title": "fix(evals): define \"persisted\" once and count both modes by it",
+      "url": "https://github.com/ayaangazali/ratchet/pull/5",
+      "reviews": [
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 1,
+            "rule violations": 0,
+            "skill insights": 0
+          },
+          "at": "2026-08-29T20:20:00Z"
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "state": "OPEN",
+      "title": "fix(verifier): runtime_test_write gates only writes to graded paths",
+      "url": "https://github.com/ayaangazali/ratchet/pull/4",
+      "reviews": [
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 5,
+            "rule violations": 0,
+            "skill insights": 0
+          },
+          "at": "2026-08-29T20:19:16Z"
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "state": "OPEN",
+      "title": "fix: lock the two shared writers on the parallel fan-out path",
+      "url": "https://github.com/ayaangazali/ratchet/pull/3",
+      "reviews": [
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 0,
+            "rule violations": 0,
+            "requirement gaps": 0
+          },
+          "at": "2026-08-29T20:19:24Z"
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "state": "OPEN",
+      "title": "fix(verifier): stop held-out test names and details reaching the prompt",
+      "url": "https://github.com/ayaangazali/ratchet/pull/2",
+      "reviews": [
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 3,
+            "rule violations": 1,
+            "skill insights": 0
+          },
+          "at": "2026-08-29T20:20:19Z"
+        }
+      ]
+    },
+    {
+      "number": 1,
+      "state": "OPEN",
+      "title": "fix(verifier): revert protected paths one at a time, fail closed",
+      "url": "https://github.com/ayaangazali/ratchet/pull/1",
+      "reviews": [
+        {
+          "kind": "review",
+          "counts": {
+            "bugs": 3,
+            "rule violations": 0,
+            "skill insights": 0
+          },
+          "at": "2026-08-29T20:17:18Z"
+        }
+      ]
+    }
+  ]
+}

@@ -9,3 +9,12 @@ __pycache__/
 .mypy_cache/
 *.egg-info/
 .env
+
+# ui gateway artifacts
+ui/runs/
+ui/constellation/node_modules/
+.playwright-mcp/
+ui/constellation/dist/
+ui/constellation/*.tsbuildinfo
+ui/constellation/vite.config.js
+ui/constellation/vite.config.d.ts
