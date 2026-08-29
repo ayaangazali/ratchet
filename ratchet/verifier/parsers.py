@@ -30,6 +30,13 @@ RESET_FAILED = ">>>>> ratchet reset failed"
 
 _EXIT_RE = re.compile(re.escape(EXIT) + r"\s*(-?\d+)")
 
+#: ANSI escapes. A runner can be told to colour in its own config file, where no
+#: environment variable reaches it, and a coloured `PASSED` does not match a status
+#: token -- so a green suite grades as zero. Stripping is safe: an escape sequence
+#: is never part of a test id, and a patch that injects one gains nothing, because
+#: the exit code is still read from outside the parsed region.
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
 #: evidence that a runner actually executed at least one test
 SUITE_RAN = [
     re.compile(r"collected [1-9]\d* items"),
@@ -49,9 +56,11 @@ def slice_output(log: str) -> str:
     END, so a forged END printed from inside a test becomes inert text instead of
     truncating the parsed region and hiding the real results after it (found by
     review)."""
-    if START in log and END in log:
-        return log.split(START, 1)[1].rsplit(END, 1)[0]
-    return log
+    body = log.split(START, 1)[1].rsplit(END, 1)[0] if (START in log and END in log) else log
+    # Escapes are stripped last, and only inside the trusted region. Safe: an escape
+    # sequence is never part of a test id, and a patch gains nothing by injecting
+    # one, because the exit code is read from the region after END.
+    return _ANSI.sub("", body)
 
 
 def parse_exit_code(log: str) -> int | None:

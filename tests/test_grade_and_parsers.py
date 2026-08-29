@@ -265,3 +265,65 @@ def test_failure_excerpt_still_names_visible_failures():
     )
     out = failure_excerpt(log, parse(log), redact=HIDDEN)
     assert "tests/test_v.py::test_a" in out
+
+
+# --------------------------------------------------------------------------- #
+# colour
+# --------------------------------------------------------------------------- #
+
+COLOURED = log(
+    "collected 2 items\n"
+    "\x1b[32mPASSED\x1b[0m tests/test_v.py::\x1b[1mtest_a\x1b[0m\n"
+    "\x1b[31mFAILED\x1b[0m tests/test_v.py::\x1b[1mtest_b\x1b[0m - AssertionError\n"
+    "\x1b[31m===== \x1b[1m1 failed\x1b[0m, \x1b[32m1 passed\x1b[0m in 0.03s",
+    exit_code=1,
+)
+
+
+def test_a_coloured_log_still_grades():
+    """The patch that must pass.
+
+    `FORCE_COLOR` in an inherited environment makes pytest wrap every status token
+    in escapes. The grader splits those lines on whitespace, so a fully green suite
+    scored 0/6, the patch was called broken, nothing could go green and the search
+    spun until its wall clock. This was live on macOS, not hypothetical.
+    """
+    statuses = parse(COLOURED, "pytest")
+    assert statuses == {
+        "tests/test_v.py::test_a": TestStatus.PASSED,
+        "tests/test_v.py::test_b": TestStatus.FAILED,
+    }
+    assert suite_ran(COLOURED)
+
+
+def test_stripping_colour_does_not_weaken_the_exit_code_cross_check():
+    """The patch that must NOT pass.
+
+    Stripping escapes is normalisation, and normalisation must not become a hole:
+    a patch that prints its own green summary in colour still contradicts a non-zero
+    exit code, and the exit code is written outside the region a patch can reach.
+    """
+    spoofed = log(
+        "collected 2 items\n"
+        "\x1b[32mPASSED\x1b[0m tests/test_v.py::test_a\n"
+        "\x1b[32mPASSED\x1b[0m tests/test_v.py::test_b\n"
+        "\x1b[32m===== 2 passed\x1b[0m",
+        exit_code=1,
+    )
+    statuses = parse(spoofed, "pytest")
+    assert all(s is TestStatus.PASSED for s in statuses.values())
+    assert not exit_code_consistent(spoofed, statuses), "a colourful lie is still a lie"
+
+
+def test_the_timeout_wrapper_is_portable():
+    """`timeout(1)` is GNU coreutils; macOS ships neither it nor a stub, so every
+    graded command died with "command not found" and read as a failed build."""
+    from ratchet.verifier.eval_script import build_test_command
+
+    cmd = build_test_command(
+        repo_dir=".", base_commit="HEAD", protected_paths=["tests/"],
+        test_cmd="python -m pytest -rA", timeout_s=60,
+    )
+    assert "_ratchet_run 60 python -m pytest -rA" in cmd
+    assert "command -v gtimeout" in cmd, "the macOS fallback has to be in the emitted shell"
+    assert "NO_COLOR=1" in cmd, "colour off inside the sandbox, where the config lives"

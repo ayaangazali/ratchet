@@ -52,6 +52,23 @@ def _reset_lines(base_commit: str, protected_paths: list[str], *, quiet: bool = 
     return lines
 
 
+#: A portable timeout. `timeout(1)` is GNU coreutils and macOS does not ship it, so
+#: on a Mac every graded command died with "timeout: command not found" -- which the
+#: gauntlet read as "the build failed", meaning no patch could ever go green and the
+#: search spun until its wall clock. The sandbox may be a different OS from the host,
+#: so the choice is made at run time inside the sandbox rather than here.
+#:
+#: The last branch runs without a limit rather than refusing to run at all: losing
+#: the guard is bad, but a verifier that cannot execute anything is worse, and the
+#: search has its own wall-clock budget above this.
+TIMEOUT_FN = """_ratchet_run() {
+  _secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then timeout "$_secs" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$_secs" "$@"
+  else "$@"; fi
+}"""
+
+
 def build_test_command(
     *,
     repo_dir: str,
@@ -70,8 +87,14 @@ def build_test_command(
     if setup_cmd:
         lines.append(setup_cmd)
     lines += [
+        TIMEOUT_FN,
+        # Colour off, every way a runner knows how to be asked. `pytest -rA` prints
+        # `PASSED tests/x.py::test_y` and the grader splits that on whitespace, so a
+        # single wrapping escape sequence scores a fully green suite as 0/6 -- the
+        # patch is then "broken", nothing can go green, and the search spins.
+        "export NO_COLOR=1 PY_COLORS=0 FORCE_COLOR=0 CLICOLOR=0 CLICOLOR_FORCE=0 TERM=dumb",
         f"echo '{START}'",
-        f"timeout {int(timeout_s)} {test_cmd}",
+        f"_ratchet_run {int(timeout_s)} {test_cmd}",
         "RATCHET_EXIT=$?",
         f"echo '{END}'",
         # 3. outside the markers on purpose
@@ -85,4 +108,4 @@ def build_test_command(
 
 def build_stage_command(*, repo_dir: str, cmd: str, timeout_s: int = 300) -> str:
     """A plain stage (build, types, lint): exit code is the whole result."""
-    return f"cd {shlex.quote(repo_dir)}\ntimeout {int(timeout_s)} {cmd}"
+    return f"cd {shlex.quote(repo_dir)}\n{TIMEOUT_FN}\n_ratchet_run {int(timeout_s)} {cmd}"

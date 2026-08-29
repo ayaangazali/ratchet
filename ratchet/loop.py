@@ -239,6 +239,13 @@ class SearchRun:
         """Fork, apply, grade, then commit or prune. One candidate, one sandbox."""
         label = f"{parent.id}-{index}-{int(time.time() * 1000) % 100000}"
         if cand.empty:
+            # A call that produced no patch still consumed a call, a prompt and, on a
+            # real provider, money. Charging it is what bounds the loop: an empty
+            # candidate creates no node, so without this it spends neither nodes nor
+            # dollars, the same state is selected again, and the search spins until
+            # the wall clock runs out. Observed: a generator that had run out of
+            # scripted replies wrote 929MB of `candidate.empty` events in six minutes.
+            self.scheduler.budget.spend(nodes=1)
             self.bus.emit("candidate.empty", parent=parent.id, model=cand.model)
             return None
 
@@ -247,6 +254,12 @@ class SearchRun:
         self.bus.emit("verify.started", label=label, parent=parent.id, intent=cand.intent, model=cand.model)
         try:
             result = self.gauntlet.run(sb, cand.patch, base_commit=self.base_commit)
+            # Charged here, before the outcome is known, because `max_nodes` caps
+            # work attempted rather than work that happened to succeed. Charging
+            # only the accepted path means a run whose candidates all regress --
+            # a model emitting diffs that will not apply, say -- spends no node
+            # budget at all and is bounded only by the wall clock.
+            self.scheduler.budget.spend(nodes=1)
             for name, st in result.stages.items():
                 self.bus.emit("stage.result", label=label, stage=name, passed=st.passed,
                               detail=st.detail, skipped=st.skipped)
@@ -269,7 +282,6 @@ class SearchRun:
                                  result=result, model=cand.model, tokens=cand.tokens, cost_usd=cand.cost_usd)
             self.tree.add(node)
             self.receipts.record_result(node.id, result)
-            self.scheduler.budget.spend(nodes=1)
             self.bus.emit("node.added", **_node_event(node, result))
             return node
         finally:

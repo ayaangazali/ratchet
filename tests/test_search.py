@@ -196,7 +196,7 @@ def test_search_finds_green_and_prunes_the_bad_branch(repo, tmp_path):
         provider=WorktreeProvider(repo, "t-search"),
         subagents=Subagents(ScriptedBackend(responses)),
         run_id="t-search",
-        scheduler=Scheduler(Budget(max_nodes=6, max_seconds=300, max_usd=1)),
+        scheduler=Scheduler(Budget(max_nodes=9, max_seconds=300, max_usd=1)),
         parallel=False,
     )
     result = run.run()
@@ -222,7 +222,7 @@ def test_dead_ends_reach_the_next_prompt(repo):
     run = SearchRun(
         task=task, repo=repo, provider=WorktreeProvider(repo, "t-dead"),
         subagents=Subagents(backend), run_id="t-dead",
-        scheduler=Scheduler(Budget(max_nodes=6, max_seconds=300, max_usd=1)), parallel=False,
+        scheduler=Scheduler(Budget(max_nodes=9, max_seconds=300, max_usd=1)), parallel=False,
     )
     run.run()
     generator_prompts = [c for c in backend.calls if c[0] == "generator"]
@@ -253,7 +253,7 @@ def test_held_out_names_never_reach_a_prompt(repo):
     run = SearchRun(
         task=task, repo=repo, provider=WorktreeProvider(repo, "t-leak"),
         subagents=Subagents(backend), run_id="t-leak",
-        scheduler=Scheduler(Budget(max_nodes=6, max_seconds=300, max_usd=1)), parallel=False,
+        scheduler=Scheduler(Budget(max_nodes=9, max_seconds=300, max_usd=1)), parallel=False,
     )
     result = run.run()
 
@@ -296,3 +296,74 @@ def test_tree_file_is_valid_json_after_a_run(repo):
     assert tree_files
     data = json.loads(tree_files[-1].read_text())
     assert "nodes" in data and "order" in data
+
+
+def test_a_generator_that_returns_nothing_cannot_spin_forever(repo):
+    """An empty reply consumes a call, so it has to consume budget.
+
+    An empty candidate creates no node. If that costs nothing, the scheduler picks
+    the same state again and the loop only stops when the wall clock does -- which
+    in practice means a fifteen-minute hang writing `candidate.empty` to the bus.
+    One run left a 929MB bus file behind before this was charged.
+    """
+    from ratchet.bus import Bus
+    from ratchet.config import load_task
+    from ratchet.loop import SearchRun
+    from ratchet.sandbox import WorktreeProvider
+    from ratchet.scheduler import Budget, Scheduler
+    from ratchet.subagents import ScriptedBackend, Subagents
+
+    max_nodes = 4
+    # "map" answers the cartographer; every generator call after it returns "".
+    backend = ScriptedBackend(["map"])
+    run = SearchRun(
+        task=load_task(TASK),
+        repo=repo,
+        provider=WorktreeProvider(repo, "empty-gen"),
+        subagents=Subagents(backend),
+        run_id="empty-gen",
+        scheduler=Scheduler(Budget(max_nodes=max_nodes, max_seconds=120)),
+        bus=Bus(repo / ".ratchet" / "empty-gen.bus.jsonl"),
+    )
+    result = run.run()
+
+    assert not result.green
+    assert "node budget" in result.stopped_because, result.stopped_because
+    # The root costs one node; the rest are the empty expansions. Without the fix
+    # this number is bounded only by how many calls fit in the wall clock.
+    generator_calls = sum(1 for role, _m in backend.calls if role == "generator")
+    assert generator_calls <= max_nodes, generator_calls
+
+
+def test_a_run_whose_candidates_all_regress_still_spends_its_budget(repo):
+    """`max_nodes` caps work attempted, not work that succeeded.
+
+    Charging only the accepted path means a run whose every candidate is pruned --
+    a model emitting diffs that do not apply, which is an ordinary Tuesday -- spends
+    no node budget and stops only when the wall clock does.
+    """
+    from ratchet.bus import Bus
+    from ratchet.config import load_task
+    from ratchet.loop import SearchRun
+    from ratchet.sandbox import WorktreeProvider
+    from ratchet.scheduler import Budget, Scheduler
+    from ratchet.subagents import ScriptedBackend, Subagents
+
+    max_nodes = 3
+    junk = "```diff\nintent: nonsense\n--- a/nope.py\n+++ b/nope.py\n@@ -1 +1 @@\n-a\n+b\n```"
+    backend = ScriptedBackend(["map"] + [junk] * 40)
+    run = SearchRun(
+        task=load_task(TASK),
+        repo=repo,
+        provider=WorktreeProvider(repo, "all-broken"),
+        subagents=Subagents(backend),
+        run_id="all-broken",
+        scheduler=Scheduler(Budget(max_nodes=max_nodes, max_seconds=180)),
+        bus=Bus(repo / ".ratchet" / "all-broken.bus.jsonl"),
+    )
+    result = run.run()
+
+    assert not result.green
+    assert "node budget" in result.stopped_because, result.stopped_because
+    generator_calls = sum(1 for role, _m in backend.calls if role == "generator")
+    assert generator_calls <= max_nodes, generator_calls
