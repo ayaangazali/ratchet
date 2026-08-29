@@ -576,12 +576,41 @@ gauntlet rail folds away, below 76 the tree does, and the activity stream is the
 last thing standing. On a short terminal the header shrinks and the counters fold
 onto two lines rather than vanishing. Tested at 84×30 and 150×46.
 
-### The same run, in a browser
+### The same run, in a browser — a pixel office 🕹️
 
 ```bash
 make dashboard                     # http://127.0.0.1:8788
 ratchet dashboard --bus .ratchet/fixture.bus.jsonl
 ```
+
+Every subagent on the bus is a pixel character in a tiny office. Verifiers sit at
+their own labeled workstations (one agent per computer, PC-01 through PC-06) and
+type while their monitor flickers; the screen settles **green** or goes dark with
+the node's verdict. Finished agents clock off and walk to the lounge. The docs
+oracle, the scheduler, the cartographer and the office pet are all real events,
+drawn live.
+
+**When the run wants to do something irreversible, an agent walks to the ⛩ gate
+and the whole page holds** — the ask comes *before* the push or PR, never after:
+
+![The dashboard holding at the gate — approve or deny before anything ships](docs/dashboard-holding.png)
+
+Approve (or hit `a`) and the run finishes; everyone celebrates and clocks off:
+
+![The run gone green — winner starred, agents off duty in the lounge](docs/dashboard-green.png)
+
+🧭 **How to read it in ten seconds:**
+
+- **Progress to green** (top right) — the best verifier score so far, 100% when a patch passes every check.
+- **Click any character or roster row** — a plain-English summary card: repo, task, branch/node, model, workstation, open-PR count, and DOING NOW / WAITING ON / DID. The raw event log is there too, collapsed, for the curious.
+- **Hover** anyone for a two-line brief.
+- ⏸ amber = waiting on *you* · ★ green = accepted · ✗ grey = pruned (parked, not deleted).
+
+💡 **Tips:** keys `a`/`d` answer the gate · refresh mid-run and the whole office
+rebuilds from byte zero (the bus is a file) · point `--bus` at any old run to
+replay it. Character and furniture art from
+[Pixel Agents](https://github.com/pixel-agents-hq/pixel-agents) (MIT), embedded
+as data URIs.
 
 Not a second implementation of the console — a second front end onto the same file.
 It streams the bus over server-sent events, so a reader that connects late still
