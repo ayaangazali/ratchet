@@ -110,7 +110,7 @@ def _profile(points, u: float) -> float | None:
     """Smoothstepped interpolation along a profile; None outside its span."""
     if u <= points[0][0] or u >= points[-1][0]:
         return None
-    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+    for (x0, y0), (x1, y1) in zip(points, points[1:], strict=False):
         if x0 <= u <= x1:
             t = 0.0 if x1 == x0 else (u - x0) / (x1 - x0)
             return y0 + (y1 - y0) * t * t * (3 - 2 * t)
@@ -226,5 +226,9 @@ if __name__ == "__main__":
         target = Path(__file__).resolve().parents[1] / "ratchet" / "tui" / "sprites.py"
         target.write_text(emit())
         print(f"wrote {target}")
+    elif "--emit" in sys.argv:
+        # print exactly what --write would write, so the test can diff the shipped
+        # file against the generator without touching the tree
+        sys.stdout.write(emit())
     else:
         preview()

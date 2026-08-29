@@ -20,7 +20,7 @@ from ratchet.tui import mascot as m
 from ratchet.tui.sprites import PALETTE, Sprite
 
 ROOT = Path(__file__).resolve().parents[1]
-SPRITES = [m.CAPY, m.CAPY_SMALL, m.CAPY_TINY]
+SPRITES = [m.FIN, m.FIN_SMALL, m.FIN_TINY]
 
 
 @pytest.mark.parametrize("sprite", SPRITES, ids=lambda s: f"{s.width}x{s.height}")
@@ -54,14 +54,14 @@ def test_sprites_match_their_geometry() -> None:
     the script that claims to produce it have parted company -- and the next person
     to run `make mascot` silently reverts their work."""
     generated = subprocess.run(
-        [sys.executable, "scripts/make_mascot.py", "--stdout"],
+        [sys.executable, "scripts/make_mascot.py", "--emit"],
         cwd=ROOT, capture_output=True, text=True, check=True,
     ).stdout
     assert generated == (ROOT / "ratchet" / "tui" / "sprites.py").read_text()
 
 
 def test_svg_uses_only_palette_colours() -> None:
-    svg = m.to_svg(m.CAPY)
+    svg = m.to_svg(m.FIN)
     assert svg.startswith("<svg") and svg.endswith("</svg>")
     fills = set(re.findall(r'fill="([^"]+)"', svg))
     assert fills and fills <= set(PALETTE.values())
@@ -79,7 +79,7 @@ def test_stylesheet_and_module_agree_on_colours() -> None:
 def test_dashboard_page_leaves_no_placeholder() -> None:
     page = _page(Path(".ratchet/demo.bus.jsonl"), Path("demo-repo")).decode()
     assert "__PALETTE__" not in page
-    assert "__CAPYBARA__" not in page
+    assert "__DOLPHIN__" not in page
     assert "__RUN__" not in page and "__REPO__" not in page
     for name, value in m.COLOURS.items():
         assert f"--{name}: {value};" in page, f"palette entry {name} never reached the page"
