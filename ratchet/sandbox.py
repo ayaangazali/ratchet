@@ -24,6 +24,7 @@ product; snapshotting is an optimisation of the search.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -204,7 +205,13 @@ class WorktreeProvider:
         try:
             if link.is_symlink() or link.exists():
                 link.unlink()
-            link.symlink_to(target)
+            # A wrapper, not a symlink. Python locates its virtualenv by looking for
+            # `pyvenv.cfg` next to `sys.executable`; a symlink makes sys.executable
+            # the link's own path, whose directory has no pyvenv.cfg, so the venv is
+            # silently not activated and the interpreter starts without pytest. exec
+            # keeps sys.executable pointing at the real binary.
+            link.write_text(f'#!/bin/sh\nexec {shlex.quote(str(target))} "$@"\n')
+            link.chmod(0o755)
         except OSError:
             return None
         return d
