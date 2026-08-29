@@ -1,5 +1,6 @@
 """`ratchet` — one entry point for every part of the system.
 
+    ratchet go <repo-url>                          clone, detect, probe, and start
     ratchet run "fix the auth token refresh bug"   search until green or budget out
     ratchet tree                                   the search tree, scores, live/pruned
     ratchet rewind <node>                          restore that state and branch from it
@@ -230,6 +231,29 @@ def cmd_research(args) -> int:
 
     print("unknown research subcommand", file=sys.stderr)
     return 1
+def cmd_go(args) -> int:
+    """One command from a URL to a live search.
+
+    Everything it needs is observable, so it observes it: the framework from the
+    files, the environment from the manifest, and the task itself from which tests
+    are red right now. See `onboard.py` for why the held-out split is interleaved.
+    """
+    from .onboard import go
+
+    try:
+        return go(
+            args.url,
+            workdir=Path(args.dir).resolve() if args.dir else None,
+            goal=args.goal,
+            run=not args.no_run,
+            console=not args.no_console,
+            budget=args.budget,
+            scripted=args.scripted,
+            probe_timeout=args.probe_timeout,
+        )
+    except RuntimeError as e:  # a clone that did not happen is not a stack trace
+        print(f"\n  {e}", file=sys.stderr)
+        return 2
 
 
 def cmd_run(args) -> int:
@@ -633,6 +657,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--version", action="version", version=f"ratchet {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=False)
+
+    p = sub.add_parser("go", help="clone a repository, work out the task, and start searching")
+    p.add_argument("url", help="a GitHub URL, `owner/repo`, or a local path")
+    p.add_argument("--goal", help="override the auto-written task statement")
+    p.add_argument("--dir", help="where to clone (default ./.ratchet-work)")
+    p.add_argument("--budget", type=int, help="max nodes")
+    p.add_argument("--scripted", help="canned model responses; runs with no harness")
+    p.add_argument("--probe-timeout", type=int, default=600,
+                   help="seconds to let the repository's own suite run (default 600)")
+    p.add_argument("--no-run", action="store_true", help="write the task and stop")
+    p.add_argument("--no-console", action="store_true", help="search without attaching the TUI")
+    p.set_defaults(fn=cmd_go)
 
     p = sub.add_parser("run", help="search until green or the budget runs out")
     p.add_argument("goal", nargs="?", help="override the task statement")
