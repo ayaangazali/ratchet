@@ -304,3 +304,57 @@ def test_first_run_lands_in_the_connect_picker(repo, monkeypatch):
             return app.query_one("#chat", _Input).value
 
     assert asyncio.run(drive()) == "/connect "
+
+
+# ----------------------------------------------------------------- security --
+
+
+def test_a_pasted_key_never_reaches_a_model_or_the_bus(repo):
+    """A mistyped /connect turns the key into a prompt; the session must refuse to
+    send it, and nothing key-shaped may land in the bus file."""
+    from ratchet.bus import Bus
+
+    bus = Bus(repo / ".ratchet" / "t.bus.jsonl")
+    called = []
+
+    class Spy:
+        provider, model = "spy", "spy"
+
+        def complete(self, prompt, **kw):
+            called.append(prompt)
+            return "intent: x\n```file:a.txt\nx\n```"
+
+    session = ChatSession(repo, backend=Spy(), bus=bus)
+    turn, _ = _run(session, "/conect groq gsk_abcdef1234567890abcdef")  # note the typo
+    assert not turn.ok and "API key" in turn.error
+    assert called == []  # the model never saw it
+    assert "gsk_" not in (repo / ".ratchet" / "t.bus.jsonl").read_text()
+
+
+def test_sandbox_env_carries_no_provider_keys(repo, monkeypatch):
+    """Model-generated code runs in the sandbox; `print(os.environ)` is one line,
+    so the keys must simply not be there."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret")
+    monkeypatch.setenv("TFY_API_KEY", "tfy-secret")
+    from ratchet.sandbox import WorktreeProvider
+
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], capture_output=True)
+    provider = WorktreeProvider(repo, "t-scrub")
+    sb = provider.fork(provider.base_image(), label="scrub")
+    try:
+        res = sb.exec("echo \"[$ANTHROPIC_API_KEY][$TFY_API_KEY]\"", timeout=60)
+    finally:
+        sb.destroy()
+        provider.cleanup()
+    assert "[][]" in res.out  # both empty inside the sandbox
+    assert "sk-ant-secret" not in res.out
+
+
+def test_key_file_dir_is_git_ignored(monkeypatch, tmp_path):
+    """~/.config is a git repo in plenty of dotfiles setups; the key file must not
+    be committable from there."""
+    import ratchet.providers as prov
+
+    monkeypatch.setattr(prov, "KEYS_PATH", tmp_path / "cfg" / "keys.env")
+    prov.save_key("groq", "gsk_test")
+    assert (tmp_path / "cfg" / ".gitignore").read_text().strip() == "keys.env"

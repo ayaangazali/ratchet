@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .context import tree_listing
-from .providers import ChatBackend, ChatProviderError
+from .providers import ChatBackend, ChatProviderError, looks_like_secret, redact
 
 FILE_FENCE = re.compile(r"```file:([^\n`]+)\n(.*?)```", re.S)
 DIFF_FENCE = re.compile(r"```(?:diff|patch)\n(.*?)```", re.S)
@@ -76,7 +76,14 @@ class ChatSession:
         t0 = time.time()
         turn = Turn(prompt=prompt)
         self.cancel.clear()
-        self._bus("chat.turn", prompt=prompt[:200], provider=self.backend.provider, model=self.backend.model)
+        # A mistyped /connect makes the "command" a prompt -- and a prompt is sent
+        # to a third-party model and appended to the bus file. Anything key-shaped
+        # stops here, unsent and unlogged, so a typo never forces a key rotation.
+        if looks_like_secret(prompt):
+            turn.error = "that looks like an API key — refusing to send it to a model or write it to the bus. Use /connect."
+            emit("error", turn.error)
+            return self._finish(turn, t0)
+        self._bus("chat.turn", prompt=redact(prompt[:200]), provider=self.backend.provider, model=self.backend.model)
 
         emit("step", f"asking {self.backend.provider}/{self.backend.model}")
         try:

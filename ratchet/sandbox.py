@@ -90,7 +90,11 @@ class WorktreeSandbox:
         self.venv = venv
 
     def _env(self) -> dict[str, str]:
-        env = dict(os.environ)
+        from .providers import scrub_env
+
+        # model-generated code executes in this sandbox; provider keys in its
+        # environment are one `print(os.environ)` away from the log
+        env = scrub_env(dict(os.environ))
         if self.venv and self.venv.exists():
             # one pre-warmed environment shared by every attempt: this is the whole
             # reason the fallback is fast enough to search with

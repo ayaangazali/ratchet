@@ -888,7 +888,9 @@ class RatchetApp(App):
         elif cmd == "/quit":
             self.exit()
         else:
-            self._note(log, f"unknown command {cmd!r} — /help lists everything, "
+            from ..providers import redact as _redact
+
+            self._note(log, f"unknown command {_redact(cmd)!r} — /help lists everything, "
                             f"or just type what you want built", m.AMBER)
             _ = COMMANDS  # imported for parity with the palette
 
@@ -945,7 +947,9 @@ class RatchetApp(App):
         if session.backend.provider == "demo":
             self._note(log, "demo provider: this scaffolds a stub, it does not think — "
                             "/connect for real codegen", m.AMBER)
-        self._note(log, prompt[:120])
+        from ..providers import redact as _redact
+
+        self._note(log, _redact(prompt[:120]))
         self._chat_worker = self._run_chat_turn(prompt)
 
     @work(thread=True, exit_on_error=False)

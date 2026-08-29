@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -86,6 +87,11 @@ def save_key(provider: str, key: str) -> Path:
         raise ChatProviderError(f"{provider!r} takes no key")
     env_name = PROVIDERS[provider][1]
     KEYS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # ~/.config is a git repo in plenty of dotfiles setups; make sure the key
+    # file can never ride along in a commit
+    gi = KEYS_PATH.parent / ".gitignore"
+    if not gi.exists():
+        gi.write_text("keys.env\n")
     lines = [
         line for line in (KEYS_PATH.read_text().splitlines() if KEYS_PATH.exists() else [])
         if not line.startswith(f"{env_name}=")
@@ -117,6 +123,43 @@ def validate_key(provider: str, key: str, *, timeout: float = 20.0) -> str:
     _raise_for(r)
     n = len(r.json().get("data", []))
     return f"connected — {n} models visible"
+
+
+# --------------------------------------------------------------------------- #
+# secret hygiene: a pasted key must never reach a model, a bus file, a log line
+# or a sandboxed child process. Belt everywhere the text flows.
+# --------------------------------------------------------------------------- #
+
+SECRET_RE = re.compile(
+    r"(sk-ant-[A-Za-z0-9_-]{10,}"          # anthropic
+    r"|sk-[A-Za-z0-9_-]{16,}"              # openai and friends
+    r"|gsk_[A-Za-z0-9]{16,}"               # groq
+    r"|tfy-[A-Za-z0-9._-]{10,}"            # truefoundry
+    r"|(?:api[_-]?key|apikey|token|secret|password)\s*[:=]\s*['\"]?[A-Za-z0-9._-]{12,})",
+    re.I,
+)
+
+#: env vars that must never leak into a sandbox where model-generated code runs
+SECRET_ENV_PREFIXES = ("ANTHROPIC_", "OPENAI_", "GROQ_", "MOONSHOT_", "TFY_", "BRIGHTDATA_", "AWS_", "GITHUB_")
+SECRET_ENV_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
+
+
+def looks_like_secret(text: str) -> bool:
+    return bool(SECRET_RE.search(text or ""))
+
+
+def redact(text: str) -> str:
+    """Replace anything key-shaped before a string is logged, bussed or echoed."""
+    return SECRET_RE.sub("<redacted>", text or "")
+
+
+def scrub_env(env: dict[str, str]) -> dict[str, str]:
+    """The environment a sandbox gets: provider keys removed, because the code
+    running in there is model-generated and `print(os.environ)` is one line."""
+    return {
+        k: v for k, v in env.items()
+        if not k.startswith(SECRET_ENV_PREFIXES) and not k.endswith(SECRET_ENV_SUFFIXES)
+    }
 
 
 _TF_CACHE: dict[str, object] = {}
