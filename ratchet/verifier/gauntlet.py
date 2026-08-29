@@ -116,6 +116,14 @@ class Gauntlet:
         )
         res = sandbox.exec(cmd, timeout=task.timeout_s + 60)
         log = res.out
+        # The revert of protected paths is the anti-tamper primitive everything else
+        # leans on. If it reported a failure, the suite just graded whatever state the
+        # agent left the tests in -- so nothing below can be trusted. Fail closed.
+        if not parsers.reset_ok(log):
+            stages["f2p"] = _stage("f2p", False, 0.0, "protected-path reset failed", t0)
+            return self._result(Outcome.INFRA, 0.0, stages, findings,
+                                reason="the pre-run revert of protected paths failed; refusing to grade agent-editable tests",
+                                last_failure=res.tail(20), t_start=t_start, patch=patch)
         status_map = parsers.parse(log, task.framework)
         ran = parsers.suite_ran(log)
         consistent = parsers.exit_code_consistent(log, status_map)

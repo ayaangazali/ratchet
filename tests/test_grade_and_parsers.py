@@ -8,7 +8,17 @@ from __future__ import annotations
 
 from ratchet.models import TestStatus
 from ratchet.verifier.grade import grade
-from ratchet.verifier.parsers import END, EXIT, START, exit_code_consistent, parse, parse_exit_code, suite_ran
+from ratchet.verifier.parsers import (
+    END,
+    EXIT,
+    RESET_FAILED,
+    START,
+    exit_code_consistent,
+    parse,
+    parse_exit_code,
+    reset_ok,
+    suite_ran,
+)
 
 VISIBLE = ["tests/test_v.py::test_a", "tests/test_v.py::test_b"]
 HIDDEN = ["tests/test_h.py::test_c", "tests/test_h.py::test_d"]
@@ -129,3 +139,13 @@ def test_honest_failing_log_is_consistent():
 def test_empty_suite_is_not_a_clean_sweep():
     assert not suite_ran(EMPTY)
     assert parse(EMPTY) == {}
+
+
+def test_a_failed_protected_path_reset_is_not_ok():
+    # the suite may look perfectly green -- if the revert failed, it graded the
+    # agent's own edits to the tests, and nothing in that log is evidence
+    assert not reset_ok(RESET_FAILED + "\n" + GOOD)
+
+
+def test_a_clean_log_passes_the_reset_guard():
+    assert reset_ok(GOOD)

@@ -25,6 +25,8 @@ from ..models import TestStatus
 START = ">>>>> ratchet test output start"
 END = ">>>>> ratchet test output end"
 EXIT = ">>>>> ratchet exit code:"
+#: emitted by the eval script when the pre-run revert of a protected path fails
+RESET_FAILED = ">>>>> ratchet reset failed"
 
 _EXIT_RE = re.compile(re.escape(EXIT) + r"\s*(-?\d+)")
 
@@ -122,6 +124,18 @@ def parse(log: str, framework: str = "pytest") -> dict[str, TestStatus]:
 # --------------------------------------------------------------------------- #
 # guards
 # --------------------------------------------------------------------------- #
+
+
+def reset_ok(log: str) -> bool:
+    """False when the pre-run revert of protected paths reported a failure.
+
+    A reset that silently did not happen means the run would grade the agent's own
+    edits to the graded tests. Fail closed: the gauntlet treats this as an
+    infrastructure failure, never as a pass. The marker sits outside the parsed
+    region, so the only thing a patch gains by printing it is an INFRA verdict
+    against itself.
+    """
+    return RESET_FAILED not in log
 
 
 def suite_ran(log: str) -> bool:

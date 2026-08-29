@@ -85,6 +85,35 @@ def test_the_canary_catches_what_no_static_rule_can(repo):
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git required")
+def test_runtime_tamper_of_protected_paths_is_reverted_before_grading(repo):
+    """Tampering that happens *inside the sandbox* -- after the static diff check has
+    already passed -- must be erased by the pre-run revert. Both halves matter:
+    checkout restores an edited test file, clean removes a file the tamper created.
+
+    Regression test for the combined-pathspec bug: `git checkout <base> -- tests/
+    conftest.py pyproject.toml` aborts wholesale when one pathspec (conftest.py,
+    absent from demo-repo) matches nothing, and the tampered tests reached the
+    grader untouched."""
+    task = load_task(TASK)
+    provider = WorktreeProvider(repo, "e2e-reset")
+    base = provider.base_image()
+    sb = provider.fork(base, label="reset")
+    try:
+        sb.exec(
+            "printf 'def test_basic():\\n    assert 1 == 2\\n' > tests/test_regression.py\n"
+            "printf 'raise RuntimeError(\"tampered\")\\n' > tests/conftest.py"
+        )
+        res = Gauntlet(task, repo_dir=".", test_sources=_sources(repo, task)).run(
+            sb, "", base_commit=base, apply_patch=False
+        )
+    finally:
+        sb.destroy()
+        provider.cleanup()
+    assert res.outcome is Outcome.PROGRESS, res.to_observation()
+    assert res.p2p_intact
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git required")
 def test_red_team_battery_holds(repo):
     """The verifier's own eval, in CI. Every known attack blocked, both controls green."""
     from ratchet import redteam
