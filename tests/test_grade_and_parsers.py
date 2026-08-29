@@ -166,6 +166,25 @@ def test_failure_excerpt_never_names_a_held_out_test():
     assert "held-out" in out  # the count survives; the names do not
 
 
+def test_failure_excerpt_withholds_held_out_failure_details():
+    """Names are not the only leak: pytest's FAILURES section echoes the held-out
+    test's source and rendered values -- the exact inputs a patch would special-case."""
+    block = log(
+        "collected 5 items\n"
+        "____________________ test_c ____________________\n"
+        '    assert slugify("Cafe Creme secret-input") == "cafe-creme"\n'
+        "E   AssertionError: assert 'cafe-crme secret-rendered' == 'cafe-creme'\n"
+        "=========================== short test summary info ===========================\n"
+        "FAILED tests/test_h.py::test_c - AssertionError: assert 'secret-rendered'\n"
+        "========== 1 failed in 0.10s",
+        exit_code=1,
+    )
+    out = failure_excerpt(block, parse(block), redact=HIDDEN)
+    assert "secret-input" not in out
+    assert "secret-rendered" not in out
+    assert "withheld" in out
+
+
 def test_failure_excerpt_still_names_visible_failures():
     """The must-not-trip half: redaction must not eat the agent's real feedback."""
     log = OVERFIT.replace(

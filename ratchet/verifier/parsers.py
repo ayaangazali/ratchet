@@ -175,18 +175,36 @@ def failure_excerpt(
     failing = [t for t, s in status_map.items() if is_red(s) and t not in hidden]
     n_hidden_red = sum(1 for t, s in status_map.items() if is_red(s) and t in hidden)
 
-    body = slice_output(log).strip()
     tokens: set[str] = set()
     for t in hidden:
         path, _, name = t.partition("::")
         tokens.update(x for x in (t, path, name) if x)
-    # longest first, so a full id is consumed before its own substrings are
-    for tok in sorted(tokens, key=len, reverse=True):
-        body = body.replace(tok, "<held-out test>")
+
+    # Names are not enough: pytest's FAILURES section echoes the failing test's
+    # *source and rendered values* -- the exact inputs a patch would special-case.
+    # So a whole failure block whose header names a held-out test is dropped, and
+    # any remaining line that mentions a held-out token is replaced outright rather
+    # than token-substituted (the short-summary line carries the assertion message).
+    kept: list[str] = []
+    dropping = False
+    for ln in slice_output(log).strip().splitlines():
+        stripped = ln.strip()
+        is_hdr = len(stripped) > 6 and stripped.startswith("_") and stripped.endswith("_")
+        if is_hdr or stripped.startswith("="):
+            dropping = is_hdr and any(tok in ln for tok in tokens)
+            if dropping:
+                kept.append("<held-out test failed; details withheld>")
+                continue
+        if dropping:
+            continue
+        if any(tok in ln for tok in tokens):
+            kept.append("<held-out test>")
+            continue
+        kept.append(ln)
 
     head = []
     if failing or n_hidden_red:
         shown = ", ".join(failing[:8])
         extra = f" (+{n_hidden_red} held-out)" if n_hidden_red else ""
         head = [f"failing: {shown}{extra}" if shown else f"failing: {n_hidden_red} held-out test(s)"]
-    return "\n".join(head + body.splitlines()[-limit:])
+    return "\n".join(head + kept[-limit:])
