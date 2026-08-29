@@ -1,0 +1,52 @@
+# An objective graph: the demo slugify goal decomposed into two sub-objectives,
+# each decided by its own tests. A node is fulfilled when — and only when — the
+# gauntlet returns green for its contract; the agent's opinion of its progress is
+# not an input. Node order is dependency order, and the repo state advances as
+# nodes fulfil, so `truncation` builds on the commit `accents` produced.
+
+graph_id: demo-slugify-graph
+repo_path: demo-repo
+framework: pytest
+timeout_s: 300
+test_cmd: python -m pytest -rA tests/test_slugify_visible.py tests/test_slugify_hidden.py tests/test_regression.py
+
+statement: |
+  `textkit.slugify` must lowercase, collapse separators, fold accents to their
+  ASCII base, and truncate at max_length without cutting a word or leaving a
+  trailing hyphen. It currently drops accents entirely and truncates mid-word.
+  Fix src/textkit/slugify.py. Do not change the tests.
+
+# every node must keep the whole regression suite green — a step that fulfils its
+# own tests by breaking someone else's is a regression, not progress
+p2p:
+  - tests/test_regression.py::test_basic
+  - tests/test_regression.py::test_collapses_separators
+  - tests/test_regression.py::test_strips_edges
+  - tests/test_regression.py::test_empty_string
+  - tests/test_regression.py::test_already_a_slug
+  - tests/test_regression.py::test_respects_max_length
+
+protected_paths:
+  - tests/
+  - pyproject.toml
+
+allowed_paths:
+  - src/textkit/
+
+nodes:
+  - id: accents
+    goal: fold accented characters to their ascii base instead of dropping them
+    f2p_visible:
+      - tests/test_slugify_visible.py::test_folds_a_simple_accent
+    f2p_hidden:
+      - tests/test_slugify_hidden.py::test_folds_combining_marks
+      - tests/test_slugify_hidden.py::test_folds_precomposed_accents
+      - tests/test_slugify_hidden.py::test_folds_multiple_scripts
+
+  - id: truncation
+    goal: truncate at max_length on a word boundary, never leaving a trailing hyphen
+    deps: [accents]
+    f2p_visible:
+      - tests/test_slugify_visible.py::test_truncates_on_a_word_boundary
+    f2p_hidden:
+      - tests/test_slugify_hidden.py::test_truncation_never_leaves_a_trailing_dash

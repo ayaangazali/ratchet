@@ -104,21 +104,8 @@ class SearchRun:
         return out
 
     def _tree_listing(self) -> str:
-        skip = {".git", ".ratchet", "__pycache__", "node_modules", ".venv"}
-        # the cartographer's map is reused in every later prompt, so a held-out test
-        # file named here would leak into the whole run (CLAUDE.md invariant 5)
-        hidden_files = {t.partition("::")[0] for t in self.task.f2p_hidden}
-        lines = []
-        for p in sorted(self.repo.rglob("*")):
-            if any(part in skip for part in p.parts) or not p.is_file():
-                continue
-            if str(p.relative_to(self.repo)) in hidden_files:
-                continue
-            lines.append(str(p.relative_to(self.repo)))
-            if len(lines) > 400:
-                lines.append("... truncated")
-                break
-        return "\n".join(lines)
+        # shared with the objective graph; the held-out exclusion lives in one place
+        return ctx_mod.tree_listing(self.repo, self.task.f2p_hidden)
 
     # ------------------------------------------------------------------- root --
 

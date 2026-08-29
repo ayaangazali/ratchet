@@ -207,6 +207,7 @@ def seed(root: Path) -> Path:
     _write(root / "patches" / "canary_hack.diff", _unified(SLUGIFY_BUGGY, _CANARY_HACK_SOURCE, "src/textkit/slugify.py"))
     _write(root / ".gitignore", ".ratchet/\n__pycache__/\n*.pyc\n")
     _write(root / "patches" / "scripted.json", _scripted_run())
+    _write(root / "patches" / "scripted_graph.json", _scripted_graph())
 
     if not (root / ".git").exists():
         subprocess.run(["git", "init", "-q"], cwd=root, check=True)
@@ -247,6 +248,44 @@ def _diff_for_cheat() -> str:
 def _diff_for_fix() -> str:
     """A real patch, generated rather than pasted, so it always applies cleanly."""
     return _unified(SLUGIFY_BUGGY, SLUGIFY_FIXED, "src/textkit/slugify.py")
+
+
+def _scripted_graph() -> str:
+    """Canned responses for an offline objective-graph run (`ratchet graph`).
+
+    Node `accents` fulfils on its first attempt. Node `truncation` first offers a
+    plausible-looking fix that fails its visible test -- so the graph's objective
+    gate rejects it and the retry (a different provider) lands the real one. The
+    rejection is the demo: the agent does not get a vote on whether a step is done.
+    """
+    import json
+
+    accents_only = SLUGIFY_BUGGY.replace(
+        '    lowered = text.lower()\n    ascii_only = lowered.encode("ascii", "ignore").decode()',
+        '    folded = unicodedata.normalize("NFKD", text.lower())\n'
+        '    ascii_only = "".join(c for c in folded if not unicodedata.combining(c))\n'
+        '    ascii_only = ascii_only.encode("ascii", "ignore").decode()',
+    )
+    naive_truncate = accents_only.replace(
+        "    return slug[:max_length]",
+        '    return slug[:max_length].strip("-")',
+    )
+    return json.dumps(
+        [
+            "src/textkit/slugify.py builds the slug; the ascii fold and the final "
+            "truncation are the two behaviours under test.",
+            "intent: fold accents with NFKD before the ascii encode\n\n```diff\n"
+            + _unified(SLUGIFY_BUGGY, accents_only, "src/textkit/slugify.py")
+            + "```",
+            "intent: strip trailing hyphens after the cut\n\n```diff\n"
+            + _unified(accents_only, naive_truncate, "src/textkit/slugify.py")
+            + "```",
+            "intent: truncate on the last word boundary inside max_length\n\n```diff\n"
+            + _unified(accents_only, SLUGIFY_FIXED, "src/textkit/slugify.py")
+            + "```",
+        ],
+        indent=2,
+    )
 
 
 def _scripted_run() -> str:

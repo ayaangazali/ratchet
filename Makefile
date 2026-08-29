@@ -1,4 +1,4 @@
-.PHONY: dev test lint fmt demo redteam evals bench serve run console replay audit clean image fixture
+.PHONY: dev test lint fmt demo redteam evals bench serve run run-graph console replay audit clean image fixture
 
 dev:
 	pip install -e ".[dev]"
@@ -30,6 +30,11 @@ bench:
 # A complete search with no model, no key and no network.
 run-offline:
 	python -m ratchet.cli run --repo demo-repo --scripted demo-repo/patches/scripted.json
+
+# An objective graph run: each node fulfilled only by its tests; a node that
+# exhausts its attempts escalates to the tree search. No model, no network.
+run-graph:
+	python -m ratchet.cli graph --file objectives/demo-graph.yaml --repo demo-repo --scripted demo-repo/patches/scripted_graph.json
 
 run:
 	python -m ratchet.cli run --repo demo-repo

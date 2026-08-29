@@ -16,11 +16,40 @@ is how a search run dies of its own logs.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 
 from .node import Node, Tree
 
 MAX_FAILURE = 2400
+MAX_LISTING = 400
+
+
+def tree_listing(repo: Path, f2p_hidden: Iterable[str]) -> str:
+    """The file listing a mapper model is allowed to see.
+
+    Lives here, next to the rest of what reaches prompts, so the held-out
+    exclusion (CLAUDE.md invariant 5) has exactly one implementation: any file a
+    hidden test id points at never appears in a listing, because the mapper's
+    output is reused by every later prompt in a run.
+    """
+    repo = Path(repo)
+    skip = {".git", ".ratchet", "__pycache__", "node_modules", ".venv"}
+    hidden_files = {t.partition("::")[0] for t in f2p_hidden}
+    lines: list[str] = []
+    for p in sorted(repo.rglob("*")):
+        if any(part in skip for part in p.parts) or not p.is_file():
+            continue
+        rel = str(p.relative_to(repo))
+        if rel in hidden_files:
+            continue
+        lines.append(rel)
+        if len(lines) > MAX_LISTING:
+            lines.append("... truncated")
+            break
+    return "\n".join(lines)
+
 MAX_DIFF = 6000
 MAX_MAP = 3000
 MAX_DEAD_ENDS = 6
