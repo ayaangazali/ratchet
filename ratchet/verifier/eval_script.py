@@ -26,6 +26,57 @@ import shlex
 from .parsers import END, EXIT, RESET_FAILED, START
 
 
+# --------------------------------------------------------------------------- #
+# a timeout that exists everywhere
+# --------------------------------------------------------------------------- #
+
+#: Every graded stage is wrapped in a timeout, and for a long time that wrapper was
+#: the literal string `timeout`. GNU coreutils ships it; macOS does not, and neither
+#: does a slim container. On a machine without it every single stage died with
+#: `timeout: command not found` before the suite ever ran, the gauntlet scored the
+#: patch `BROKEN`/`build failed`, and a completely healthy search looked like an
+#: agent that could not fix anything -- the whole tool reads as fake when its
+#: verifier cannot execute. The bug was one missing binary.
+#:
+#: So: use the real thing when it is there, and otherwise run a watchdog in the
+#: shell. The fallback keeps the contract that matters -- exit code 124 means the
+#: command ran out of time -- because `sandbox.py` and the parsers key off it.
+#:
+#: Written for bash 3.2, which is what macOS still ships: no `wait -n`, no arrays.
+#:
+#: The watchdog's redirections are load-bearing, not tidiness. A background
+#: subshell inherits the caller's stdout, and `subprocess.run(capture_output=True)`
+#: reads until every writer closes the pipe -- so a watchdog sleeping for the full
+#: timeout kept the pipe open and hung the parent for the entire budget even after
+#: the suite had finished. It read exactly like a hang in the test suite.
+TIMEOUT_SHIM = """\
+_rt_have_timeout=0; _rt_have_gtimeout=0
+command -v timeout >/dev/null 2>&1 && _rt_have_timeout=1
+command -v gtimeout >/dev/null 2>&1 && _rt_have_gtimeout=1
+_ratchet_timeout() {
+  _rt_limit=$1; shift
+  if [ "$_rt_have_timeout" = "1" ]; then timeout "$_rt_limit" "$@"; return $?; fi
+  if [ "$_rt_have_gtimeout" = "1" ]; then gtimeout "$_rt_limit" "$@"; return $?; fi
+  _rt_flag="${TMPDIR:-/tmp}/ratchet-timeout-$$-$RANDOM"
+  rm -f "$_rt_flag"
+  "$@" &
+  _rt_cmd=$!
+  ( sleep "$_rt_limit"
+    if kill -0 $_rt_cmd 2>/dev/null; then
+      : > "$_rt_flag"; kill -TERM $_rt_cmd 2>/dev/null
+      sleep 5; kill -KILL $_rt_cmd 2>/dev/null
+    fi ) >/dev/null 2>&1 </dev/null &
+  _rt_watch=$!
+  wait $_rt_cmd 2>/dev/null
+  _rt_rc=$?
+  kill -TERM $_rt_watch 2>/dev/null
+  wait $_rt_watch 2>/dev/null
+  if [ -f "$_rt_flag" ]; then rm -f "$_rt_flag"; return 124; fi
+  rm -f "$_rt_flag"
+  return $_rt_rc
+}"""
+
+
 def _reset_lines(base_commit: str, protected_paths: list[str], *, quiet: bool = False) -> list[str]:
     """The revert, one protected path at a time.
 
@@ -62,6 +113,7 @@ def build_test_command(
     setup_cmd: str | None = None,
 ) -> str:
     lines = [
+        TIMEOUT_SHIM,
         f"cd {shlex.quote(repo_dir)}",
         "git config --global --add safe.directory '*' >/dev/null 2>&1 || true",
         # 1. pristine tests, every time, no flag to skip it
@@ -71,7 +123,7 @@ def build_test_command(
         lines.append(setup_cmd)
     lines += [
         f"echo '{START}'",
-        f"timeout {int(timeout_s)} {test_cmd}",
+        f"_ratchet_timeout {int(timeout_s)} {test_cmd}",
         "RATCHET_EXIT=$?",
         f"echo '{END}'",
         # 3. outside the markers on purpose
@@ -85,4 +137,4 @@ def build_test_command(
 
 def build_stage_command(*, repo_dir: str, cmd: str, timeout_s: int = 300) -> str:
     """A plain stage (build, types, lint): exit code is the whole result."""
-    return f"cd {shlex.quote(repo_dir)}\ntimeout {int(timeout_s)} {cmd}"
+    return f"{TIMEOUT_SHIM}\ncd {shlex.quote(repo_dir)}\n_ratchet_timeout {int(timeout_s)} {cmd}"
