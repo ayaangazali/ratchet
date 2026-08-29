@@ -171,9 +171,22 @@ def _check_runner(settings) -> Check:
     except Exception:
         return Check("test runner", WARN, "skipped — task did not load")
     exe = cmd.split()[0] if cmd else ""
-    if exe and not shutil.which(exe) and not Path(exe).exists():
-        return Check("test runner", FAIL, f"{exe!r} is not on PATH (test_cmd: {cmd})", f"pip install {exe}")
-    return Check("test runner", OK, f"{cmd}")
+    if not exe:
+        return Check("test runner", WARN, "the task declares no test command")
+
+    # The sandbox does not inherit this process's PATH. WorktreeProvider puts the
+    # warm venv at <repo>/.ratchet/venv on PATH for every node, which is how `python`
+    # resolves on a macOS host that only ships `python3` -- so checking the host PATH
+    # alone reports a failure for a setup that grades green.
+    venv_bin = Path(settings.repo) / ".ratchet" / "venv" / "bin"
+    if (venv_bin / exe).exists():
+        return Check("test runner", OK, f"{cmd}   (via the warm venv at {venv_bin.parent})")
+    if shutil.which(exe) or Path(exe).exists():
+        return Check("test runner", OK, f"{cmd}")
+    hint = (f"build the warm venv the sandbox uses:  python3 -m venv {venv_bin.parent} && "
+            f"{venv_bin}/pip install -e {settings.repo} pytest")
+    return Check("test runner", FAIL, f"{exe!r} resolves neither on PATH nor in the warm venv "
+                                      f"(test_cmd: {cmd})", hint)
 
 
 def _check_sandbox(settings) -> Check:

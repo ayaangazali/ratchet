@@ -131,6 +131,20 @@ def _papers(scraper, query: str, limit: int):
     return rank(found, query, limit=limit), problems
 
 
+def cmd_doctor(args) -> int:
+    """Check everything a run depends on, before the run depends on it."""
+    from . import doctor
+
+    s = Settings.from_env()
+    if args.repo:
+        s.repo = args.repo
+    if args.task:
+        s.task_path = args.task
+    checks, ok = doctor.run(s, live=not args.offline)
+    print(doctor.render(checks, ok))
+    return 0 if ok else 1
+
+
 def cmd_research(args) -> int:
     """Read the literature, turn it into skills, and make each one prove itself."""
     from .research.distill import Distiller
@@ -619,6 +633,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-ship", action="store_true", help="stop before the approval gate")
     p.add_argument("--no-skills", action="store_true", help="ignore skills/ for this run")
     p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("doctor", help="check everything a run depends on, before it does not work")
+    p.add_argument("--repo")
+    p.add_argument("--task")
+    p.add_argument("--offline", action="store_true", help="skip the live model call")
+    p.set_defaults(fn=cmd_doctor)
 
     p = sub.add_parser("research", help="read papers, distil skills, and trial them")
     rsub = p.add_subparsers(dest="research_cmd", required=True)
