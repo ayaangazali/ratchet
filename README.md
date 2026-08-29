@@ -196,35 +196,100 @@ that happened.
 ## The console
 
 ```
-┌─ tree ──────────────────┬─ verifier ─────────────────────────┐
-│ ● root         0.58     │ stage 3/7 · fail-to-pass           │
-│ ├─● 0f3a  0.62          │ PASS  build            ok           │
-│ │ ├─● 7c21  0.81 ←live  │ PASS  cheat check      0 critical   │
-│ │ └─✗ 9ba4  pruned      │ FAIL  fail-to-pass     5/6 (hidden) │
-│ └─✗ 4de0  regressed     │ ....  pass-to-pass                  │
-│                         │                                     │
-│ subagents 4 · sandboxes │ ⚠ 9ba4 pruned: cheat-check          │
-│ 2 live/7 · approvals 1  │   skip marker on a held-out test    │
-├─────────────────────────┴─────────────────────────────────────┤
-│ budget: 22/40 nodes · 6m12s · $1.14   [a]pprove [r]ewind [q]  │
-└───────────────────────────────────────────────────────────────┘
+ ╭──────────────────────────────────────────────────────────────────────────────╮
+ │  ▄▄▖  ▗▄▄   ✻ ratchet                                                        │
+ │ ▐████████▌  the agent doesn't decide it's done. the tests do.                │
+ │ ▐██▘▀▀▘██▌                                                                   │
+ │  ▝█████▛▘   demo-001-slugify · harness · snapshots · run-fixture             │
+ ╰──────────────────────────────────────────────────────────────────────────────╯
+ ╭ search tree ────────╮╭ activity ──────────────────────╮╭ gauntlet ───────────╮
+ │ ● root   0.35       ││ ● Verify(0f3a-c)               ││ truncate on the la… │
+ │  └● 0f3a  0.62      ││   ⎿ gemini-3-pro: truncate on… ││                     │
+ │     claude-sonnet   ││   ⎿ PASS  build / install  ok  ││ ✔ build / install ok│
+ │   ├✗ 4de0  0.44     ││   ⎿ PASS  cheat check      0   ││ ✔ cheat check     0 │
+ │   │  1 previously-… ││   ⎿ PASS  fail-to-pass     7/7 ││ ✔ fail-to-pass  7/7 │
+ │   ├✗ 9ba4  0.00     ││   ⎿ kept 4f2a at 1.00  ★ green ││ ✔ pass-to-pass  3/3 │
+ │   │  integrity vio… ││                                ││ ✔ type check  clean │
+ │   └● 7c21  0.71     ││ ● Done(4f2a)                   ││ ✔ lint        clean │
+ │                     ││   ⎿ verifier returned green    ││ ✔ diff hygiene 1 fi │
+ ╰─────────────────────╯╰────────────────────────────────╯╰─────────────────────╯
+ ╭ harness ────────────╮                                  ╭ waiting on ─────────╮
+ │ subagents  7        │                                  │ ⏸ approval a1b2     │
+ │ sandboxes  1 live/6 │                                  │   demo-001-slugify… │
+ ╰─────────────────────╯                                  ╰─────────────────────╯
+ ╭──────────────────────────────────────────────────────────────────────────────╮
+ │  ✻ Ratchet wants to open_pull_request                                        │
+ │    demo-001-slugify: truncate on the last hyphen before the limit            │
+ │    nodes_explored 6 · path_length 3 · score 1.0 · green True · cost_usd 1.14 │
+ │    -     return slug[:max_length]                                            │
+ │    +     if len(slug) <= max_length:                                         │
+ │    Do you want to proceed?                                                   │
+ │    ❯ 1. Yes, open the pull request                                           │
+ │      2. No, keep searching                                                   │
+ ╰──────────────────────────────────────────────────────────────────────────────╯
+ ⏸ waiting on you (6m12s · 6/40 nodes · $1.14 of $3.00)
+  a approve  d deny  r rewind  f follow  q quit
 ```
 
-Left: where the search has been. Right: what it is doing now. Bottom: what it is
-costing and what you can do about it. The ambient counters — sub-agents spawned,
-sandboxes live, approvals pending — stay on screen at all times, which is free proof
-the harness is loaded in every screenshot.
+Four questions, four places to look. **Left**: where the search has been — the tree,
+with scores, live branches and pruned ones, and the one-line reason each dead end
+died. **Centre**: what it is doing right now, one bullet per step and one elbow per
+result. **Right**: how this candidate is being judged, and what the run is waiting
+on. **Bottom**: what it is costing and what you can do about it.
 
-It renders entirely off a JSONL bus, so it can be started, killed and restarted
+The ambient counters — sub-agents spawned, sandboxes live, approvals pending — stay
+on screen at all times, which is free proof the harness is loaded in every
+screenshot anyone takes.
+
+**The gate is the point.** When something irreversible is proposed the approval card
+takes the full width and the run stops behind it. It is capped rather than
+fullscreen on purpose: a reviewer who cannot see the tree cannot judge the diff.
+`a` approves, `d` denies, and if the console dies mid-demo the decision still works
+by hand, because it travels as a file:
+
+```bash
+echo '{"allow": true}' > demo-repo/.ratchet/approvals/<id>.json
+```
+
+It renders entirely off the JSONL bus, so it can be started, killed and restarted
 mid-run, and a finished run can be replayed into it:
 
 ```bash
 make fixture && make console       # a recorded run; no model needed
-ratchet replay --speed 4           # the same run, in the terminal
+ratchet replay --speed 4           # the same run, plain text
 ```
 
-If the console dies mid-demo the approval still works:
-`echo '{"allow": true}' > demo-repo/.ratchet/approvals/<id>.json`.
+It degrades in a chosen order rather than an accidental one. Below 104 columns the
+gauntlet rail folds away, below 76 the tree does, and the activity stream is the
+last thing standing. On a short terminal the header shrinks and the counters fold
+onto two lines rather than vanishing. Tested at 84×30 and 150×46.
+
+### The same run, in a browser
+
+```bash
+make dashboard                     # http://127.0.0.1:8788
+ratchet dashboard --bus .ratchet/fixture.bus.jsonl
+```
+
+Not a second implementation of the console — a second front end onto the same file.
+It streams the bus over server-sent events, so a reader that connects late still
+gets the whole run from byte zero, and **its approve button writes the same file the
+TUI writes**. `gate.Gate.wait` polls one directory; the TUI, the browser and `echo`
+are three ways to reach one gate, not three approval paths.
+
+It is one HTML file with no framework and no CDN, and the palette and the mascot are
+injected from `tui/mascot.py` at request time so the browser and the terminal cannot
+drift apart. A demo happens on conference wifi; a dashboard that has to reach a CDN
+is a dashboard that goes blank at the judging table. It binds to loopback by default
+because an endpoint that can approve a pull request is not one to expose.
+
+### The capybara
+
+She is a sprite, not ASCII art: a pixel grid drawn with `▀`, two stacked pixels per
+terminal cell, which is what makes the pixels come out square instead of stretched.
+The geometry lives in `scripts/make_mascot.py` as superellipses and rectangles, so
+she is symmetric by construction and no row can drift a character out of line —
+`make mascot` redraws her, and the same grids render to SVG for the dashboard.
 
 ---
 
@@ -276,7 +341,8 @@ ratchet/
     eval_script.py the fifteen lines of bash
   evals/           our own bug suite: linear vs search
   harness/         TrueForge client, model backend, sandbox wiring
-  tui/             the console
+  tui/             the console: sprites, palette, widgets
+  dashboard/       the same run over SSE, in a browser
 ```
 
 | command | what it does |

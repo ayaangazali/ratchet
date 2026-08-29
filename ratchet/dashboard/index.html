@@ -1,0 +1,563 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ratchet · __RUN__</title>
+<style>
+    :root {
+/*__PALETTE__*/
+      --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 18px; gap: 14px;
+      display: flex; flex-direction: column;
+      background: var(--bg); color: var(--text);
+      font: 13px/1.55 var(--mono);
+    }
+    a { color: var(--accent); }
+
+    /* ---------------------------------------------------------------- hero -- */
+    .hero {
+      display: flex; align-items: center; gap: 22px;
+      padding: 16px 20px; border: 1px solid var(--accentDim); border-radius: 10px;
+      background: var(--panel);
+    }
+    /* The sprite is drawn at one unit per pixel and scaled here, so it stays
+       crisp at any size instead of shipping three copies of the same drawing. */
+    .hero svg { width: 96px; height: auto; flex: none; }
+    .hero h1 { margin: 0; font-size: 17px; letter-spacing: .02em; }
+    .hero h1 .mark { color: var(--accent); }
+    .tag { margin: 2px 0 10px; color: var(--muted); }
+    .meta { margin: 0; color: var(--dim); }
+    .meta b { color: var(--text); font-weight: 600; }
+    .grow { flex: 1; }
+
+    .pill {
+      flex: none; display: flex; align-items: center; gap: 8px;
+      padding: 7px 14px; border-radius: 999px;
+      border: 1px solid var(--border); background: var(--bg); color: var(--muted);
+      white-space: nowrap;
+    }
+    .pill .glyph { color: var(--accent); }
+    .pill[data-state="blocked"] { border-color: var(--amber); color: var(--amber); }
+    .pill[data-state="blocked"] .glyph { color: var(--amber); }
+    .pill[data-state="done"] { border-color: var(--green); color: var(--green); }
+    .pill[data-state="done"] .glyph { color: var(--green); }
+    .pill[data-state="offline"] { border-color: var(--red); color: var(--red); }
+
+    /* ---------------------------------------------------------------- gate -- */
+    /* The one component that is allowed to shout. Nothing irreversible happens
+       until somebody presses a button in here. */
+    .gate {
+      border: 1px solid var(--accent); border-radius: 10px;
+      background: var(--panelWarm); padding: 18px 20px;
+    }
+    .gate[hidden] { display: none; }
+    .gate h2 { margin: 0 0 4px; font-size: 15px; }
+    .gate h2 .mark { color: var(--accent); }
+    .gate .action { color: var(--accent); }
+    .gate .summary { margin: 10px 0 2px; color: var(--text); }
+    .gate .stats { margin: 0 0 12px; color: var(--dim); }
+    .gate pre {
+      margin: 0 0 14px; padding: 12px 14px; max-height: 220px; overflow: auto;
+      border-radius: 8px; background: var(--bg); border: 1px solid var(--border);
+    }
+    .gate pre .add { color: var(--green); }
+    .gate pre .del { color: var(--red); }
+    .gate pre .ctx { color: var(--dim); }
+    .buttons { display: flex; gap: 10px; align-items: center; }
+    button {
+      font: inherit; padding: 9px 18px; border-radius: 7px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--bg); color: var(--text);
+    }
+    button:hover { border-color: var(--muted); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #1a1210; font-weight: 600; }
+    button.primary:hover { filter: brightness(1.08); }
+    button:disabled { opacity: .5; cursor: default; }
+    .hint { color: var(--dim); }
+
+    /* ---------------------------------------------------------------- grid -- */
+    main { display: grid; grid-template-columns: 320px minmax(0, 1fr) 320px; gap: 14px; align-items: start; }
+    @media (max-width: 1180px) { main { grid-template-columns: 1fr; } }
+
+    .panel { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+    .panel > h2 {
+      margin: 0; padding: 9px 14px; font-size: 11px; font-weight: 600;
+      letter-spacing: .11em; text-transform: uppercase;
+      color: var(--muted); border-bottom: 1px solid var(--border);
+    }
+    .panel > .body { padding: 12px 14px; max-height: 460px; overflow: auto; }
+    .stack { display: flex; flex-direction: column; gap: 14px; }
+    .empty { color: var(--dim); }
+
+    /* ---------------------------------------------------------------- tree -- */
+    .node { display: flex; align-items: baseline; gap: 8px; padding: 1px 0; white-space: nowrap; }
+    .node .glyph { color: var(--muted); }
+    .node .id { color: var(--text); font-weight: 600; }
+    .node .score { color: var(--muted); }
+    .node .tag2 { color: var(--dim); }
+    .node.live .glyph, .node.live .id { color: var(--accent); }
+    .node.green .glyph, .node.green .id { color: var(--green); }
+    .node.pruned .glyph, .node.pruned .id { color: var(--red); }
+    .node.pruned .score { color: var(--dim); }
+    .why { color: var(--red); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .model { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ------------------------------------------------------------ activity -- */
+    /* One bullet per step, one elbow per result -- the same shape the terminal
+       console draws, so a screenshot of either reads the same way. */
+    .step { margin-top: 12px; }
+    .step:first-child { margin-top: 0; }
+    .step .bullet { color: var(--accent); }
+    .step .verb { color: var(--text); font-weight: 600; }
+    .step .arg { color: var(--muted); }
+    .note { padding-left: 2px; color: var(--muted); }
+    .note .elbow { color: var(--border); margin-right: 8px; }
+    .note.ok { color: var(--green); }
+    .note.bad { color: var(--red); }
+    .note.warn { color: var(--amber); }
+    .note.faint { color: var(--dim); }
+    .note.data { color: var(--violet); }
+    .step.bad .bullet { color: var(--red); }
+    .step.warn .bullet { color: var(--amber); }
+    .step.data .bullet { color: var(--violet); }
+    .step.ok .bullet { color: var(--green); }
+    .step.info .bullet { color: var(--blue); }
+
+    /* ------------------------------------------------------------- gauntlet -- */
+    .stage { display: flex; align-items: baseline; gap: 10px; padding: 2px 0; }
+    .stage .g { width: 12px; color: var(--border); }
+    .stage .name { flex: 1; color: var(--dim); }
+    .stage .detail { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .stage.pass .g { color: var(--green); } .stage.pass .name { color: var(--text); }
+    .stage.fail .g, .stage.fail .name { color: var(--red); font-weight: 600; }
+    .stage.skip .g, .stage.skip .name { color: var(--dim); }
+    .candidate { color: var(--muted); margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* --------------------------------------------------------------- meters -- */
+    .row { display: flex; justify-content: space-between; padding: 2px 0; }
+    .row .k { color: var(--dim); } .row .v { color: var(--blue); }
+    .row .v.hot { color: var(--amber); font-weight: 600; }
+    .meter { height: 5px; border-radius: 3px; background: var(--border); margin: 6px 0 12px; overflow: hidden; }
+    .meter > span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+</style>
+
+<header class="hero">
+  <!--__DOLPHIN__-->
+  <div>
+    <h1><span class="mark">✻</span> ratchet</h1>
+    <p class="tag">the agent doesn't decide it's done. the tests do.</p>
+    <p class="meta"><b id="task">—</b> · <span id="provider">—</span> · <span id="run">—</span> · <span>__REPO__</span></p>
+  </div>
+  <div class="grow"></div>
+  <div class="pill" id="pill" data-state="idle"><span class="glyph">·</span><span id="pill-text">connecting…</span></div>
+</header>
+
+<section class="gate" id="gate" hidden>
+  <h2><span class="mark">✻</span> Ratchet wants to <span class="action" id="gate-action">act</span></h2>
+  <p class="summary" id="gate-summary"></p>
+  <p class="stats" id="gate-stats"></p>
+  <pre id="gate-diff"></pre>
+  <div class="buttons">
+    <button class="primary" id="approve">Approve</button>
+    <button id="deny">Deny</button>
+    <span class="hint" id="gate-hint">nothing has been pushed yet — this is the last stop</span>
+  </div>
+</section>
+
+<main>
+  <section class="panel">
+    <h2>search tree</h2>
+    <div class="body" id="tree"><p class="empty">waiting for the root node…</p></div>
+  </section>
+
+  <section class="panel">
+    <h2>activity</h2>
+    <div class="body" id="activity"><p class="empty">nothing on the bus yet.</p></div>
+  </section>
+
+  <div class="stack">
+    <section class="panel">
+      <h2>gauntlet</h2>
+      <div class="body" id="gauntlet"></div>
+    </section>
+    <section class="panel">
+      <h2>harness</h2>
+      <div class="body" id="harness"></div>
+    </section>
+    <section class="panel">
+      <h2>budget</h2>
+      <div class="body" id="budget"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+const STAGES = [
+  ["build",   "build / install"],
+  ["cheat",   "cheat check"],
+  ["f2p",     "fail-to-pass"],
+  ["p2p",     "pass-to-pass"],
+  ["types",   "type check"],
+  ["lint",    "lint"],
+  ["hygiene", "diff hygiene"],
+];
+const SPINNER = ["·", "✢", "✳", "∗", "✻", "✽"];
+const VERBS = ["Ratcheting", "Foraging", "Grazing", "Wallowing", "Snuffling",
+               "Nibbling", "Pondering", "Wading", "Chewing", "Paddling"];
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+};
+const short = (model) => String(model || "").split("/").pop();
+
+// The whole run lives here. The page holds no other state, so a refresh rebuilds
+// it from the bus rather than from anything the browser remembered.
+const state = {
+  nodes: new Map(), order: [], live: null,
+  stages: new Map(), candidate: "",
+  subagents: 0, live_sandboxes: 0, sandboxes: 0, approvals: 0,
+  budget: null, status: "idle", note: "waiting for a run", started: null,
+  pending: null, tick: 0, verb: 0, cleared: false,
+};
+
+/* ------------------------------------------------------------------- header -- */
+
+function drawPill() {
+  const pill = $("pill");
+  pill.dataset.state = state.status;
+  const glyph = pill.firstElementChild;
+  const secs = state.started ? Math.max(0, Math.round((Date.now() - state.started) / 1000)) : null;
+  const clock = secs === null ? "—" : (secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${String(secs % 60).padStart(2, "0")}s`);
+  if (state.status === "working") {
+    glyph.textContent = SPINNER[state.tick % SPINNER.length];
+    $("pill-text").textContent = `${VERBS[state.verb % VERBS.length]}… ${clock}`;
+  } else if (state.status === "blocked") {
+    glyph.textContent = "⏸";
+    $("pill-text").textContent = `waiting on you · ${clock}`;
+  } else if (state.status === "done") {
+    glyph.textContent = state.note === "green" ? "✔" : "■";
+    $("pill-text").textContent = `${state.note} · ${clock}`;
+  } else {
+    glyph.textContent = SPINNER[Math.floor(state.tick / 3) % SPINNER.length];
+    $("pill-text").textContent = state.note;
+  }
+}
+setInterval(() => {
+  state.tick++;
+  if (state.tick % 40 === 0) state.verb++;
+  drawPill();
+}, 120);
+
+/* --------------------------------------------------------------------- tree -- */
+
+function drawTree() {
+  const box = $("tree");
+  box.textContent = "";
+  if (!state.order.length) { box.append(el("p", "empty", "waiting for the root node…")); return; }
+
+  const kids = new Map();
+  for (const id of state.order) {
+    const parent = state.nodes.get(id).parent ?? null;
+    if (!kids.has(parent)) kids.set(parent, []);
+    kids.get(parent).push(id);
+  }
+
+  const walk = (id, prefix, last, root) => {
+    const n = state.nodes.get(id);
+    const cls = n.pruned ? "pruned" : (n.green ? "green" : (id === state.live ? "live" : ""));
+    const line = el("div", `node ${cls}`);
+    line.append(el("span", "tag2", prefix + (root ? "" : (last ? "└─" : "├─"))));
+    line.append(el("span", "glyph", n.pruned ? "✗" : (n.green ? "★" : "●")));
+    line.append(el("span", "id", id));
+    line.append(el("span", "score", (n.score ?? 0).toFixed(2)));
+    if (n.green) line.append(el("span", "tag2", "green"));
+    else if (id === state.live && !n.pruned) line.append(el("span", "tag2", "live"));
+    box.append(line);
+
+    const indent = prefix + (root ? "" : (last ? "   " : "│  ")) + "  ";
+    if (n.pruned && (n.reason || n.outcome)) {
+      box.append(el("div", "why", indent + (n.reason || n.outcome)));
+    } else if (n.model) {
+      box.append(el("div", "model", indent + short(n.model)));
+    }
+    const children = kids.get(id) || [];
+    children.forEach((k, i) => walk(k, prefix + (root ? "" : (last ? "   " : "│  ")), i === children.length - 1, false));
+  };
+  (kids.get(null) || []).forEach((r) => walk(r, "", true, true));
+}
+
+/* ----------------------------------------------------------------- activity -- */
+
+function step(verb, arg, kind) {
+  const box = $("activity");
+  if (!state.cleared) { box.textContent = ""; state.cleared = true; }
+  const line = el("div", `step ${kind || ""}`);
+  line.append(el("span", "bullet", "● "));
+  line.append(el("span", "verb", verb));
+  if (arg) line.append(el("span", "arg", `(${arg})`));
+  box.append(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+function note(body, kind) {
+  const box = $("activity");
+  if (!state.cleared) { box.textContent = ""; state.cleared = true; }
+  const line = el("div", `note ${kind || ""}`);
+  line.append(el("span", "elbow", "⎿"));
+  line.append(document.createTextNode(body));
+  box.append(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+/* ----------------------------------------------------------------- gauntlet -- */
+
+function drawGauntlet() {
+  const box = $("gauntlet");
+  box.textContent = "";
+  box.append(el("div", "candidate", state.candidate || "no candidate in flight"));
+  for (const [key, label] of STAGES) {
+    const s = state.stages.get(key);
+    const status = s ? (s.skipped ? "skip" : (s.passed ? "pass" : "fail")) : "";
+    const row = el("div", `stage ${status}`);
+    row.append(el("span", "g", s ? (s.skipped ? "−" : (s.passed ? "✔" : "✖")) : "○"));
+    row.append(el("span", "name", label));
+    row.append(el("span", "detail", s ? (s.detail || "") : ""));
+    box.append(row);
+  }
+}
+
+function drawHarness() {
+  const box = $("harness");
+  box.textContent = "";
+  const row = (k, v, hot) => {
+    const r = el("div", "row");
+    r.append(el("span", "k", k));
+    r.append(el("span", `v${hot ? " hot" : ""}`, v));
+    box.append(r);
+  };
+  row("subagents", String(state.subagents));
+  row("sandboxes", `${state.live_sandboxes} live / ${state.sandboxes}`);
+  row("approvals", String(state.approvals), state.approvals > 0);
+}
+
+function drawBudget() {
+  const box = $("budget");
+  const b = state.budget;
+  box.textContent = "";
+  if (!b) { box.append(el("p", "empty", "no budget reported yet")); return; }
+  const bar = (k, used, max, fmt) => {
+    const r = el("div", "row");
+    r.append(el("span", "k", k));
+    r.append(el("span", "v", `${fmt(used)} / ${fmt(max)}`));
+    box.append(r);
+    const meter = el("div", "meter");
+    const fill = el("span");
+    fill.style.width = `${Math.min(100, max ? (used / max) * 100 : 0)}%`;
+    meter.append(fill);
+    box.append(meter);
+  };
+  const secs = (s) => (s < 60 ? `${Math.round(s)}s` : `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, "0")}s`);
+  bar("nodes", b.nodes_used || 0, b.max_nodes || 0, (v) => String(Math.round(v)));
+  bar("time",  b.elapsed || 0,    b.max_seconds || 0, secs);
+  bar("spend", b.usd_used || 0,   b.max_usd || 0, (v) => `$${Number(v).toFixed(2)}`);
+}
+
+/* --------------------------------------------------------------------- gate -- */
+
+function showGate(p) {
+  state.pending = p.id;
+  $("gate-action").textContent = p.action || "do something irreversible";
+  $("gate-summary").textContent = p.summary || "";
+  $("gate-stats").textContent = Object.entries(p.stats || {}).map(([k, v]) => `${k} ${v}`).join("  ·  ");
+  const pre = $("gate-diff");
+  pre.textContent = "";
+  for (const line of String(p.diff_preview || "").split("\n")) {
+    const cls = line.startsWith("+++") || line.startsWith("---") ? "ctx"
+              : line.startsWith("+") ? "add"
+              : line.startsWith("-") ? "del" : "ctx";
+    pre.append(el("span", cls, line + "\n"));
+  }
+  $("approve").disabled = false;
+  $("deny").disabled = false;
+  $("gate-hint").textContent = "nothing has been pushed yet — this is the last stop";
+  $("gate").hidden = false;
+}
+
+async function decide(allow) {
+  if (!state.pending) return;
+  $("approve").disabled = true;
+  $("deny").disabled = true;
+  $("gate-hint").textContent = "sending…";
+  try {
+    const r = await fetch("/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: state.pending, allow }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    $("gate-hint").textContent = allow ? "approved — the run may proceed" : "denied";
+  } catch (e) {
+    $("gate-hint").textContent = `could not send: ${e.message}`;
+    $("approve").disabled = false;
+    $("deny").disabled = false;
+  }
+}
+$("approve").addEventListener("click", () => decide(true));
+$("deny").addEventListener("click", () => decide(false));
+addEventListener("keydown", (e) => {
+  if ($("gate").hidden) return;
+  if (e.key === "a" || e.key === "1") decide(true);
+  if (e.key === "d" || e.key === "2" || e.key === "Escape") decide(false);
+});
+
+/* ---------------------------------------------------------------- the stream -- */
+
+function apply(kind, p, ts) {
+  if (state.started === null && ts) state.started = ts * 1000;
+  if (kind !== "run.done" && state.status !== "blocked") state.status = "working";
+  if (p.budget) { state.budget = p.budget; drawBudget(); }
+
+  switch (kind) {
+    case "run.started":
+      $("task").textContent = p.task ?? "—";
+      $("provider").textContent = `${p.provider ?? "—"} · ${p.snapshots ? "snapshots" : "worktree fallback"}`;
+      $("run").textContent = p.run_id ?? "—";
+      step("Run", p.run_id, "");
+      note(`task ${p.task} · provider ${p.provider}`);
+      break;
+
+    case "repo.mapped":
+      state.subagents++; drawHarness();
+      step("Cartographer", "repo map", "info");
+      note(`${p.lines} lines of repo map into the context`);
+      break;
+
+    case "sandbox.created":
+      state.sandboxes++; state.live_sandboxes++; drawHarness();
+      break;
+
+    case "expand":
+      step("Expand", p.node, "");
+      note(`fanout ${p.fanout} · depth ${p.depth} · ${p.dead_ends || 0} dead end(s) fed back to siblings`);
+      break;
+
+    case "verify.started":
+      state.subagents++; drawHarness();
+      state.stages.clear();
+      state.candidate = p.intent || "";
+      drawGauntlet();
+      step("Verify", p.label, "");
+      note(`${short(p.model)}  ${p.intent || ""}`, "faint");
+      break;
+
+    case "stage.result": {
+      state.stages.set(p.stage, { passed: !!p.passed, skipped: !!p.skipped, detail: p.detail || "" });
+      drawGauntlet();
+      const label = (STAGES.find((s) => s[0] === p.stage) || [null, p.stage])[1];
+      const mark = p.skipped ? "skip" : (p.passed ? "PASS" : "FAIL");
+      note(`${mark.padEnd(4)}  ${String(label).padEnd(16)}${p.detail || ""}`,
+           p.skipped ? "faint" : (p.passed ? "ok" : "bad"));
+      break;
+    }
+
+    case "subagent":
+      // Declared in bus.py as part of the renderer contract. Nothing in the loop
+      // emits it today; a role the harness spawns on its own would arrive here.
+      state.subagents++; drawHarness();
+      step("Subagent", p.role || p.label, "info");
+      if (p.task) note(String(p.task), "faint");
+      break;
+
+    case "candidate.empty":
+      note(`${short(p.model)} returned no patch`, "faint");
+      break;
+
+    case "node.added":
+      state.live_sandboxes = Math.max(0, state.live_sandboxes - 1); drawHarness();
+      if (!state.nodes.has(p.id)) state.order.push(p.id);
+      state.nodes.set(p.id, { ...(state.nodes.get(p.id) || {}), ...p, pruned: false });
+      state.live = p.id;
+      drawTree();
+      note(`kept ${p.id} at ${(p.score ?? 0).toFixed(2)}${p.green ? "   ★ every gate green" : ""}`, "ok");
+      break;
+
+    case "node.pruned":
+      state.live_sandboxes = Math.max(0, state.live_sandboxes - 1); drawHarness();
+      if (!state.nodes.has(p.id)) state.order.push(p.id);
+      state.nodes.set(p.id, { ...(state.nodes.get(p.id) || {}), ...p, pruned: true });
+      drawTree();
+      step("Prune", p.id, "bad");
+      note(`${p.reason || p.outcome}${(p.findings || []).length ? `  [${p.findings.join(", ")}]` : ""}`, "bad");
+      break;
+
+    case "stall":
+      step("Stall", p.node, "warn");
+      note(`no improvement for 3 expansions — forking ${p.fanout} ways from depth ${p.depth}`, "warn");
+      break;
+
+    case "docs.fetch":
+      step("BrightData", `${p.library} ${p.version}`, "data");
+      break;
+
+    case "docs.heal":
+      step("ScraperRepair", p.library, "data");
+      note(`${JSON.stringify(p.old_section)} → ${JSON.stringify(p.new_section)}`, "data");
+      break;
+
+    case "approval.required":
+      state.approvals++; drawHarness();
+      state.status = "blocked";
+      showGate(p);
+      step("Approval", p.action, "warn");
+      note("held — a human has to decide before anything leaves this machine", "warn");
+      break;
+
+    case "approval.resolved":
+      state.approvals = Math.max(0, state.approvals - 1); drawHarness();
+      state.status = "working";
+      state.pending = null;
+      $("gate").hidden = true;
+      note(`approval ${p.approved ? "granted" : "denied"}`, p.approved ? "ok" : "bad");
+      break;
+
+    case "rewind":
+      step("Rewind", p.node, "warn");
+      break;
+
+    case "run.done":
+      state.status = "done";
+      state.note = p.green ? "green" : (p.reason || "stopped");
+      step("Done", p.winner, p.green ? "ok" : "");
+      note(`${p.reason} · winner ${p.winner} at ${(p.score ?? 0).toFixed(2)} · ${p.nodes} nodes`,
+           p.green ? "ok" : "faint");
+      break;
+  }
+  drawPill();
+}
+
+const source = new EventSource("/events");
+source.onmessage = (e) => {
+  const { kind, payload, ts } = JSON.parse(e.data);
+  apply(kind, payload || {}, ts);
+};
+source.onerror = () => {
+  // EventSource reconnects on its own; say so rather than looking merely frozen.
+  if (source.readyState === EventSource.CLOSED) {
+    state.status = "offline";
+    state.note = "stream closed — is `ratchet dashboard` still running?";
+    drawPill();
+  }
+};
+
+drawGauntlet();
+drawHarness();
+drawBudget();
+</script>
