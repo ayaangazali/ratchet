@@ -61,7 +61,7 @@ Live runs: `npx @truefoundry/trueforge@latest` then `ratchet run --repo <your-re
 ### The pixel office 🕹️
 
 ```bash
-ratchet dashboard --repo demo-repo --run <run-id>   # http://127.0.0.1:8788
+ratchet dashboard --repo demo-repo    # attaches to the latest run · http://127.0.0.1:8788
 ```
 
 Every subagent on the bus is a pixel character in a tiny office (art from
@@ -85,7 +85,8 @@ workstation, open-PR count, DOING NOW / WAITING ON / DID · hover for a two-line
 brief · ⏸ amber = waiting on *you* · ★ = accepted · ✗ = pruned (parked, not deleted).
 
 💡 **Tips:** keys `a`/`d` answer the gate · refresh mid-run and the office rebuilds
-from byte zero (the bus is a file) · replay any old run with `--bus`. The dashboard
+from byte zero (the bus is a file) · replay any old run with `--bus`. Run ids are
+just the bus filenames — `ls <repo>/.ratchet/` shows them, and `--run <id>` picks one. The dashboard
 code lands via [PR #14](https://github.com/ayaangazali/ratchet/pull/14); these
 screenshots are from a live run of that branch.
 
