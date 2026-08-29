@@ -47,6 +47,7 @@ from .docs_oracle import DocsOracle
 from .gauntlet.runner import Backend, Pawl, docker_available
 from .ledger import Ledger, git
 from .models import Candidate, Decision, RunPhase, RunState
+from .receipts import ReceiptBook
 from .workspace import Workspace
 
 try:  # the server is optional at import time so tests and the TUI can import this module
@@ -73,6 +74,9 @@ class RatchetService:
         backend = Backend.DOCKER if (settings.backend == "docker" and docker_available()) else Backend.LOCAL
         self.pawl = Pawl(backend=backend, image=self.task.image, log_dir=self.repo / ".ratchet" / "logs")
         self.docs = DocsOracle(self.repo, self.bus, settings)
+        # Every verdict is receipted into a hash chain the agent cannot reach or
+        # forge, so "these commits were green" is evidence rather than assertion.
+        self.receipts = ReceiptBook(self.repo / ".ratchet" / f"{self.run_id}.receipts.jsonl")
         self.state = RunState(
             run_id=self.run_id,
             task=self.task,
@@ -113,6 +117,7 @@ class RatchetService:
             "last_green": self.state.last_green_sha,
             "candidates": {k: (c.best.score if c.best else None) for k, c in self.state.candidates.items()},
             "backend": self.pawl.backend.value,
+            "receipts": self.receipts.summary(),
         }
 
     # ---------------------------------------------------------------- core --
@@ -163,10 +168,11 @@ class RatchetService:
                 self.state.consecutive_rejects += 1
             led.append(verdict, None)
 
+        receipt = self.receipts.record(verdict)
         self.state.verdicts.append(verdict)
         if branch in self.state.candidates:
             self.state.candidates[branch].verdicts.append(verdict)
-        self.bus.emit(VERDICT, **verdict.to_dict())
+        self.bus.emit(VERDICT, receipt_seq=receipt.seq, receipt=receipt.digest()[:16], **verdict.to_dict())
 
         obs = verdict.to_observation()
 
@@ -175,6 +181,19 @@ class RatchetService:
         if hint:
             obs += "\n\n" + hint
 
+        # An escalation ladder rather than a single cliff: the response to one bad
+        # attempt should not be the same as the response to three.
+        if self.state.consecutive_rejects == 1 and branch == "trunk":
+            obs += (
+                "\n\n[hint] One rejection is data, not a crisis. Re-read the failing gate above before "
+                "you write anything, and use dry_run to test the next idea for free."
+            )
+        elif self.state.consecutive_rejects == 2 and branch == "trunk":
+            obs += (
+                "\n\n[hint] Two rejections on the same hypothesis. If any failure mentions an import, an "
+                "attribute or an unexpected keyword argument, call docs_lookup for that library before "
+                "guessing again -- your memory of an API is a hypothesis, the changelog is evidence."
+            )
         if self.state.consecutive_rejects >= STALL_THRESHOLD and branch == "trunk":
             self.state.phase = RunPhase.STALLED
             self.bus.emit(STALL, attempts=self.state.consecutive_rejects)

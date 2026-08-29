@@ -97,6 +97,65 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if v.green else 1
 
 
+def cmd_redteam(args: argparse.Namespace) -> int:
+    """Fire every known reward-hacking patch at the verifier and score the verifier."""
+    from . import redteam
+
+    repo = Path(args.repo or "demo-repo")
+    demo_task = load_task(args.task or "tasks/demo-001-slugify/task.yaml")
+    canary_task = load_task(args.canary or "tasks/canary-impossible/task.yaml")
+    backend = Backend.DOCKER if (args.backend == "docker" and docker_available()) else Backend.LOCAL
+    results = redteam.run(repo, demo_task, canary_task, backend=backend)
+    print(redteam.report(results))
+    return 0 if all(r.correct for r in results) else 1
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    """Verify the receipt chain for a run. This is how a judge checks the demo was real."""
+    from .receipts import ReceiptBook
+
+    book = ReceiptBook(Path(args.receipts))
+    ok, problems = book.verify()
+    for k, v in book.summary().items():
+        print(f"  {k:<14}{v}")
+    if ok:
+        print("\nchain intact: every verdict is in the order it was issued and none has been edited.")
+        return 0
+    print("\nCHAIN BROKEN:")
+    for p in problems:
+        print(f"  - {p}")
+    return 1
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    """Re-render a finished run from its bus file, at speed. Demo insurance."""
+    import time as _t
+
+    from .bus import Bus
+
+    bus = Bus(Path(args.bus))
+    events = bus.read_all()
+    if not events:
+        print("no events in that bus file", file=sys.stderr)
+        return 1
+    keep = (
+        "run_id", "task", "backend", "attempt", "branch", "gate", "passed", "detail", "decision",
+        "score", "delta", "text", "tool", "labels", "to", "reason", "library", "new_section",
+        "attempts", "title", "thread", "rows",
+    )
+    t0 = events[0].ts
+    try:
+        for e in events:
+            if args.speed > 0:
+                _t.sleep(min(2.0, (e.ts - t0) / args.speed))
+                t0 = e.ts
+            payload = {k: v for k, v in e.payload.items() if k in keep}
+            print(f"{e.kind:<20} {payload}")
+    except BrokenPipeError:
+        pass  # piping into `head` is the normal way to use this
+    return 0
+
+
 def cmd_demo(args: argparse.Namespace) -> int:
     from .demo import seed
 
@@ -140,6 +199,22 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--backend", default="docker")
     p.add_argument("--fast", action="store_true")
     p.set_defaults(fn=cmd_verify)
+
+    p = sub.add_parser("redteam", help="fire known cheating patches at the verifier and score it")
+    p.add_argument("--repo")
+    p.add_argument("--task")
+    p.add_argument("--canary")
+    p.add_argument("--backend", default="local")
+    p.set_defaults(fn=cmd_redteam)
+
+    p = sub.add_parser("audit", help="verify a run's receipt chain")
+    p.add_argument("--receipts", required=True)
+    p.set_defaults(fn=cmd_audit)
+
+    p = sub.add_parser("replay", help="re-render a finished run from its bus file")
+    p.add_argument("--bus", required=True)
+    p.add_argument("--speed", type=float, default=0.0, help="0 = instant; 1 = real time; 4 = 4x")
+    p.set_defaults(fn=cmd_replay)
 
     p = sub.add_parser("demo", help="seed the demo repository")
     p.add_argument("--dir")

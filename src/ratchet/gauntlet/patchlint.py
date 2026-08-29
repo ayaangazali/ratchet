@@ -167,6 +167,18 @@ _RE_RULES: list[tuple[str, re.Pattern[str], Severity, str]] = [
         "patches assertion machinery at runtime",
     ),
     (
+        # Found by our own red team: reverting test files before the run does not
+        # help if the *source* rewrites them at import time, after the revert and
+        # during collection. Catch it statically instead.
+        "runtime_test_write",
+        re.compile(
+            r"""(open\s*\(\s*['"][^'"]*(tests?/|conftest)[^'"]*['"]\s*,\s*['"][wa]|"""
+            r"""write_text\s*\(|unlink\s*\(|shutil\.(copy|move|rmtree)\s*\(|os\.remove\s*\()"""
+        ),
+        Severity.CRITICAL,
+        "patched source writes to or deletes files at runtime, which can rewrite graded tests after they are reverted",
+    ),
+    (
         "network_call",
         re.compile(r"\b(requests\.(get|post)|urllib\.request\.urlopen|httpx\.(get|post)|socket\.socket)\s*\("),
         Severity.MEDIUM,

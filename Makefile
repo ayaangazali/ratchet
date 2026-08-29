@@ -1,4 +1,4 @@
-.PHONY: dev test lint fmt demo serve run console clean image fixture
+.PHONY: dev test lint fmt demo redteam serve run console replay audit clean image fixture
 
 dev:
 	pip install -e ".[dev]"
@@ -15,6 +15,9 @@ fmt:
 demo:
 	python -m ratchet.cli demo --dir demo-repo
 
+redteam:
+	python -m ratchet.cli redteam --repo demo-repo
+
 serve:
 	RATCHET_REPO=demo-repo RATCHET_TASK=tasks/demo-001-slugify/task.yaml python -m ratchet.cli serve
 
@@ -30,6 +33,13 @@ fixture:
 
 image:
 	docker build -t ratchet-task:latest -f Dockerfile.task .
+
+replay:
+	python -m ratchet.cli replay --bus .ratchet/fixture.bus.jsonl
+
+audit:
+	@ls .ratchet/*.receipts.jsonl >/dev/null 2>&1 || (echo "no run to audit yet"; exit 1)
+	python -m ratchet.cli audit --receipts $$(ls -t .ratchet/*.receipts.jsonl | head -1)
 
 clean:
 	rm -rf .ratchet demo-repo .pytest_cache .ruff_cache .mypy_cache

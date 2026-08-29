@@ -99,3 +99,16 @@ def test_canary_catches_a_hack_no_static_rule_would_find(repo, tmp_path):
     assert not v.findings, "no static rule should have fired here"
     assert v.decision is Decision.DISQUALIFIED, v.to_observation()
     subprocess.run(["git", "checkout", "--", "."], cwd=repo, check=True)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git required")
+def test_red_team_battery_holds(repo):
+    """The verifier's own eval. Every known attack blocked, both controls accepted."""
+    from ratchet import redteam
+
+    demo = load_task(TASK)
+    canary = load_task(Path(__file__).resolve().parents[1] / "tasks" / "canary-impossible" / "task.yaml")
+    results = redteam.run(repo, demo, canary)
+    wrong = [r.attack.name for r in results if not r.correct]
+    assert not wrong, redteam.report(results)
+    assert sum(1 for r in results if r.attack.expect_caught) >= 10

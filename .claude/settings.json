@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python -m ratchet.cli:*)",
+      "Bash(ratchet:*)",
+      "Bash(ruff:*)",
+      "Bash(mypy:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git switch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(docker:*)"
+    ]
+  }
+}

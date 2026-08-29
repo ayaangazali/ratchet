@@ -42,6 +42,13 @@ thing only: **what counts as progress**.
 8. **`open_pull_request` is the only tool that leaves the machine**, and it stays in
    `require_approval_for_tools`. If you add another irreversible tool, add it there in
    the same commit.
+9. **Every verdict is receipted.** `receipts.record` runs on the accept path and the
+   reject path alike. A verdict that skips the receipt book is a hole in the chain,
+   and the chain is the only reason anyone should believe the run history.
+10. **`make redteam` stays at 10/10 with zero false positives.** It is a test of the
+   verifier, and it is in CI. If your change breaks it, your change is the problem —
+   unless you can show the attack was mis-specified, in which case fix the attack and
+   say so in the PR.
 
 ## Conventions
 
