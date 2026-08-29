@@ -114,7 +114,11 @@ def main() -> None:
          intent="truncate on the last hyphen before the limit", model="google-gemini/gemini-3-pro",
          depth=2, findings=[], reason="all gates green")
 
-    # 5. the gate
+    # 5. the search is over -- and only now does anything irreversible get proposed.
+    # `cmd_run` searches to green first and asks to ship second, so the recording
+    # ends held at the gate rather than sailing past it.
+    beat(bus, "run.done", winner="4f2a", green=True, score=1.0, reason="verifier returned green",
+         nodes=6, budget=budget(6, 372, 1.14))
     beat(bus, "approval.required", id="a1b2", action="open_pull_request",
          summary="demo-001-slugify: truncate on the last hyphen before the limit",
          stats={"nodes_explored": 6, "path_length": 3, "score": 1.0, "green": True, "cost_usd": 1.14},
@@ -122,8 +126,6 @@ def main() -> None:
                       "@@\n-    return slug[:max_length]\n+    if len(slug) <= max_length:\n"
                       "+        return slug\n+    cut = slug[: max_length + 1]\n"
                       '+    if "-" in cut:\n+        cut = cut[: cut.rindex("-")]\n')
-    beat(bus, "run.done", winner="4f2a", green=True, score=1.0, reason="verifier returned green",
-         nodes=6, budget=budget(6, 372, 1.14))
 
     print(f"fixture written to {path}")
     print(f"  ratchet console --bus {path}")

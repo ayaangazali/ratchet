@@ -1,4 +1,4 @@
-.PHONY: dev test lint fmt demo redteam evals bench run run-offline run-graph proof docs console replay audit tree clean image fixture
+.PHONY: dev test lint fmt demo redteam evals bench run run-offline run-graph proof docs console dashboard mascot replay audit tree clean image fixture
 
 dev:
 	pip install -e ".[dev]"
@@ -45,6 +45,14 @@ run:
 
 console:
 	python -m ratchet.cli console --repo demo-repo
+
+# The same run in a browser, for anyone who would rather be handed a URL.
+dashboard:
+	python -m ratchet.cli dashboard --repo demo-repo
+
+# Redraw the dolphin from its geometry.
+mascot:
+	python scripts/make_mascot.py
 
 fixture:
 	python scripts/make_fixture.py .ratchet/fixture.bus.jsonl

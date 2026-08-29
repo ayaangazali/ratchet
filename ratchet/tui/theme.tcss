@@ -1,98 +1,131 @@
-/* Ratchet console theme.
-   Two rules govern everything here: the gauntlet is never scrolled off screen,
-   and the approval bar is the only thing allowed to take the full width. */
+/* Ratchet console theme -- ocean blue.
+   The colours are the ones in `mascot.py`; if you change one, change it there
+   too, because the web dashboard reads them from that module.
 
+   Two rules govern the layout. The gauntlet is never scrolled off screen, and
+   the approval gate is the only thing allowed to take the full width. */
+
+/* The console never scrolls as a whole. Every pane owns its own overflow, so a
+   short terminal loses the bottom of a pane rather than sliding the header off. */
 Screen {
-    background: #0d1117;
-    color: #c9d1d9;
+    background: #0d1219;
+    color: #dce8f5;
+    layout: vertical;
+    overflow: hidden hidden;
 }
+
+/* ----------------------------------------------------------------- header -- */
+
+#banner {
+    height: auto;
+    padding: 0 2;
+    margin: 0 1;
+    background: #141c26;
+    border: round #2a5f8f;
+}
+
+/* ------------------------------------------------------------------- body -- */
 
 #main {
     height: 1fr;
+    min-height: 8;
+    padding: 0 1;
 }
 
 #left {
-    width: 1fr;
-    min-width: 34;
-    border-right: solid #21262d;
+    width: 34;
+    min-width: 26;
 }
 
 #right {
+    width: 36;
+    min-width: 28;
+}
+
+#activity-box {
     width: 1fr;
-    min-width: 46;
+    min-width: 30;
 }
 
-.pane-title {
-    background: #161b22;
-    color: #8b949e;
-    text-style: bold;
+#tree-box, #activity-box, #counters, #gauntlet, #waiting {
+    border: round #26323f;
+    background: #141c26;
+    border-title-color: #93a7bd;
+    border-title-align: left;
+    border-title-style: bold;
     padding: 0 1;
 }
 
-#log {
+/* The tree keeps its rows even when everything else is squeezed: it is the
+   answer to "where has this been", and a console that cannot answer that is
+   just a log. */
+#tree-box { height: 1fr; min-height: 5; overflow-x: hidden; }
+#counters { height: auto; padding: 1; }
+#counters.-compact { padding: 0 1; }
+#gauntlet { height: auto; padding: 1 1 0 1; }
+#waiting  { height: 1fr; min-height: 4; padding: 1; }
+#activity-box { padding: 0 1; }
+
+#tree { height: auto; }
+
+/* RichLog scrolls itself. Wrapping it in a scroll container as well gives you
+   two scrollbars and an auto-scroll that never reaches the bottom. */
+#activity {
     height: 1fr;
-    padding: 0 1;
-    background: #0d1117;
+    background: #141c26;
+    overflow-x: hidden;
+    scrollbar-size-vertical: 1;
 }
 
-#tree-scroll {
-    height: 1fr;
-    padding: 0 1;
+Screen, VerticalScroll, RichLog {
+    scrollbar-background: #141c26;
+    scrollbar-background-hover: #141c26;
+    scrollbar-background-active: #141c26;
+    scrollbar-color: #26323f;
+    scrollbar-color-hover: #2a5f8f;
+    scrollbar-color-active: #4d9fe8;
 }
 
-#tree {
-    height: auto;
-}
+/* --------------------------------------------------------- the gate, armed -- */
 
-#counters {
-    height: auto;
-    padding: 1;
-    background: #161b22;
-    border-top: solid #21262d;
-}
-
-#budget {
-    height: 1;
-    padding: 0 1;
-    background: #161b22;
-    color: #8b949e;
-}
-
-#stages {
-    height: auto;
-    padding: 1;
-    background: #0d1117;
-}
-
+/* Full width, warm border, and it does not go away until somebody decides.
+   This is the interaction the whole project exists to make possible. */
+/* Capped on purpose. The gate has to dominate without erasing the run behind
+   it -- a reviewer who cannot see the tree cannot judge the diff. */
 #approval {
     display: none;
     height: auto;
-    max-height: 18;
+    max-height: 17;
+    margin: 0 1;
     padding: 1 2;
-    background: #2d2400;
-    border: heavy #d29922;
+    background: #1a2532;
+    border: round #4d9fe8;
 }
 
-#approval.armed {
-    display: block;
+#approval-head   { height: auto; padding-bottom: 1; }
+#approval-diff   { height: auto; max-height: 7; padding-bottom: 1; }
+#approval-choices{ height: auto; }
+
+#approval-buttons { height: auto; padding-top: 1; }
+#approval-buttons Button { margin-right: 2; min-width: 14; }
+
+/* ------------------------------------------------------------------ chrome -- */
+
+#status {
+    height: 1;
+    padding: 0 2;
+    background: #0d1219;
 }
 
-#approval-title {
-    width: 100%;
-    padding-bottom: 1;
+#hints {
+    height: 1;
+    padding: 0 2;
+    background: #0d1219;
 }
 
-#approval-body {
-    height: auto;
-    max-height: 10;
-    color: #e3b341;
-}
-
-#approval-buttons {
-    height: auto;
-    padding-top: 1;
-}
-
-#approval-buttons Button {
-    margin-right: 2;
+/* Fixed-width panes clip rather than wrap. A wrapped tree stops looking like a
+   tree, and a wrapped stage rail spills its own text outside its border. */
+#banner, #tree, #gauntlet, #waiting, #counters, #status, #hints {
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
 }

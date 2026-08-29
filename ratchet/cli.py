@@ -15,6 +15,7 @@
     ratchet audit                                  verify a run's receipt chain
     ratchet evals                                  linear vs search, on our own bug suite
     ratchet console                                the TUI
+    ratchet dashboard                              the same run, in a browser
     ratchet demo                                   seed the demo repository
 
 `verify` matters more than it looks. It means the entire verification story can be
@@ -409,6 +410,21 @@ def cmd_docs(args) -> int:
     return 0
 
 
+def cmd_dashboard(args) -> int:
+    """The console's twin. Same bus, same palette, same approval gate -- the only
+    difference is that a browser can be handed to somebody who does not want a
+    terminal put in front of them."""
+    from .dashboard import serve
+
+    repo = Path(args.repo or ".").resolve()
+    bus_path = Path(args.bus) if args.bus else _latest(repo, "bus.jsonl", args.run)
+    if not bus_path:
+        print("no run found; start one with `ratchet run`, or `make fixture` for a recorded one", file=sys.stderr)
+        return 1
+    serve(bus_path, repo, host=args.host, port=args.port)
+    return 0
+
+
 def cmd_demo(args) -> int:
     from .demo import seed
 
@@ -524,6 +540,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--topic")
     p.add_argument("--repo")
     p.set_defaults(fn=cmd_docs)
+
+    p = sub.add_parser("dashboard", help="the same run, in a browser")
+    p.add_argument("--bus")
+    p.add_argument("--repo")
+    p.add_argument("--run")
+    p.add_argument("--host", default="127.0.0.1", help="loopback by default: this endpoint can approve a pull request")
+    p.add_argument("--port", type=int, default=8788)
+    p.set_defaults(fn=cmd_dashboard)
 
     p = sub.add_parser("demo", help="seed the demo repository")
     p.add_argument("--dir")
