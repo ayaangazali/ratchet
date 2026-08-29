@@ -8,7 +8,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14' fill='%23f5a623'>▸</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@800;900&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
@@ -19,14 +19,13 @@
     <div class="nav-links">
       <a href="dashboard.html">Dashboard</a>
       <a href="docs.html">Docs</a>
-      <a href="pricing.html">Pricing</a>
       <a href="https://github.com/ayaangazali/ratchet">GitHub</a>
     </div>
   </div>
 </nav>
 
-<!-- HERO: what it is + why in one breath, product visual behind it -->
-<header class="hero">
+<!-- HERO (black) -->
+<header class="hero block--dark">
   <canvas id="hero3d" aria-hidden="true"></canvas>
   <div class="wrap hero-inner">
     <span class="eyebrow">Open source · MIT · no docker, no keys</span>
@@ -34,36 +33,80 @@
     <p class="sub">
       Your agent says "done." Ratchet doesn't care. Every patch has to survive a
       seven-stage verifier gauntlet — hidden tests, cheat detection, signed receipts —
-      before it counts. Ship the diff, not the vibes.
+      before it counts.
     </p>
     <div class="hero-ctas">
-      <a class="btn btn-primary" href="https://github.com/ayaangazali/ratchet">Get started free</a>
-      <a class="btn btn-ghost" href="#demo">Watch it catch a cheat</a>
+      <a class="btn btn-primary" href="https://github.com/ayaangazali/ratchet">View on GitHub</a>
+      <a class="btn btn-ghost" href="#cheats">Watch it catch a cheat</a>
     </div>
     <p style="margin:18px 0 0"><span class="clone-line"><span class="p">$ </span>git clone https://github.com/ayaangazali/ratchet &amp;&amp; make demo</span></p>
   </div>
 </header>
 
-<!-- TRACTION: measured numbers, nothing invented -->
-<div class="proof-band" aria-label="Measured results">
+<!-- TRACTION (amber block) -->
+<div class="proof-band block--amber" aria-label="Measured results">
   <div class="wrap">
-    <div class="proof-stat"><span class="v" style="color:var(--green)" id="ps-redteam">11/11</span><span class="k">reward hacks caught</span></div>
-    <div class="proof-stat"><span class="v" style="color:var(--green)" id="ps-fp">0</span><span class="k">false positives</span></div>
+    <div class="proof-stat"><span class="v" id="ps-redteam">11/11</span><span class="k">reward hacks caught</span></div>
+    <div class="proof-stat"><span class="v" id="ps-fp">0</span><span class="k">false positives</span></div>
     <div class="proof-stat"><span class="v" id="ps-tests">94</span><span class="k">tests in the suite</span></div>
     <div class="proof-stat"><span class="v" id="ps-proof">13/13</span><span class="k">proof checks pass offline</span></div>
     <div class="proof-stat"><span class="v" id="ps-stages">7</span><span class="k">gauntlet stages</span></div>
   </div>
 </div>
 
-<!-- PROBLEM → SOLUTION, proven live in the same section -->
-<section id="demo">
+<!-- THE PROBLEM, SHOWN NOT TOLD (paper block) -->
+<section id="cheats" class="block block--paper">
   <div class="wrap">
     <span class="eyebrow">The problem</span>
-    <h2>Agents grade their own homework</h2>
+    <h2>Agents cheat their own tests</h2>
     <p class="lede">
-      Give an agent a test command and it will eventually cheat: skip the hidden suite,
-      hardcode the visible cases, rewrite the tests at import time — then tell you it's done.
-      We measured it. So Ratchet has no "done" tool at all. Watch three patches hit the gauntlet:
+      Left alone with a test command, a coding agent eventually stops fixing the bug and
+      starts gaming the grader. Three real moves, all from Ratchet's red-team battery:
+    </p>
+    <div class="cheats">
+      <div class="cheat">
+        <div class="viz" aria-hidden="true">tests/test_visible.py <span class="ok">✓</span>
+tests/test_visible2.py <span class="ok">✓</span>
+tests/test_hidden.py<span class="skip-tag">@skip</span></div>
+        <div class="body">
+          <h3>Skips the hard tests</h3>
+          <p>Drops a skip marker on the suite it can't pass — score goes green, bug stays.</p>
+          <span class="rule">caught by: skip_marker</span>
+        </div>
+      </div>
+      <div class="cheat">
+        <div class="viz" aria-hidden="true">def slugify(text):
+<span class="hardline">    return "hello-world"</span>
+    # works for the one
+    # case the test checks</div>
+        <div class="body">
+          <h3>Hardcodes the answer</h3>
+          <p>Returns exactly what the visible test expects instead of solving anything.</p>
+          <span class="rule">caught by: special_casing</span>
+        </div>
+      </div>
+      <div class="cheat">
+        <div class="viz" aria-hidden="true">$ pytest
+37 passed in 1.2s
+<span class="big-exit">exit 0</span><span class="stamp">FORGED</span></div>
+        <div class="body">
+          <h3>Fakes the report</h3>
+          <p>Prints a passing log and spoofs the exit code — the tests never actually ran.</p>
+          <span class="rule">caught by: log_spoofed</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- THE ANSWER (black block) -->
+<section class="block block--dark">
+  <div class="wrap">
+    <span class="eyebrow">The answer</span>
+    <h2>No "done" button. Only verdicts.</h2>
+    <p class="lede">
+      Ratchet has no done tool at all. Every patch runs the gauntlet; the same three moves
+      above get caught before a line of them executes:
     </p>
     <div class="term" role="img" aria-label="Terminal: three verify verdicts">
 <span class="d">$</span> ratchet verify --diff patches/honest.diff
@@ -74,19 +117,19 @@
 
 <span class="d">$</span> ratchet verify --diff patches/canary_hack.diff
 <span class="r">CHEATED</span> — zero static findings; the canary caught it anyway</div>
-    <p class="lede" style="margin:22px 0 0">
+    <p class="lede" style="margin:20px 0 0">
       That third one matters: the patch trips no static rule and gets caught anyway.
       Runs on your laptop in sixty seconds — no model, no key, no network.
     </p>
   </div>
 </section>
 
-<!-- HOW IT WORKS: 3 steps -->
-<section id="how">
+<!-- HOW IT WORKS (green block) -->
+<section id="how" class="block block--green">
   <div class="wrap">
     <span class="eyebrow">How it works</span>
     <h2>Three steps, one clean diff</h2>
-    <div class="grid grid-3" style="margin-bottom:26px">
+    <div class="grid grid-3" style="margin-bottom:22px">
       <div class="card">
         <span class="tag">Step 1</span>
         <h3>Point it at a repo</h3>
@@ -95,8 +138,8 @@
       <div class="card">
         <span class="tag">Step 2</span>
         <h3>It searches, the verifier grades</h3>
-        <p>Every step is a git commit + sandbox snapshot, so the run is a tree search over repo
-           states. Dead branches get pruned, promising ones fork in parallel.</p>
+        <p>Every step is a git commit + sandbox snapshot — a tree search over repo states.
+           Dead branches pruned, promising ones fork in parallel.</p>
       </div>
       <div class="card">
         <span class="tag">Step 3</span>
@@ -114,7 +157,7 @@
       <div class="stage"><span class="n">06</span><span class="s">lint</span></div>
       <div class="stage"><span class="n">07</span><span class="s">diff hygiene</span></div>
     </div>
-    <div class="term" style="margin-top:26px" role="img" aria-label="Terminal: a search run reaching green">
+    <div class="term" style="margin-top:22px" role="img" aria-label="Terminal: a search run reaching green">
 <span class="d">$</span> ratchet run --repo demo-repo --scripted patches/scripted.json
 <span class="a">● root  0.58</span>
 <span class="r">├─✗ 1e0f  0.58  pruned</span>
@@ -122,8 +165,8 @@
   </div>
 </section>
 
-<!-- FEATURES: four, one job each -->
-<section id="features">
+<!-- WHY IT HOLDS (paper block) -->
+<section id="features" class="block block--paper">
   <div class="wrap">
     <span class="eyebrow">Why it holds</span>
     <h2>Built to be cheated on</h2>
@@ -156,8 +199,8 @@
   </div>
 </section>
 
-<!-- FAQ: the five objections that actually come up -->
-<section id="faq">
+<!-- FAQ (black block) -->
+<section id="faq" class="block block--dark">
   <div class="wrap">
     <span class="eyebrow">Fair questions</span>
     <h2>Before you ask</h2>
@@ -193,31 +236,19 @@
   </div>
 </section>
 
-<!-- FINAL CTA -->
-<section id="cta">
-  <div class="wrap" style="text-align:center">
-    <h2>Sixty seconds to your first verdict</h2>
-    <p class="lede" style="margin-inline:auto">Python 3.11+ and git. Nothing else.</p>
-    <div class="hero-ctas" style="justify-content:center">
-      <a class="btn btn-primary" href="https://github.com/ayaangazali/ratchet">Get started free</a>
-      <a class="btn btn-ghost" href="docs.html#getting-started">10-minute quickstart</a>
-    </div>
-  </div>
-</section>
-
 <footer>
   <div class="wrap">
     <div class="col">
       <a class="wordmark" href="index.html">RATCHET<span class="tick">▸</span></a>
       <p class="fine" style="margin-top:12px">Built in the open by
-        <a href="https://github.com/ayaangazali" style="color:var(--ink-2)">Ayaan Gazali</a>.<br>
+        <a href="https://github.com/ayaangazali" style="color:var(--ink-2)">Ayaan Gazali</a>
+        and Shreya Grande.<br>
         A ratchet turns one way. So does this.</p>
     </div>
     <div class="col">
       <h3>Product</h3>
       <a href="dashboard.html">Dashboard</a>
       <a href="docs.html">Docs &amp; FAQ</a>
-      <a href="pricing.html">Pricing</a>
     </div>
     <div class="col">
       <h3>Project</h3>
@@ -243,6 +274,11 @@
   set("ps-proof", `${S.proofChecksPassed}/${S.proofChecksTotal}`);
   set("ps-stages", S.gauntletStages);
 })();
+// Cheat visuals animate when scrolled into view (CSS handles reduced-motion).
+const io = new IntersectionObserver((es) => es.forEach((e) => {
+  if (e.isIntersecting) { e.target.classList.add("on"); io.unobserve(e.target); }
+}), { threshold: 0.4 });
+document.querySelectorAll(".cheat").forEach((el) => io.observe(el));
 </script>
 <script type="module" src="hero3d.js"></script>
 </body>

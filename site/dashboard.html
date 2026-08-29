@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ratchet — dashboard</title>
-<meta name="description" content="Everything the Ratchet backend can prove, on one page: the PR review pipeline, the red-team score, the offline proof run, receipt chains, and the latest search.">
+<meta name="description" content="Everything the Ratchet backend can prove, on one page: the red-team score, the offline proof run, the search tree, receipt chains, and the PR pipeline.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14' fill='%23f5a623'>▸</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@800;900&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
@@ -19,15 +19,13 @@
     <div class="nav-links">
       <a href="dashboard.html" aria-current="page">Dashboard</a>
       <a href="docs.html">Docs</a>
-      <a href="pricing.html">Pricing</a>
       <a href="https://github.com/ayaangazali/ratchet">GitHub</a>
     </div>
   </div>
 </nav>
 
 <header class="dash-head wrap">
-  <span class="eyebrow">Everything the backend can prove</span>
-  <h1>Ratchet operations dashboard</h1>
+  <h1>Operations dashboard</h1>
   <p class="meta" id="dash-meta"></p>
 </header>
 
@@ -35,18 +33,8 @@
   <div class="kpis" id="kpis"></div>
 
   <div class="panel">
-    <h2>Pull request pipeline</h2>
-    <p class="sub">Every change goes through a Qodo-reviewed PR. Bars show lines added and removed per PR, scaled to the largest diff.</p>
-    <div class="legend" aria-hidden="true">
-      <span class="item"><span class="swatch" style="background:var(--series-1)"></span>additions</span>
-      <span class="item"><span class="swatch" style="background:var(--series-2)"></span>deletions</span>
-    </div>
-    <div id="pr-chart"></div>
-  </div>
-
-  <div class="panel">
-    <h2>Red team — the verifier scored against known attacks</h2>
-    <p class="sub">From the latest <code>make proof</code> run. "cheated" means the attack was caught and scored zero; the two honest patches at the bottom must pass — false positives count against the verifier.</p>
+    <h2>Red team — the verifier vs known attacks</h2>
+    <p class="sub">Latest <code>make proof</code> run. "caught" = attack blocked, scored zero. The two honest patches at the bottom must be accepted — false positives count against the verifier.</p>
     <div style="overflow-x:auto">
     <table>
       <thead><tr><th>attack</th><th>verdict</th><th>score</th><th>stopped at</th><th>findings</th></tr></thead>
@@ -55,14 +43,16 @@
     </div>
   </div>
 
-  <div class="grid grid-2" style="margin-top:0">
-    <div class="panel">
-      <h2>Offline proof run — <span id="proof-score"></span></h2>
-      <p class="sub"><code>make proof</code> exercises every front-page claim with no model, no key, no network.</p>
-      <ul class="checklist" id="proof-list" style="columns:1"></ul>
+  <div class="dash-cols" style="margin-top:16px">
+    <div>
+      <div class="panel">
+        <h2>Offline proof run — <span id="proof-score"></span></h2>
+        <p class="sub"><code>make proof</code>: every public claim exercised with no model, no key, no network.</p>
+        <ul class="checklist" id="proof-list"></ul>
+      </div>
     </div>
     <div>
-      <div class="panel" style="margin-top:18px">
+      <div class="panel">
         <h2>Latest search run</h2>
         <p class="sub" id="search-meta"></p>
         <div class="term" id="search-tree" role="img" aria-label="Search tree"></div>
@@ -77,7 +67,17 @@
   </div>
 
   <div class="panel">
-    <h2>Receipt chains — proving the run is the run that happened</h2>
+    <h2>Pull request pipeline</h2>
+    <p class="sub">Every change goes through a reviewed PR. Bars show lines added and removed, scaled to the largest diff.</p>
+    <div class="legend" aria-hidden="true">
+      <span class="item"><span class="swatch" style="background:var(--series-1)"></span>additions</span>
+      <span class="item"><span class="swatch" style="background:var(--series-2)"></span>deletions</span>
+    </div>
+    <div id="pr-chart"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Receipt chains</h2>
     <p class="sub">Every graded node is signed into a hash chain. The third row is the tamper demo: a forged green verdict, detected by <code>make audit</code>.</p>
     <div style="overflow-x:auto">
     <table>
@@ -87,20 +87,27 @@
     </div>
   </div>
 
-  <div class="panel">
-    <h2>Cheat detector — active rules</h2>
-    <p class="sub">Each rule ships with two tests: a patch that trips it and a patch that must not.</p>
-    <div class="rulegrid" id="rules"></div>
-  </div>
-
-  <div class="panel">
-    <h2>Research digest</h2>
-    <p class="sub">Everything verified before the build, so nobody re-searches it on the day.</p>
-    <p style="margin:0;font-size:14.5px;color:var(--ink-2)">
-      <a href="https://github.com/ayaangazali/ratchet/blob/main/RESEARCH.md">RESEARCH.md</a> — the TrueForge wire contract, SSE event stream, approval flow, sandbox facts, all primary-sourced ·
-      <a href="https://github.com/ayaangazali/ratchet/blob/main/BLOG.md">BLOG.md</a> ·
-      <a href="https://github.com/ayaangazali/ratchet/blob/main/SUBMISSION.md">SUBMISSION.md</a>
-    </p>
+  <div class="dash-cols" style="margin-top:16px">
+    <div>
+      <div class="panel">
+        <h2>Cheat detector — active rules</h2>
+        <p class="sub">Each rule ships with a patch that trips it and a patch that must not.</p>
+        <div class="rulegrid" id="rules"></div>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>Research digest</h2>
+        <p class="sub">Verified before the build, so nobody re-searches it on the day.</p>
+        <p style="margin:0;font-size:14px;color:var(--ink-2)">
+          <a href="https://github.com/ayaangazali/ratchet/blob/main/RESEARCH.md">RESEARCH.md</a> —
+          the TrueForge wire contract, SSE event stream, approval flow, sandbox facts,
+          all primary-sourced ·
+          <a href="https://github.com/ayaangazali/ratchet/blob/main/BLOG.md">BLOG.md</a> ·
+          <a href="https://github.com/ayaangazali/ratchet/blob/main/SUBMISSION.md">SUBMISSION.md</a>
+        </p>
+      </div>
+    </div>
   </div>
 </main>
 
@@ -131,18 +138,6 @@ $("kpis").innerHTML = [
   { v: S.gauntletStages, k: "gauntlet stages" },
   { v: S.prsOpen, k: "open reviewed PRs" },
 ].map((t) => `<div class="kpi${t.good ? " good" : ""}"><span class="v">${t.v}</span><span class="k">${t.k}</span></div>`).join("");
-
-// PR chart: two thin horizontal bars per PR, scaled to the largest value
-const maxLines = Math.max(...D.prs.flatMap((p) => [p.additions, p.deletions]));
-$("pr-chart").innerHTML = D.prs.map((p) => `
-  <div class="barrow" data-tip="#${p.number} ${esc(p.title)}&#10;+${p.additions} / −${p.deletions} · ${p.state}">
-    <span class="lbl"><a href="${p.url}">#${p.number}</a></span>
-    <span class="bars">
-      <span class="bar adds" style="width:${Math.max(0.5, p.additions / maxLines * 100)}%"></span>
-      <span class="bar dels" style="width:${Math.max(0.5, p.deletions / maxLines * 100)}%"></span>
-    </span>
-    <span class="nums">+${p.additions} / −${p.deletions}</span>
-  </div>`).join("");
 
 // Red team table — status always icon + label, never color alone
 const verdict = (r) => {
@@ -181,6 +176,18 @@ $("graph-body").innerHTML = D.objectiveGraph.nodes.map((n) => `
     <td class="num">attempts ${n.attempts}</td>
     <td class="mono" style="color:var(--muted)">${n.escalated ? "escalated to tree search" : "—"}</td>
   </tr>`).join("");
+
+// PR chart: two thin horizontal bars per PR, scaled to the largest value
+const maxLines = Math.max(...D.prs.flatMap((p) => [p.additions, p.deletions]));
+$("pr-chart").innerHTML = D.prs.map((p) => `
+  <div class="barrow" data-tip="#${p.number} ${esc(p.title)}&#10;+${p.additions} / −${p.deletions} · ${p.state}">
+    <span class="lbl"><a href="${p.url}">#${p.number}</a></span>
+    <span class="bars">
+      <span class="bar adds" style="width:${Math.max(0.5, p.additions / maxLines * 100)}%"></span>
+      <span class="bar dels" style="width:${Math.max(0.5, p.deletions / maxLines * 100)}%"></span>
+    </span>
+    <span class="nums">+${p.additions} / −${p.deletions}</span>
+  </div>`).join("");
 
 // Receipts
 $("receipts-body").innerHTML = D.receipts.map((r) => {

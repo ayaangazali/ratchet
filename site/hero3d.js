@@ -81,7 +81,7 @@ function layout() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  group.position.x = w > 900 ? 3.2 : 0;
+  group.position.x = w > 900 ? 4.6 : w > 640 ? 2.2 : 0;
 }
 layout();
 addEventListener("resize", layout);

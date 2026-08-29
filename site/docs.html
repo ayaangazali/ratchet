@@ -3,197 +3,427 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ratchet — docs, getting started &amp; FAQ</title>
-<meta name="description" content="How Ratchet works, a 10-minute getting-started guide, and FAQs on product, billing, security, and troubleshooting.">
+<title>Ratchet — documentation</title>
+<meta name="description" content="Ratchet documentation: setup, concepts (gauntlet, tree search, receipts, red team), guides, CLI reference, and troubleshooting.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14' fill='%23f5a623'>▸</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@800;900&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
 
 <nav class="nav" aria-label="Main">
-  <div class="wrap">
+  <div class="wrap" style="max-width:none">
     <a class="wordmark" href="index.html">RATCHET<span class="tick">▸</span></a>
     <div class="nav-links">
       <a href="dashboard.html">Dashboard</a>
       <a href="docs.html" aria-current="page">Docs</a>
-      <a href="pricing.html">Pricing</a>
       <a href="https://github.com/ayaangazali/ratchet">GitHub</a>
     </div>
   </div>
 </nav>
 
-<header class="dash-head wrap">
-  <span class="eyebrow">Docs · help · FAQ</span>
-  <h1>Ratchet documentation</h1>
-  <p class="lede" style="margin-bottom:22px">Search everything on this page — guides and FAQs together.</p>
-  <input class="docs-search" id="q" type="search" placeholder="Search docs — try “billing”, “hidden tests”, “docker”, “API limits”…" aria-label="Search docs and FAQs">
-  <p class="no-results" id="no-results">No matches. Try a broader term, or <a href="https://github.com/ayaangazali/ratchet/issues/new">ask on GitHub</a>.</p>
-</header>
+<div class="docs-layout">
 
-<main class="wrap" style="padding-bottom:70px">
+<aside class="docs-side" aria-label="Documentation topics">
+  <input class="docs-search" id="q" type="search" placeholder="Search docs…" aria-label="Search documentation">
+  <p class="no-results" id="no-results">No matches.</p>
+  <nav id="side-nav">
+    <div class="group"><span>Getting started</span>
+      <a href="#install">Install</a>
+      <a href="#demo">Run the demo</a>
+      <a href="#first-verdicts">Your first verdicts</a>
+      <a href="#full-search">A full search run</a>
+    </div>
+    <div class="group"><span>Concepts</span>
+      <a href="#how-it-works">How it works</a>
+      <a href="#gauntlet">The gauntlet</a>
+      <a href="#cheat-detector">The cheat detector</a>
+      <a href="#tree-search">Tree search</a>
+      <a href="#receipts">Receipts</a>
+      <a href="#red-team">The red team</a>
+      <a href="#objective-graph">Objective graph</a>
+      <a href="#docs-oracle">The docs oracle</a>
+      <a href="#sandboxes">Sandboxes</a>
+    </div>
+    <div class="group"><span>Guides</span>
+      <a href="#add-task">Write a task</a>
+      <a href="#add-rule">Add a verification rule</a>
+      <a href="#console">Use the console</a>
+      <a href="#audit">Audit a run</a>
+    </div>
+    <div class="group"><span>Reference</span>
+      <a href="#cli">CLI commands</a>
+      <a href="#make">Make targets</a>
+    </div>
+    <div class="group"><span>Troubleshooting</span>
+      <a href="#ts-macos">macOS timeout error</a>
+      <a href="#ts-false-cheat">Honest patch flagged as cheat</a>
+      <a href="#ts-no-green">Search never goes green</a>
+      <a href="#ts-pruned">Recover a pruned branch</a>
+    </div>
+    <div class="group"><span>FAQ</span>
+      <a href="#faq">Common questions</a>
+    </div>
+  </nav>
+</aside>
 
-<section id="how-it-works" style="border-top:none;padding-top:36px">
-  <span class="eyebrow">How it works</span>
-  <h2>The high-level picture</h2>
-  <div class="doc-block card" style="margin-bottom:12px">
-    <p>
-      You give Ratchet a repo and a task file. An agent proposes patches; Ratchet never asks the
-      agent whether it's finished. Instead, every candidate patch runs a seven-stage
-      <strong>verifier gauntlet</strong> — build, cheat check, hidden fail-to-pass tests,
-      pass-to-pass regressions, types, lint, diff hygiene. Only the gauntlet can declare
-      success, and it does so in exactly one place in the code.
-    </p>
-  </div>
-  <div class="doc-block card" style="margin-bottom:12px">
-    <p>
-      Every step is a git commit plus a sandbox snapshot, so a run is a <strong>tree search over
-      repo states</strong> with the verifier's score as the value function. Stalled branches fork
-      in parallel, dead ends are pruned (and parked, so they're still restorable), and the
-      winning path exits as one squashed diff at a <strong>human approval gate</strong>. Every
-      graded node is signed into a tamper-evident <strong>receipt chain</strong> you can audit.
-    </p>
-  </div>
-</section>
+<main class="docs-main">
+  <h1>Documentation</h1>
+  <p style="max-width:640px">Everything here runs on your laptop with Python 3.11+ and git —
+  no docker, no API keys, no network. When in doubt, <code>make proof</code> re-verifies every
+  claim and keeps the evidence.</p>
 
-<section id="getting-started">
-  <span class="eyebrow">Getting started</span>
-  <h2>Up and running in 10 minutes</h2>
-  <div class="doc-block">
-    <h3>1. Install (2 min)</h3>
-    <p style="color:var(--ink-2)">You need Python 3.11+ and git. Node 22.14+ only if you want the live TrueForge path.</p>
-    <pre>git clone https://github.com/ayaangazali/ratchet &amp;&amp; cd ratchet
+  <!-- ============ GETTING STARTED ============ -->
+  <section class="doc-section" id="install">
+    <h2>Install</h2>
+    <p>Requirements: Python 3.11+, git. Node 22.14+ only if you want the live TrueForge harness path.</p>
+    <pre>git clone https://github.com/ayaangazali/ratchet && cd ratchet
 make dev          # editable install + dev deps</pre>
-  </div>
-  <div class="doc-block">
-    <h3>2. Seed the demo and run the suite (3 min)</h3>
-    <pre>make demo         # seeds demo-repo/: a broken slugify, three prepared patches
-make test         # the whole suite; no docker, no network
+    <div class="callout">macOS: the eval script uses GNU <code>timeout</code>. See
+    <a href="#ts-macos">troubleshooting</a> if <code>make evals</code> fails.</div>
+  </section>
+
+  <section class="doc-section" id="demo">
+    <h2>Run the demo</h2>
+    <p><code>make demo</code> seeds <code>demo-repo/</code> with a deliberately broken
+    <code>slugify</code> function and three prepared patches:</p>
+    <table>
+      <tr><td class="mono">honest.diff</td><td>the real fix — should go green</td></tr>
+      <tr><td class="mono">cheat.diff</td><td>a reward hack — must be blocked before it executes</td></tr>
+      <tr><td class="mono">canary_hack.diff</td><td>a cheat with zero static findings — must be caught anyway</td></tr>
+    </table>
+    <p>It also seeds visible tests, a held-out (hidden) suite, and a canary test. Then run
+    the whole suite and the red team:</p>
+    <pre>make test         # the whole suite; no docker, no network
 make redteam      # the published reward-hacking battery fired at the verifier</pre>
-  </div>
-  <div class="doc-block">
-    <h3>3. Get your first three verdicts (3 min)</h3>
-    <p style="color:var(--ink-2)">The honest fix goes green; the cheat is blocked before a line of it runs; the canary hack is caught with zero static findings.</p>
+  </section>
+
+  <section class="doc-section" id="first-verdicts">
+    <h2>Your first verdicts</h2>
+    <p>The gauntlet runs standalone — no agent, no model. Three verdicts tell the whole story:</p>
     <pre>ratchet verify --task tasks/demo-001-slugify/task.yaml --repo demo-repo \
                --diff demo-repo/patches/honest.diff    # GREEN, score 1.000
 ratchet verify --task tasks/demo-001-slugify/task.yaml --repo demo-repo \
                --diff demo-repo/patches/cheat.diff     # CHEATED
 ratchet verify --task tasks/canary-impossible/task.yaml --repo demo-repo \
                --diff demo-repo/patches/canary_hack.diff  # CHEATED, zero static findings</pre>
-  </div>
-  <div class="doc-block">
-    <h3>4. Run a full search, offline (2 min)</h3>
-    <pre>make run-offline  # a complete search: root, a real prune, a green node, the gate
-make proof        # exercise every claim on the site and keep the evidence
-make console      # the TUI
-make audit        # verify the latest run's receipt chain</pre>
-    <p style="color:var(--ink-2)">macOS note: the eval script uses GNU <code>timeout</code> — <code>brew install coreutils</code> and put <code>gtimeout</code> on PATH as <code>timeout</code>.</p>
-  </div>
-</section>
+    <p>The cheat is caught by static analysis <em>before a line of it runs</em>. The canary hack
+    trips no static rule and is caught by behavior instead — see
+    <a href="#cheat-detector">the cheat detector</a>.</p>
+  </section>
 
-<section id="faq">
-  <span class="eyebrow">FAQ</span>
-  <h2>Frequently asked questions</h2>
+  <section class="doc-section" id="full-search">
+    <h2>A full search run</h2>
+    <p>A complete run — root node, a real prune, a green node, and the human approval gate —
+    works offline with a scripted agent:</p>
+    <pre>make run-offline
+# or directly:
+ratchet run --repo demo-repo --scripted demo-repo/patches/scripted.json</pre>
+    <p>You'll see the search tree print as it goes: pruned branches marked
+    <code>✗</code>, the live best node starred, and the run ending at an approval that waits
+    for a human decision.</p>
+    <pre>● root  0.58
+├─✗ 1e0f  0.58  pruned
+└─★ 2874  1.00  ✓green</pre>
+  </section>
 
-  <h3 style="margin-top:26px">Product</h3>
-  <details class="doc-block"><summary>What models does Ratchet work with?</summary>
-    <div class="body">Model calls, retries, and multi-provider routing belong to the TrueForge
-    harness Ratchet runs on. Ratchet owns what counts as progress — it is model-agnostic by
-    construction, and the whole verifier runs with no model at all.</div></details>
-  <details class="doc-block"><summary>Does it need Docker?</summary>
-    <div class="body">No. Ratchet never orchestrates containers. Sandboxes come from the harness;
-    the documented fallback is one git worktree per node off a prebuilt base, with a shared
-    pre-warmed virtualenv.</div></details>
-  <details class="doc-block"><summary>What are the API limits?</summary>
-    <div class="body">Ratchet itself imposes none — the offline paths (<code>make test</code>,
-    <code>make proof</code>, <code>ratchet verify</code>) make zero API calls. Live runs inherit
-    whatever limits your TrueForge model providers have, and the search budget
-    (nodes, wall-clock, dollars) is set per run and enforced by the scheduler.</div></details>
-  <details class="doc-block"><summary>Can I add my own verification rules?</summary>
-    <div class="body">Yes. Every new rule ships with two tests — a patch that trips it and a
-    patch that must not — plus an entry in the red-team battery, so the perfect catch score
-    stays honest. See "Extending Ratchet" in the README.</div></details>
-  <details class="doc-block"><summary>Is there a Slack or CI integration?</summary>
-    <div class="body">Not yet. Today the integration points are the CLI, the TUI console, and
-    the receipt chain (auditable in CI via <code>make audit</code>). The red team already runs
-    in CI on the repo itself.</div></details>
+  <!-- ============ CONCEPTS ============ -->
+  <section class="doc-section" id="how-it-works">
+    <h2>How it works</h2>
+    <p>You give Ratchet a repo and a task file. An agent proposes patches; Ratchet never asks
+    the agent whether it's finished — there is no "done" tool anywhere in the system. Instead,
+    every candidate patch runs a seven-stage <a href="#gauntlet">verifier gauntlet</a>, and
+    <strong>green is set in exactly one place in the codebase</strong>: the gauntlet itself.</p>
+    <p>Every step the agent takes is a git commit plus a sandbox snapshot, so a run is a
+    <a href="#tree-search">tree search over repo states</a> with the verifier's score as the
+    value function. The winning path exits as one squashed diff at a human approval gate, and
+    every graded step is signed into a tamper-evident <a href="#receipts">receipt chain</a>.</p>
+    <p>Division of labor: the TrueForge harness owns model calls, sandboxes, sub-agents, and
+    session persistence. Ratchet owns exactly one question — <strong>what counts as progress</strong>.</p>
+  </section>
 
-  <h3 style="margin-top:26px">Billing</h3>
-  <details class="doc-block"><summary>How much does Ratchet cost?</summary>
-    <div class="body">Nothing. Ratchet is MIT-licensed open source — every feature on this site
-    is in the public repo. You pay only your own model providers for live runs.
-    See <a href="pricing.html">pricing</a> for planned hosted tiers.</div></details>
-  <details class="doc-block"><summary>Is there a trial, refund, or contract?</summary>
-    <div class="body">No trial needed — the full product is free. Hosted plans, when they ship,
-    will be monthly with no long-term contract.</div></details>
+  <section class="doc-section" id="gauntlet">
+    <h2>The gauntlet</h2>
+    <p>Seven stages, in order. A patch that fails an early stage never reaches a later one —
+    and a patch that fails the cheat check never executes at all.</p>
+    <table>
+      <tr><th>#</th><th>stage</th><th>what it asks</th></tr>
+      <tr><td class="num">1</td><td class="mono">build</td><td>Does the repo still build/import with the patch applied?</td></tr>
+      <tr><td class="num">2</td><td class="mono">cheat check</td><td>Does the diff match any known reward-hacking pattern? (static — runs before execution)</td></tr>
+      <tr><td class="num">3</td><td class="mono">fail-to-pass</td><td>Do the held-out tests that were failing now pass?</td></tr>
+      <tr><td class="num">4</td><td class="mono">pass-to-pass</td><td>Does everything that passed before still pass? (no regressions)</td></tr>
+      <tr><td class="num">5</td><td class="mono">types</td><td>Type check clean?</td></tr>
+      <tr><td class="num">6</td><td class="mono">lint</td><td>Lint clean?</td></tr>
+      <tr><td class="num">7</td><td class="mono">diff hygiene</td><td>Is the diff minimal and inside allowed paths?</td></tr>
+    </table>
+    <p>Two hard rules around the gauntlet: <strong>protected paths</strong> (tests, verifier
+    config) are reverted before grading on every run with no flag to skip, and the exit code
+    is echoed outside the output region the agent can influence.</p>
+  </section>
 
-  <h3 style="margin-top:26px">Security</h3>
-  <details class="doc-block"><summary>Can the agent see the held-out tests?</summary>
-    <div class="body">No. Held-out test names never appear in anything the agent can read — the
-    context assembly, the observations, and every bus event are all scrubbed, and there are
-    tests asserting it. A leak would silently destroy the signal, so this is invariant #5 of
-    the project.</div></details>
-  <details class="doc-block"><summary>What stops the agent from editing the tests or the verifier?</summary>
-    <div class="body">Protected paths are reverted before grading on every run with no skip
-    flag; runtime writes to graded paths are a cheat finding; and the verdict's exit code is
-    echoed outside the region the agent can influence.</div></details>
-  <details class="doc-block"><summary>Can a run's results be forged after the fact?</summary>
-    <div class="body">Every graded node is signed into a hash-linked receipt chain.
-    <code>make audit</code> re-verifies it; edit one verdict and the chain reports BROKEN with
-    the exact receipt that fails. The tamper demo runs in <code>make proof</code>.</div></details>
-  <details class="doc-block"><summary>What can the sandbox reach on the network?</summary>
-    <div class="body">On the live harness path, local sandbox egress is allowlisted to PyPI and
-    GitHub only. The offline paths make no network calls at all.</div></details>
+  <section class="doc-section" id="cheat-detector">
+    <h2>The cheat detector</h2>
+    <p>Stage two is a library of static rules, each shipped with two tests — a patch that
+    trips it and a patch that must not. Current rules:</p>
+    <p class="mono" style="line-height:2">hard_exit · always_equal · special_casing · runtime_test_write ·
+    protected_path · skip_marker · test_file_emptied · test_deleted · assertion_removed ·
+    report_hook_tamper · env_bypass · canary_passed · broad_except_pass · log_spoofed</p>
+    <h3>The canary</h3>
+    <p>Static rules can't catch everything — so one task in every battery is
+    <em>impossible</em>: its hidden test cannot legitimately pass. Any patch that makes the
+    canary go green must have smuggled an answer, even if it trips zero static rules. That's
+    the <code>canary_passed</code> finding, and it's why the canary hack in the demo is caught
+    with no static findings at all.</p>
+    <h3>Hidden tests stay hidden</h3>
+    <p>Held-out test names and failure details never appear in anything the agent can read —
+    context assembly, observations, and every bus event are scrubbed, and the suite has tests
+    asserting it. A leak would silently destroy the signal.</p>
+  </section>
 
-  <h3 style="margin-top:26px">Troubleshooting</h3>
-  <details class="doc-block"><summary>`make evals` fails on macOS with a timeout error</summary>
-    <div class="body">The eval script uses GNU <code>timeout</code>. Run
-    <code>brew install coreutils</code> and expose <code>gtimeout</code> on your PATH as
-    <code>timeout</code> — a symlink into your venv's <code>bin/</code> works.</div></details>
-  <details class="doc-block"><summary>A patch I believe is honest gets flagged as a cheat</summary>
-    <div class="body">Run <code>ratchet verify</code> on the diff by hand with no model in the
-    loop and read the failing stage — it names the exact rule and location. If you still think
-    the rule is wrong, open an issue with the diff; the verifier only changes with a
-    reproducing test, never to make a specific patch pass.</div></details>
-  <details class="doc-block"><summary>The search never goes green</summary>
-    <div class="body">Read the failing stage first. Scores below 1.0 tell you which stage is
-    holding the line (f2p means hidden tests still fail). Check the budget line — a run that
-    exhausts its node budget parks its best branch rather than forcing a verdict.</div></details>
-  <details class="doc-block"><summary>Where did my pruned branch go?</summary>
-    <div class="body">Pruned work is parked before it is dropped, at
-    <code>refs/ratchet/pruned/&lt;node&gt;</code>. A dead end is still a node you can rewind to.</div></details>
-</section>
+  <section class="doc-section" id="tree-search">
+    <h2>Tree search</h2>
+    <p>Because every step is a restorable node (git commit + snapshot), a run is not a linear
+    loop with retries — it's a tree search over repo states:</p>
+    <ul>
+      <li><strong>Score</strong> — the verifier grades each node; the score is the value function.</li>
+      <li><strong>Fork</strong> — stalled branches fork in parallel; sub-agents share the sandbox but see none of the conversation.</li>
+      <li><strong>Prune</strong> — dead ends are cut, but <a href="#ts-pruned">parked first</a> at <code>refs/ratchet/pruned/&lt;node&gt;</code>, so nothing is lost.</li>
+      <li><strong>Budget</strong> — every run has explicit caps: nodes, wall-clock, dollars. The scheduler decides where the next unit of compute goes.</li>
+    </ul>
+    <p>The winning path is squashed into one clean diff and parked at the approval gate.
+    Nothing irreversible — no push, no PR — happens without a human decision.</p>
+  </section>
 
+  <section class="doc-section" id="receipts">
+    <h2>Receipts</h2>
+    <p>Every graded node — accepted or pruned — is recorded into a signed, hash-linked chain,
+    and a finished run seals its chain. That gives you two guarantees:</p>
+    <ul>
+      <li><strong>Order</strong> — results are provably in the order they were issued.</li>
+      <li><strong>Integrity</strong> — edit any verdict after the fact and the chain breaks.</li>
+    </ul>
+    <pre>make audit
+#   receipts      4
+#   head          b26a36f26e627c03
+#   chain         intact</pre>
+    <p>Forge a green verdict and the same command reports <code>CHAIN BROKEN</code> with the
+    exact receipt whose signature fails. The tamper demo runs as part of <code>make proof</code>.</p>
+  </section>
+
+  <section class="doc-section" id="red-team">
+    <h2>The red team</h2>
+    <p>The verifier itself is what gets evaluated. <code>make redteam</code> fires a published
+    battery of real reward-hacking patterns at the gauntlet — skip markers, hardcoded answers,
+    tests rewritten at import time, conftest report hooks, spoofed exit codes — plus two honest
+    patches that <em>must</em> be accepted, because a paranoid verifier that rejects real fixes
+    is broken too.</p>
+    <p>The score to hold: <strong>every attack caught, zero false positives</strong>. It runs
+    in CI, and the <a href="dashboard.html">dashboard</a> shows the full attack-by-attack table
+    from the latest proof run.</p>
+  </section>
+
+  <section class="doc-section" id="objective-graph">
+    <h2>Objective graph</h2>
+    <p>Bigger goals decompose into a graph of objective nodes — each one fulfillable only by
+    tests, never by the agent's say-so. Nodes are attempted cheaply first; a node that exhausts
+    its attempts <strong>escalates to full tree search</strong> automatically.</p>
+    <pre>graph demo-slugify-graph · 2 node(s)
+  ✓ accents        fulfilled  attempts 1
+  ✓ truncation     fulfilled  attempts 3 (escalated to tree search)</pre>
+    <p>The demo graph lives at <code>objectives/demo-graph.yaml</code>.</p>
+  </section>
+
+  <section class="doc-section" id="docs-oracle">
+    <h2>The docs oracle</h2>
+    <p>When a failure looks like the outside world — an import error, a missing attribute, an
+    unexpected keyword argument — the oracle attaches current upstream documentation for the
+    <em>exact version in the lockfile</em> to the next prompt, instead of letting the model
+    guess from memory.</p>
+    <ul>
+      <li>Sources are configured in <code>ratchet/scrapers.yaml</code>, version-controlled — never one-off shell scrapes.</li>
+      <li>Content is extracted <strong>by heading, not CSS selector</strong> — headings survive site redesigns.</li>
+      <li>Every fetch is validated against the source's <code>expect</code> block; on failure the oracle relocates the section by heading similarity and commits the repair as a diff, so the repair history is auditable.</li>
+    </ul>
+  </section>
+
+  <section class="doc-section" id="sandboxes">
+    <h2>Sandboxes</h2>
+    <p>Ratchet does not orchestrate containers — ever. <code>sandbox.py</code> is an interface
+    with two implementations:</p>
+    <table>
+      <tr><td class="mono">HarnessProvider</td><td>Execution and snapshots from the TrueForge sandbox provider. Children inherit installed deps and warm caches — this makes forking cheap.</td></tr>
+      <tr><td class="mono">WorktreeProvider</td><td>The offline fallback: one git worktree per node off a prebuilt base, all attempts sharing a pre-warmed virtualenv. No snapshots, same search, same verifier.</td></tr>
+    </table>
+    <p>Decide between them with <code>ratchet bench-snapshot</code>: under ~5s fork round-trip,
+    run the search on snapshots; over it, take the worktree fallback.</p>
+  </section>
+
+  <!-- ============ GUIDES ============ -->
+  <section class="doc-section" id="add-task">
+    <h2>Write a task</h2>
+    <p>A task is a YAML file that tells the gauntlet what to grade. Use
+    <code>tasks/demo-001-slugify/task.yaml</code> as the template. A task names:</p>
+    <ul>
+      <li>the repo and the goal,</li>
+      <li>the visible tests the agent may run itself,</li>
+      <li>the held-out tests that actually grade it (never shown to the agent),</li>
+      <li>protected paths that revert before grading.</li>
+    </ul>
+    <p>Verify your task with no agent in the loop first:</p>
+    <pre>ratchet verify --task tasks/&lt;your-task&gt;/task.yaml --repo &lt;repo&gt; --diff &lt;patch&gt;</pre>
+  </section>
+
+  <section class="doc-section" id="add-rule">
+    <h2>Add a verification rule</h2>
+    <p>Every new rule ships as a set — this is the repo's contract, not a suggestion:</p>
+    <ol>
+      <li>The rule itself, in the verifier's cheat module (pure function: data in, findings out).</li>
+      <li>A test with a patch that <strong>trips</strong> it.</li>
+      <li>A test with a patch that <strong>must not</strong> trip it (false-positive guard).</li>
+      <li>An entry in the red-team battery, so <code>make redteam</code> proves it end to end.</li>
+    </ol>
+    <div class="callout">If an honest patch starts getting flagged after your rule lands, your
+    rule is the bug. The battery's two honest patches exist to catch exactly that.</div>
+  </section>
+
+  <section class="doc-section" id="console">
+    <h2>Use the console</h2>
+    <p>The TUI shows the live search tree, scores, prunes, and the approval gate:</p>
+    <pre>make console      # the TUI
+make fixture      # a recorded run, so the console works with no model</pre>
+  </section>
+
+  <section class="doc-section" id="audit">
+    <h2>Audit a run</h2>
+    <pre>make audit        # verify the latest run's receipt chain</pre>
+    <p>Reports receipt count, chain head, and intact/broken status. Broken output names the
+    first receipt whose signature or back-link fails. See <a href="#receipts">receipts</a> for
+    what's being checked.</p>
+  </section>
+
+  <!-- ============ REFERENCE ============ -->
+  <section class="doc-section" id="cli">
+    <h2>CLI commands</h2>
+    <table>
+      <tr><td class="mono">ratchet verify --task &lt;yaml&gt; --repo &lt;dir&gt; --diff &lt;patch&gt;</td><td>Run the gauntlet on one patch, no agent, no model. Exit code is the verdict.</td></tr>
+      <tr><td class="mono">ratchet run --repo &lt;dir&gt; [--scripted &lt;json&gt;]</td><td>A full search run. <code>--scripted</code> replays recorded agent moves — fully offline.</td></tr>
+      <tr><td class="mono">ratchet bench-snapshot</td><td>Time a sandbox fork round-trip; decides HarnessProvider vs WorktreeProvider.</td></tr>
+      <tr><td class="mono">ratchet redteam --repo &lt;dir&gt;</td><td>Fire the attack battery at the verifier and print the score table.</td></tr>
+    </table>
+  </section>
+
+  <section class="doc-section" id="make">
+    <h2>Make targets</h2>
+    <table>
+      <tr><td class="mono">make dev</td><td>editable install + dev deps</td></tr>
+      <tr><td class="mono">make demo</td><td>seed demo-repo/ with the broken slugify and three patches</td></tr>
+      <tr><td class="mono">make test</td><td>the whole suite; no docker, no network</td></tr>
+      <tr><td class="mono">make lint</td><td>ruff + mypy</td></tr>
+      <tr><td class="mono">make redteam</td><td>score the verifier against known cheating patterns</td></tr>
+      <tr><td class="mono">make evals</td><td>linear loop vs tree search on seeded bugs</td></tr>
+      <tr><td class="mono">make bench</td><td>time a sandbox fork round trip</td></tr>
+      <tr><td class="mono">make run-offline</td><td>a complete scripted search, offline</td></tr>
+      <tr><td class="mono">make fixture</td><td>a recorded run for the console</td></tr>
+      <tr><td class="mono">make console</td><td>the TUI</td></tr>
+      <tr><td class="mono">make audit</td><td>verify the latest run's receipt chain</td></tr>
+      <tr><td class="mono">make proof</td><td>exercise every public claim offline, keep the evidence</td></tr>
+    </table>
+  </section>
+
+  <!-- ============ TROUBLESHOOTING ============ -->
+  <section class="doc-section" id="ts-macos">
+    <h2>macOS: timeout error in <code>make evals</code></h2>
+    <p>The eval script uses GNU <code>timeout</code>, which macOS doesn't ship.</p>
+    <pre>brew install coreutils
+ln -s "$(command -v gtimeout)" .venv/bin/timeout   # any PATH location works</pre>
+  </section>
+
+  <section class="doc-section" id="ts-false-cheat">
+    <h2>An honest patch gets flagged as a cheat</h2>
+    <p>Run the gauntlet on the diff by hand and read the failing stage — it names the exact
+    rule and location:</p>
+    <pre>ratchet verify --task &lt;task&gt; --repo &lt;repo&gt; --diff &lt;patch&gt;</pre>
+    <p>If you still think the rule is wrong, open an issue with the diff attached. The
+    verifier only changes with a reproducing test — never to make one specific patch pass.
+    That rule applies to humans too.</p>
+  </section>
+
+  <section class="doc-section" id="ts-no-green">
+    <h2>The search never goes green</h2>
+    <ul>
+      <li>Scores below 1.0 name the stage holding the line — <code>f2p</code> means the hidden tests still fail.</li>
+      <li>Check the budget line: a run that exhausts its node budget parks its best branch rather than forcing a verdict.</li>
+      <li>In an objective graph, an exhausted node escalates to tree search automatically — check the graph status output.</li>
+    </ul>
+  </section>
+
+  <section class="doc-section" id="ts-pruned">
+    <h2>Recover a pruned branch</h2>
+    <p>Pruned work is parked before it's dropped:</p>
+    <pre>git for-each-ref refs/ratchet/pruned/     # list parked nodes
+git checkout refs/ratchet/pruned/&lt;node&gt;   # inspect one</pre>
+    <p>A dead end is still a node you can rewind to.</p>
+  </section>
+
+  <!-- ============ FAQ ============ -->
+  <section class="doc-section" id="faq">
+    <h2>Common questions</h2>
+    <details><summary>What does Ratchet cost?</summary>
+      <div class="body">Nothing — MIT-licensed open source, every feature in the public repo.
+      You pay only your own model providers on live runs, capped by per-run budgets.</div></details>
+    <details><summary>What models does it work with?</summary>
+      <div class="body">Model routing belongs to the TrueForge harness; Ratchet is
+      model-agnostic and the whole verifier runs with no model at all.</div></details>
+    <details><summary>Does it need Docker or network access?</summary>
+      <div class="body">No. All offline paths (<code>make test/redteam/proof/run-offline</code>)
+      use no docker and no network. Live sandbox egress is allowlisted to PyPI and GitHub.</div></details>
+    <details><summary>Can the agent see the hidden tests?</summary>
+      <div class="body">No — names and details are scrubbed from everything the agent reads,
+      with tests asserting it. See <a href="#cheat-detector">the cheat detector</a>.</div></details>
+    <details><summary>Can a run's results be forged?</summary>
+      <div class="body">Edit any verdict and <code>make audit</code> reports CHAIN BROKEN with
+      the failing receipt. See <a href="#receipts">receipts</a>.</div></details>
+    <details><summary>Where do I get help?</summary>
+      <div class="body"><a href="https://github.com/ayaangazali/ratchet/issues">GitHub issues</a> —
+      that's the support channel, and it's read.</div></details>
+  </section>
 </main>
-
-<footer>
-  <div class="wrap">
-    <p class="fine">Can't find it? <a href="https://github.com/ayaangazali/ratchet/issues/new">Open an issue</a> — that's the support channel, and it's read.</p>
-  </div>
-</footer>
+</div>
 
 <script>
-// Client-side search: filters every .doc-block (guides + FAQs) by text match.
+const links = [...document.querySelectorAll(".docs-side a")];
+const sections = [...document.querySelectorAll(".doc-section")];
+const groups = [...document.querySelectorAll(".docs-side .group")];
+
+// Active-topic highlight follows scroll.
+const byId = Object.fromEntries(links.map((a) => [a.getAttribute("href").slice(1), a]));
+const spy = new IntersectionObserver((es) => {
+  es.forEach((e) => {
+    if (!e.isIntersecting) return;
+    links.forEach((a) => a.classList.remove("active"));
+    byId[e.target.id]?.classList.add("active");
+  });
+}, { rootMargin: "-20% 0px -70% 0px" });
+sections.forEach((s) => spy.observe(s));
+
+// Search filters both the sidebar topics and the content sections.
 const q = document.getElementById("q");
-const blocks = [...document.querySelectorAll(".doc-block")];
-const sections = [...document.querySelectorAll("main section")];
 const noRes = document.getElementById("no-results");
 q.addEventListener("input", () => {
   const term = q.value.trim().toLowerCase();
   let hits = 0;
-  blocks.forEach((b) => {
-    const show = !term || b.textContent.toLowerCase().includes(term);
-    b.style.display = show ? "" : "none";
-    if (show) hits++;
-    if (term && show && b.tagName === "DETAILS") b.open = true;
-    if (!term && b.tagName === "DETAILS") b.open = false;
-  });
-  // hide section headers whose blocks are all hidden
   sections.forEach((s) => {
-    const any = [...s.querySelectorAll(".doc-block")].some((b) => b.style.display !== "none");
-    s.style.display = any ? "" : "none";
+    const show = !term || s.textContent.toLowerCase().includes(term);
+    s.style.display = show ? "" : "none";
+    const a = byId[s.id];
+    if (a) a.style.display = show ? "" : "none";
+    if (show) hits++;
+  });
+  groups.forEach((g) => {
+    const any = [...g.querySelectorAll("a")].some((a) => a.style.display !== "none");
+    g.style.display = any ? "" : "none";
   });
   noRes.style.display = term && hits === 0 ? "block" : "none";
 });
