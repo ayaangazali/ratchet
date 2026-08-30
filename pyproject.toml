@@ -1,6 +1,6 @@
 [project]
 name = "ratchet"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A coding agent that cannot decide it is done. The verifier decides."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,6 +23,11 @@ ratchet = "ratchet.cli:main"
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+# one source of truth: a merge once reverted this file's literal to 0.1.0 while
+# __init__ said 0.5.1, so the wheel's metadata and `ratchet --version` disagreed
+[tool.setuptools.dynamic]
+version = {attr = "ratchet.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["ratchet*"]

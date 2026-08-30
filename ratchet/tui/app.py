@@ -302,26 +302,50 @@ class StatusLine(Static):
         self.note = "waiting for a run"
         self.budget: dict | None = None
         self.verb_seed = 0
+        # Work time, not session age. The clock used to run from the moment the
+        # console opened, so a console left open overnight claimed hours of work
+        # on a one-second turn. `work_started` is None while idle; `work_total`
+        # accumulates only the stretches where something was actually running.
+        self.work_started: float | None = None
+        self.work_total = 0.0
+
+    def begin_work(self) -> None:
+        if self.work_started is None:
+            self.work_started = time.time()
+
+    def end_work(self) -> None:
+        if self.work_started is not None:
+            self.work_total += time.time() - self.work_started
+            self.work_started = None
+
+    @property
+    def work_seconds(self) -> float:
+        """Total time spent working, including the stretch in progress."""
+        live = (time.time() - self.work_started) if self.work_started else 0.0
+        return self.work_total + live
+
+    def _clock(self) -> str:
+        return m.duration(self.work_seconds)
 
     def draw(self) -> None:
         t = Text(no_wrap=True, overflow="ellipsis")
         if self.state == "working":
             t.append(f" {m.spinner_glyph(self.tick)} ", style=f"bold {m.ACCENT}")
             t.append(f"{m.verb(self.verb_seed)}… ", style=m.TEXT)
-            t.append(f"({m.elapsed(self.started)}", style=m.DIM)
+            t.append(f"({self._clock()}", style=m.DIM)
         elif self.state == "blocked":
             t.append(" ⏸ ", style=f"bold {m.AMBER}")
             t.append("waiting on you ", style=f"bold {m.AMBER}")
-            t.append(f"({m.elapsed(self.started)}", style=m.DIM)
+            t.append(f"({self._clock()}", style=m.DIM)
         elif self.state == "done":
             ok = self.note.startswith("green")
             t.append(f" {'✔' if ok else '■'} ", style=f"bold {m.GREEN if ok else m.MUTED}")
             t.append(f"{self.note} ", style=m.GREEN if ok else m.MUTED)
-            t.append(f"({m.elapsed(self.started)}", style=m.DIM)
+            t.append(f"({self._clock()}", style=m.DIM)
         else:
             t.append(f" {m.spinner_glyph(self.tick // 3)} ", style=m.DIM)
             t.append(f"{self.note} ", style=m.DIM)
-            t.append("(—", style=m.DIM)
+            t.append(f"({self._clock() if self.work_total else '—'}", style=m.DIM)
 
         b = self.budget
         if b:
@@ -502,6 +526,7 @@ class RatchetApp(App):
         self._resize_banner()
         self._fit()
         self._idle_splash()
+        self.call_after_refresh(self._warn_about_the_directory)
         self.call_after_refresh(self._first_run_connect)
         self.set_interval(0.2, self.drain)
         self.set_interval(0.12, self.animate_status)
@@ -538,6 +563,19 @@ class RatchetApp(App):
         if compact != banner.compact:
             banner.compact = compact
             banner.draw()
+
+    def _warn_about_the_directory(self) -> None:
+        """`ratchet` in $HOME cannot commit and will feed the model your whole home
+        directory. Say so before the first prompt, not after it fails."""
+        from ..gitstate import is_repo
+
+        log = self.query_one("#activity", RichLog)
+        if self.repo == Path.home():
+            self._step(log, "heads up", "this is your home directory", m.AMBER)
+            self._note(log, "make a project folder first — `mkdir mysite && cd mysite && git init && ratchet`", m.AMBER)
+        elif not is_repo(self.repo):
+            self._step(log, "heads up", "not a git repository", m.AMBER)
+            self._note(log, "run `git init` here so each turn becomes a commit you can /undo", m.AMBER)
 
     def _first_run_connect(self) -> None:
         """Nothing connected means the first thing on screen is the connect picker:
@@ -601,6 +639,9 @@ class RatchetApp(App):
                 status.started = time.time()
             if k != "run.done" and status.state != "blocked":
                 status.state = "working"
+                status.begin_work()
+            if k == "run.done":
+                status.end_work()
 
             if k == "run.started":
                 b = self.query_one(Banner)
@@ -782,8 +823,8 @@ class RatchetApp(App):
         self.bus = Bus(self.bus.path)   # a fresh reader: re-drains from byte zero
         self.seen_any = False
         status = self.query_one(StatusLine)
+        status.end_work()
         status.state = "idle"
-        status.started = time.time()
         status.note = "restarted"
         status.draw()
         log.clear()
@@ -801,6 +842,9 @@ class RatchetApp(App):
             if self._heartbeat is not None:
                 self._heartbeat.stop()
                 self._heartbeat = None
+            status.end_work()
+            status.state = "done" if status.state == "working" else status.state
+            status.note = f"idle · {m.duration(status.work_seconds)} of work this session"
             status.draw()
             return
         secs = int(time.time() - self._turn_started)
@@ -974,6 +1018,18 @@ class RatchetApp(App):
                 state = "ok" if t.ok else (t.error or "cancelled")
                 self._note(log, f"{t.intent or t.prompt[:60]} · {len(t.files)} file(s) · "
                                 f"commit {t.commit or '—'} · {state}")
+        elif cmd == "/export":
+            from .. import report
+
+            status = self.query_one(StatusLine)
+            path = report.write(self.repo, turns=session.turns, bus_path=self.bus.path,
+                                work_seconds=status.work_seconds)
+            self._step(log, "export", path.name, m.ACCENT)
+            ok = [t for t in session.turns if t.ok]
+            files = {f for t in session.turns for f in t.files}
+            self._note(log, f"{len(session.turns)} turn(s), {len(ok)} landed · {len(files)} file(s) · "
+                            f"{m.duration(status.work_seconds)} of work", m.GREEN)
+            self._note(log, str(path))
         elif cmd == "/restart":
             self._restart()
         elif cmd == "/debug":
@@ -1048,6 +1104,7 @@ class RatchetApp(App):
             self._note(log, "a turn is already running — Esc to interrupt it first", m.AMBER)
             return
         self._turn_started = time.time()
+        self.query_one(StatusLine).begin_work()
         if self._heartbeat is None:
             # "is it dead or just slow?" is the question that made this whole
             # session unusable; answer it once a second, on screen

@@ -71,14 +71,26 @@ def enabled() -> bool:
 
 class _Handler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
-        log(record.levelname, f"{record.name}: {record.getMessage()}")
+        msg = record.getMessage()
+        # our own POST/← lines already say model, cap, status and timing
+        if record.name == "httpx" and msg.startswith("HTTP Request:"):
+            return
+        log(record.levelname, f"{record.name}: {msg}")
 
 
 def install_logging() -> None:
-    """Route httpx's own logging (connect, timeout, retry) into the panel."""
+    """Route library logging into the panel, at levels that stay readable.
+
+    httpcore narrates every socket state change ("request=<Request [b'POST']>"
+    fourteen times a call), which buried the lines that matter. It is kept for
+    warnings and errors -- where a connection problem actually shows up -- while
+    httpx's one-line-per-request stays visible.
+    """
     h = _Handler()
-    for name in ("httpx", "httpcore", "ratchet"):
+    levels = {"httpx": logging.INFO, "httpcore": logging.WARNING, "ratchet": logging.DEBUG}
+    for name, level in levels.items():
         lg = logging.getLogger(name)
-        lg.setLevel(logging.DEBUG if enabled() else logging.INFO)
+        lg.setLevel(level)
+        lg.propagate = False
         if not any(isinstance(x, _Handler) for x in lg.handlers):
             lg.addHandler(h)

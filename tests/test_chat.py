@@ -212,7 +212,7 @@ def test_palette_autocompletes_commands_and_models():
     assert [r.label for r in rows_for("/mo")] == ["/model"]
     assert len(rows_for("/")) == len(COMMANDS)
     models = rows_for("/model ")
-    assert len(models) == 15 and all(r.kind == "model" for r in models)  # +trueforge, +truefoundry
+    assert len(models) == 19 and all(r.kind == "model" for r in models)  # incl. claude-code, trueforge, truefoundry
     kimi = [r.label for r in rows_for("/model kimi")]
     assert kimi and all("kimi" in label for label in kimi)
     providers = [r.label for r in rows_for("/connect")]
@@ -528,3 +528,170 @@ def test_sources_prefer_the_file_the_prompt_names(repo):
     assert "THE PAGE YOU ASKED ABOUT" in sources
     # within the attached sources, the named file leads
     assert sources.index("index.html") < sources.index("AAA_first")
+
+
+# ------------------------------------------------------------------ report --
+
+
+def test_export_reports_what_the_session_actually_did(repo):
+    from ratchet import report
+    from ratchet.providers import ChatBackend
+
+    session = ChatSession(repo, backend=ChatBackend("demo", "demo"))
+    _run(session, "make a page for my cafe")
+    _run(session, "add a menu")
+
+    text = report.build(repo, turns=session.turns, work_seconds=42.0)
+    assert "# ratchet session" in text
+    assert "index.html" in text
+    assert "42s" in text
+    rows = [ln for ln in text.splitlines() if ln.startswith("| 1 |") or ln.startswith("| 2 |")]
+    assert len(rows) == 2 and "cafe" in rows[0] and "menu" in rows[1]
+    assert session.turns[0].commit in text          # the commit trail
+    assert "git revert" in text                     # says how to undo it
+
+    path = report.write(repo, turns=session.turns, work_seconds=1.0)
+    assert path.exists() and path.name.startswith("session-")
+
+
+def test_export_redacts_secrets_and_survives_a_failed_turn(repo):
+    from ratchet import report
+
+    class Broken:
+        provider, model = "b", "b"
+
+        def complete(self, prompt, **kw):
+            raise RuntimeError("nope")
+
+    session = ChatSession(repo, backend=Broken())
+    _run(session, "here is my key gsk_abcdef1234567890abcdef build a site")
+    text = report.build(repo, turns=session.turns)
+    assert "gsk_abcdef" not in text
+    assert "failed" in text or "API key" in text
+    assert "gsk_abcdef" not in report.to_json(repo, turns=session.turns)
+
+
+def test_the_clock_counts_work_not_session_age():
+    """The reported bug: a console open for an hour claimed an hour of work on a
+    one-second turn. The clock must only run while something is running."""
+    import time as _t
+
+    from ratchet.tui.app import StatusLine
+
+    s = StatusLine()
+    s.started = _t.time() - 3600          # console has been open an hour
+    assert s.work_seconds == 0.0          # ...but nothing has been done
+    assert s._clock() == "0s"
+
+    s.begin_work()
+    _t.sleep(0.05)
+    s.end_work()
+    banked = s.work_seconds
+    assert 0.0 < banked < 5.0             # a fraction of a second, not an hour
+
+    _t.sleep(0.05)
+    assert s.work_seconds == banked       # idle time does not accrue
+
+
+def test_a_model_that_rejects_max_tokens_is_retried_with_the_new_name(monkeypatch):
+    """OpenAI's newer models 400 on `max_tokens` and name `max_completion_tokens`.
+    Rather than track model families, the client learns from the rejection and
+    retries once -- and remembers, so the next call gets it right first time."""
+    import ratchet.providers as prov
+
+    calls = []
+
+    class Resp:
+        def __init__(self, code, payload):
+            self.status_code, self._p = code, payload
+            self.text = str(payload)
+            self.request = type("R", (), {"url": type("U", (), {"host": "api.openai.com"})()})()
+
+        def json(self):
+            return self._p
+
+    def fake_post(url, **kw):
+        calls.append(dict(kw["json"]))  # snapshot: the retry mutates it in place
+        if "max_tokens" in kw["json"]:
+            return Resp(400, {"error": {"message": "Unsupported parameter: 'max_tokens' is not supported "
+                                                   "with this model. Use 'max_completion_tokens' instead.",
+                                        "type": "invalid_request_error"}})
+        return Resp(200, {"choices": [{"message": {"content": "done"}}]})
+
+    monkeypatch.setattr(prov.httpx, "post", fake_post)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    prov._TOKEN_PARAM.clear()
+
+    b = prov.ChatBackend("openai", "gpt-5.2")
+    assert b.complete("hi") == "done"
+    assert "max_tokens" in calls[0] and "max_completion_tokens" in calls[1]
+
+    calls.clear()
+    assert b.complete("again") == "done"
+    assert "max_completion_tokens" in calls[0]  # learned; no wasted round trip
+
+
+def test_provider_errors_read_as_sentences_not_json(monkeypatch):
+    import ratchet.providers as prov
+
+    class Resp:
+        status_code = 401
+        text = "{}"
+        request = type("R", (), {"url": type("U", (), {"host": "api.openai.com"})()})()
+
+        def json(self):
+            return {"error": {"message": "Incorrect API key provided", "code": "invalid_api_key"}}
+
+    monkeypatch.setattr(prov.httpx, "post", lambda url, **kw: Resp())
+    monkeypatch.setenv("OPENAI_API_KEY", "bad")
+    prov._TOKEN_PARAM.clear()
+    try:
+        prov.ChatBackend("openai", "gpt-4o").complete("hi")
+        raise AssertionError("should have raised")
+    except prov.ChatProviderError as e:
+        assert "Incorrect API key provided" in str(e)
+        assert "/connect" in str(e)      # tells you what to do
+        assert "{" not in str(e)         # not a JSON dump
+
+
+def test_a_turn_that_writes_nothing_is_not_a_success(repo):
+    """The reported failure: gpt-5.2 replied with 10k characters, the diff did not
+    apply to a directory it could not see, and the session report said "1 turn,
+    ok, 0 files". A turn that produced nothing is a failed turn."""
+
+    class DiffAgainstNothing:
+        provider, model = "d", "d"
+
+        def complete(self, prompt, **kw):
+            return ("intent: restyle the site\n```diff\n"
+                    "--- a/does_not_exist.html\n+++ b/does_not_exist.html\n"
+                    "@@ -1,1 +1,1 @@\n-old\n+new\n```\n")
+
+    turn, lines = _run(ChatSession(repo, backend=DiffAgainstNothing()), "make a website")
+    assert not turn.ok
+    assert "did not apply" in turn.error and "does_not_exist.html" in turn.error
+    assert any(kind == "error" for kind, _t in lines)
+
+
+def test_prose_only_reply_is_a_failure_not_an_empty_success(repo):
+    class AllTalk:
+        provider, model = "t", "t"
+
+        def complete(self, prompt, **kw):
+            return "intent: plan it out\n\nFirst we should discuss the architecture..."
+
+    turn, _ = _run(ChatSession(repo, backend=AllTalk()), "make a website")
+    assert not turn.ok
+
+
+def test_claude_code_provider_is_available_without_a_key(monkeypatch):
+    """No /connect step: if the CLI is installed, the user is already signed in."""
+    import shutil
+
+    import ratchet.providers as prov
+
+    monkeypatch.setattr(prov.shutil if hasattr(prov, "shutil") else shutil, "which",
+                        lambda name: "/usr/local/bin/claude" if name == "claude" else None)
+    assert prov.validate_key("claude-code", "") .startswith("connected")
+    assert "claude-code" in prov.MODEL_CATALOG
+    assert prov.PROVIDERS["claude-code"][1] == ""   # no key env at all

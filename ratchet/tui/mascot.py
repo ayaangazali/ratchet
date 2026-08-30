@@ -103,7 +103,7 @@ __all__ = [
     "ACCENT", "ACCENT_DIM", "AMBER", "BG", "BLUE", "BORDER", "FIN", "FIN_SMALL",
     "FIN_TINY", "COLOURS", "DIM", "GREEN", "MUTED", "PALETTE", "PANEL", "PANEL_WARM", "RED",
     "SPINNER", "Sprite", "TEXT", "VERBS", "VIOLET", "beside", "elapsed", "render",
-    "render_lines", "spinner_glyph", "to_svg", "verb",
+    "duration", "render_lines", "spinner_glyph", "to_svg", "verb",
 ]
 
 
@@ -116,7 +116,13 @@ def verb(seed: int) -> str:
 
 
 def elapsed(since: float) -> str:
-    s = max(0, int(time.time() - since))
+    return duration(time.time() - since)
+
+
+def duration(seconds: float) -> str:
+    """A span, formatted. Separate from `elapsed` because the status clock counts
+    accumulated work time, which is not "time since a timestamp"."""
+    s = max(0, int(seconds))
     return f"{s}s" if s < 60 else f"{s // 60}m{s % 60:02d}s"
 
 

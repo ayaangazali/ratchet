@@ -172,14 +172,26 @@ class ChatSession:
             emit("step", f"wrote {rel} ({len(content.splitlines())} lines)")
 
         if diff and not self.cancel.is_set():
+            from .verifier.cheat import parse_unified_diff
+
+            targets = [f.path for f in parse_unified_diff(diff.group(1)) if f.path]
             applied = self._apply(diff.group(1))
             if applied:
-                from .verifier.cheat import parse_unified_diff
-
-                turn.files.extend(f.path for f in parse_unified_diff(diff.group(1)) if f.path)
+                turn.files.extend(dict.fromkeys(targets))
                 emit("step", "applied diff")
             else:
-                emit("note", "diff did not apply; skipped")
+                # a diff against files that are not there (the model guessed at a
+                # repo it could not see) used to end as a silent success: no files,
+                # no commit, outcome "ok". That is the worst possible report.
+                named = ", ".join(dict.fromkeys(targets)) or "the named files"
+                turn.error = f"the model's diff did not apply to {named} — nothing was written"
+                emit("error", turn.error)
+                return self._finish(turn, t0)
+
+        if not turn.files and not turn.cancelled:
+            turn.error = "the model replied but produced no file the working directory could take"
+            emit("error", turn.error)
+            return self._finish(turn, t0)
 
         return self._commit_and_finish(turn, t0)
 

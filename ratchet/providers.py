@@ -31,6 +31,9 @@ PROVIDERS: dict[str, tuple[str | None, str, str]] = {
     "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-5.2"),
     "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "llama-3.3-70b-versatile"),
     "kimi": ("https://api.moonshot.ai/v1", "MOONSHOT_API_KEY", "kimi-k2-0905-preview"),
+    # the Claude Code CLI you are already signed into: no API key, no wire call --
+    # ratchet shells out to `claude -p` and grades what comes back like any other
+    "claude-code": (None, "", "default"),
     "trueforge": (None, "", "auto"),  # the local agent harness; TRUEFORGE_BASE_URL, no key
     # the TrueFoundry AI Gateway (cloud): OpenAI-compatible, key from
     # https://shryukg.truefoundry.cloud/gateway-onboarding — base overridable via TFY_BASE_URL
@@ -61,6 +64,12 @@ MODEL_CATALOG: dict[str, list[tuple[str, str]]] = {
         ("kimi-k2-0905-preview", "k2 flagship"),
         ("kimi-k2-turbo-preview", "k2, faster"),
         ("moonshot-v1-32k", "long context"),
+    ],
+    "claude-code": [
+        ("default", "your signed-in Claude Code — no API key needed"),
+        ("opus", "deepest reasoning"),
+        ("sonnet", "fast + sharp"),
+        ("haiku", "quick edits"),
     ],
     "trueforge": [("auto", "whatever the harness routes — needs TrueForge on :8790")],
     "truefoundry": [("auto", "first model on the gateway — /connect truefoundry with your TFY key")],
@@ -109,6 +118,12 @@ def validate_key(provider: str, key: str, *, timeout: float = 20.0) -> str:
     makes /connect honest -- a saved key that never worked is worse than none."""
     if provider == "demo":
         return "demo needs no key"
+    if provider == "claude-code":
+        import shutil
+
+        if shutil.which("claude"):
+            return "connected — using your signed-in Claude Code"
+        raise ChatProviderError("the `claude` CLI is not on PATH; install Claude Code first")
     if provider == "trueforge":
         if trueforge_alive(ttl=0):
             return "connected — the harness is answering"
@@ -186,7 +201,11 @@ def connected_providers() -> dict[str, bool]:
     load_saved_keys()
     out = {}
     for name, (_b, key_env, _m) in PROVIDERS.items():
-        if name == "trueforge":
+        if name == "claude-code":
+            import shutil
+
+            out[name] = bool(shutil.which("claude"))
+        elif name == "trueforge":
             out[name] = trueforge_alive()
         else:
             out[name] = not key_env or bool(os.environ.get(key_env))
@@ -238,6 +257,8 @@ class ChatBackend:
     def _complete(self, prompt: str, *, max_tokens: int, timeout: float) -> str:
         if self.provider == "demo":
             return _demo_reply(prompt)
+        if self.provider == "claude-code":
+            return self._claude_code_complete(prompt, timeout=timeout)
         if self.provider == "trueforge":
             return self._trueforge_complete(prompt, max_tokens=max_tokens)
         base, key_env, _default = PROVIDERS[self.provider]
@@ -274,21 +295,70 @@ class ChatBackend:
             if not model:
                 raise ChatProviderError(f"{self.provider} returned a model with no id")
             self.model = model  # pin it, so the activity line names something real
-        debuglog.log("info", f"POST {base}/chat/completions model={model} timeout={timeout}s")
-        r = httpx.post(
-            f"{base}/chat/completions",
-            headers={"Authorization": f"Bearer {key}"},
-            json={"model": model, "max_tokens": max_tokens,
-                  "messages": [{"role": "user", "content": prompt}]},
-            timeout=timeout,
-        )
-        debuglog.log("info", f"← {r.status_code} in {_elapsed(r):.1f}s")
+        body: dict[str, object] = {"model": model, "messages": [{"role": "user", "content": prompt}]}
+        # OpenAI renamed the cap for its newer models (gpt-5.x, o-series) and
+        # rejects the old name outright. Rather than keep a model list that rots,
+        # send what this model is known to want, and learn from a rejection.
+        body[_TOKEN_PARAM.get(model, "max_tokens")] = max_tokens
+
+        for attempt in (1, 2):
+            debuglog.log("info", f"POST {base}/chat/completions model={model} "
+                                 f"cap={next(k for k in body if k.startswith('max'))} timeout={timeout}s")
+            r = httpx.post(
+                f"{base}/chat/completions",
+                headers={"Authorization": f"Bearer {key}"},
+                json=body,
+                timeout=timeout,
+            )
+            debuglog.log("info", f"← {r.status_code} in {_elapsed(r):.1f}s")
+            swapped = _swap_token_param(r, body, model)
+            if swapped and attempt == 1:
+                debuglog.log("warn", f"{model} wants max_completion_tokens; retrying")
+                continue
+            break
+
         _raise_for(r)
         try:
             return r.json()["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, ValueError) as e:
             raise ChatProviderError(f"{self.provider} returned an unexpected payload: {e}") from e
 
+
+    def _claude_code_complete(self, prompt: str, *, timeout: float) -> str:
+        """Ask the local Claude Code CLI, headless.
+
+        The point is that there is nothing to connect: if `claude` runs on this
+        machine, the user is already authenticated, and ratchet borrows that
+        session. Tools are disallowed -- Claude Code is asked for the same fenced
+        answer every other provider gives, so the reply still goes through the
+        cheat gate and lands as one reviewable commit rather than editing the
+        working tree behind ratchet's back.
+        """
+        import shutil
+        import subprocess
+
+        from . import debuglog
+
+        exe = shutil.which("claude")
+        if not exe:
+            raise ChatProviderError(
+                "the `claude` CLI is not on PATH — install Claude Code, or /model something else"
+            )
+        argv = [exe, "-p", prompt, "--output-format", "text", "--disallowed-tools",
+                "Edit,Write,NotebookEdit,Bash"]
+        if self.model and self.model != "default":
+            argv += ["--model", self.model]
+        debuglog.log("info", f"exec claude -p (model={self.model}) timeout={timeout}s")
+        try:
+            r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            raise ChatProviderError(f"claude -p timed out after {timeout}s") from e
+        except OSError as e:
+            raise ChatProviderError(f"could not run claude: {e}") from e
+        debuglog.log("info", f"claude exited {r.returncode} · {len(r.stdout)} chars")
+        if r.returncode != 0:
+            raise ChatProviderError(f"claude exited {r.returncode}: {(r.stderr or r.stdout).strip()[:200]}")
+        return r.stdout
 
     def _trueforge_complete(self, prompt: str, *, max_tokens: int) -> str:
         """Route the turn through the TrueForge agent harness -- the same machinery
@@ -320,6 +390,33 @@ class ChatBackend:
         return text
 
 
+#: model -> which token-cap parameter it accepts. Learned at runtime from the
+#: provider's own rejection, so a new model never needs a code change.
+_TOKEN_PARAM: dict[str, str] = {}
+
+
+def _swap_token_param(r: httpx.Response, body: dict[str, object], model: str) -> bool:
+    """True when the provider rejected the token-cap parameter and `body` has been
+    rewritten to use the other spelling.
+
+    OpenAI's newer models answer `max_tokens` with a 400 naming
+    `max_completion_tokens` (and vice versa on older deployments). One retry with
+    the other name is cheaper and more durable than tracking model families.
+    """
+    if r.status_code != 400:
+        return False
+    try:
+        message = json.dumps(r.json()).lower()
+    except ValueError:
+        message = r.text.lower()
+    for wrong, right in (("max_tokens", "max_completion_tokens"), ("max_completion_tokens", "max_tokens")):
+        if wrong in body and right in message and "unsupported" in message:
+            body[right] = body.pop(wrong)
+            _TOKEN_PARAM[model] = right
+            return True
+    return False
+
+
 def _elapsed(r) -> float:
     """Response timing, defensively: the debug channel never breaks the call."""
     try:
@@ -336,12 +433,28 @@ def _base_for(provider: str, table_base: str | None) -> str | None:
 
 
 def _raise_for(r: httpx.Response) -> None:
-    if r.status_code >= 400:
-        try:
-            detail = json.dumps(r.json())[:300]
-        except Exception:
-            detail = r.text[:300]
-        raise ChatProviderError(f"{r.request.url.host} -> {r.status_code}: {detail}")
+    """Raise the provider's own sentence, not its JSON.
+
+    Every provider buries the useful line in a different shape; a wall of escaped
+    JSON in the activity pane tells a user nothing they can act on.
+    """
+    if r.status_code < 400:
+        return
+    detail = ""
+    try:
+        payload = r.json()
+        err = payload.get("error", payload) if isinstance(payload, dict) else {}
+        if isinstance(err, dict):
+            detail = str(err.get("message") or err.get("detail") or "")
+        elif isinstance(err, str):
+            detail = err
+    except ValueError:
+        pass
+    if not detail:
+        detail = r.text[:200]
+    hint = {401: "  (check the key with /connect)", 404: "  (is that model available on this account?)",
+            429: "  (rate limited — wait, or /model something else)"}.get(r.status_code, "")
+    raise ChatProviderError(f"{r.request.url.host} {r.status_code}: {detail.strip()[:240]}{hint}")
 
 
 def _demo_reply(prompt: str) -> str:
