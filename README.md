@@ -239,14 +239,19 @@ difference is whether a bad step is allowed to persist.
 
 ```
 bug                            mode             solved   calls   cheats stuck
-slugify: accents + truncation  linear          67% ±19      3.5              4
+slugify: accents + truncation  linear          50% ±20      3.5              3
 slugify: accents + truncation  search         100% ±0       3.8              0
 slugify: accents only          linear          50% ±20      3.2              4
 slugify: accents only          search         100% ±0       2.5              0
 
-overall   linear 58% ±14   ·   search 100% ±0
-cheating patches that persisted   linear 8   ·   search 0
+overall   linear 50% ±14   ·   search 100% ±0
+cheating patches that persisted   linear 7   ·   search 0
 ```
+
+"Persisted" means still in the trial's final state: linear has no rollback, so every
+applied cheat persists; under search nothing is inherited unless the verifier passed
+it, so the zero is the mechanism doing its job — and a nonzero there would mean the
+gauntlet itself was defeated, which is why the suite treats it as a hard failure.
 
 The generator is simulated and the report says so: this measures the machinery —
 rollback and pruning — not a model. That is the claim being made.
