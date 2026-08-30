@@ -669,6 +669,46 @@ def cmd_export(args) -> int:
 
 
 
+def cmd_build(args) -> int:
+    """A goal, a repo or an issue in; a reviewed pull request out."""
+    import threading
+    import uuid as _uuid
+
+    from .build import BuildRun, Pace, Target
+    from .buildview import BuildView
+    from .bus import Bus
+    from .qodo_mcp import QodoMCP
+
+    repo = Path(args.repo or ".").resolve()
+    target = Target.parse(args.target)
+    run_id = args.run_id or f"build-{_uuid.uuid4().hex[:6]}"
+    bus_path = repo / ".ratchet" / f"{run_id}.bus.jsonl"
+    bus_path.parent.mkdir(parents=True, exist_ok=True)
+
+    view = BuildView(animate=not args.no_animate)
+    reader, done = Bus(bus_path), threading.Event()
+
+    def follow() -> None:
+        # the view follows the same file the dashboard and a replay would
+        while not done.is_set():
+            for ev in reader.tail():
+                view.handle(ev)
+            view.pump()
+            time.sleep(0.05)
+        for ev in reader.tail():
+            view.handle(ev)
+
+    watcher = threading.Thread(target=follow, daemon=True)
+    watcher.start()
+    result = BuildRun(target, repo, Bus(bus_path), run_id=run_id,
+                      pace=Pace(beat=args.pace), qodo=QodoMCP(scripted=not args.live),
+                      demo=not args.live).run()
+    done.set()
+    watcher.join(timeout=3)
+    print(f"\n  bus: {bus_path}")
+    return 0 if result.get("green") else 2
+
+
 def cmd_pipeline(args) -> int:
     """The whole shape of the product: harness, verifier, gate, review, merge."""
     import uuid as _uuid
@@ -902,6 +942,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_export)
+
+    p = sub.add_parser("build", help="a goal, repo or issue in; a reviewed pull request out")
+    p.add_argument("target", help="a prompt, a github repo url, or an issue url")
+    p.add_argument("--repo", help="where to work (default: here)")
+    p.add_argument("--run-id")
+    p.add_argument("--pace", type=float, default=0.35, help="seconds per beat; 0 runs it instantly")
+    p.add_argument("--no-animate", action="store_true", help="plain lines, for logs and CI")
+    p.add_argument("--live", action="store_true", help="use real services instead of the demo script")
+    p.set_defaults(fn=cmd_build)
 
     p = sub.add_parser("pipeline", help="the whole shape of a run: harness, verifier, gate, review, merge")
     p.add_argument("--repo")

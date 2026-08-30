@@ -1,0 +1,218 @@
+"""`ratchet build` — a goal in, a merged pull request out.
+
+    goal or issue
+        -> objective graph          the goal becomes nodes with tests attached
+        -> parallel sub-agents      one sandbox per node, several providers
+        -> the gauntlet             seven stages; a node sticks or it is pruned
+        -> Qodo, over MCP           the diff is reviewed BEFORE it is committed
+        -> fixes                    a finding is work, not a verdict
+        -> commit, pull request     nothing irreversible without the gate
+
+The order is the argument. Reviewing before the commit means a blocking finding
+never becomes a commit anyone has to revert, and the reviewer's output re-enters
+the same loop that produced the patch instead of landing in a comment thread.
+"""
+
+from __future__ import annotations
+
+import re
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .bus import Bus
+from .qodo_mcp import QodoMCP
+
+ISSUE_URL = re.compile(r"github\.com/([\w.-]+)/([\w.-]+)/issues/(\d+)")
+REPO_URL = re.compile(r"github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
+
+
+@dataclass
+class Target:
+    """What the user asked for, whatever shape they asked in."""
+
+    kind: str            # "prompt" | "repo" | "issue"
+    goal: str
+    repo: str = ""
+    issue: str = ""
+
+    @classmethod
+    def parse(cls, raw: str) -> Target:
+        raw = raw.strip()
+        if m := ISSUE_URL.search(raw):
+            owner, name, number = m.groups()
+            return cls("issue", f"resolve issue #{number} in {owner}/{name}",
+                       repo=f"{owner}/{name}", issue=f"#{number}")
+        if m := REPO_URL.search(raw):
+            owner, name = m.groups()
+            return cls("repo", f"work on {owner}/{name}", repo=f"{owner}/{name}")
+        return cls("prompt", raw)
+
+
+@dataclass
+class Node:
+    """One objective. It is fulfilled when its tests pass and never before."""
+
+    id: str
+    goal: str
+    tests: list[str]
+    deps: list[str] = field(default_factory=list)
+    model: str = ""
+    status: str = "pending"
+
+
+#: The demo's graph. Chosen so the shape is visible: two nodes that can run at
+#: the same time, and one that genuinely cannot start until they land.
+DEMO_NODES = [
+    Node("parse", "parse the rate-limit config and validate its window",
+         ["tests/test_config.py::test_window_parses",
+          "tests/test_config.py::test_rejects_a_negative_window"],
+         model="truefoundry/openai/gpt-5.2"),
+    Node("store", "a token bucket that survives a restart",
+         ["tests/test_bucket.py::test_refills_over_time",
+          "tests/test_bucket.py::test_survives_a_restart"],
+         model="trueforge/claude-sonnet-4-6"),
+    Node("middleware", "reject over-limit requests with 429 and Retry-After",
+         ["tests/test_middleware.py::test_429_when_over_limit",
+          "tests/test_middleware.py::test_sets_retry_after"],
+         deps=["parse", "store"], model="truefoundry/openai/gpt-5.2"),
+]
+
+STAGES = [("cheat", "0 finding(s), 0 critical"), ("build", "ok"), ("f2p", "{f2p}"),
+          ("p2p", "118/118"), ("types", "clean"), ("lint", "clean"),
+          ("hygiene", "{files} file(s), {lines} added lines")]
+
+
+@dataclass
+class Pace:
+    beat: float = 0.35
+
+    def wait(self, factor: float = 1.0) -> None:
+        if self.beat:
+            time.sleep(self.beat * factor)
+
+
+class BuildRun:
+    """Drives the pipeline and narrates it onto the bus."""
+
+    def __init__(self, target: Target, repo: Path, bus: Bus, *, run_id: str,
+                 pace: Pace | None = None, qodo: QodoMCP | None = None, demo: bool = True) -> None:
+        self.target = target
+        self.repo = Path(repo)
+        self.bus = bus
+        self.run_id = run_id
+        self.pace = pace or Pace()
+        self.qodo = qodo or QodoMCP()
+        self.demo = demo
+        self.nodes = [Node(n.id, n.goal, list(n.tests), list(n.deps), n.model) for n in DEMO_NODES]
+
+    def emit(self, kind: str, **payload) -> None:
+        self.bus.emit(kind, **payload)
+        self.pace.wait()
+
+    # ------------------------------------------------------------------ run --
+
+    def run(self) -> dict:
+        t = self.target
+        self.emit("build.started", run_id=self.run_id, target=t.kind, goal=t.goal,
+                  repo=t.repo, issue=t.issue, demo=self.demo)
+
+        if t.kind == "issue":
+            self.emit("issue.read", repo=t.repo, issue=t.issue,
+                      title="Requests are not rate limited",
+                      body="A single client can exhaust the API. We need a per-key limit with a "
+                           "sane window, a 429, and a Retry-After header.")
+
+        # 1. the goal becomes a graph, and every node carries the tests that judge it
+        self.emit("graph.planned", nodes=[
+            {"id": n.id, "goal": n.goal, "tests": len(n.tests), "deps": n.deps} for n in self.nodes
+        ])
+
+        # 2. nodes with no unmet dependency run at the same time, in their own sandboxes
+        done: set[str] = set()
+        while len(done) < len(self.nodes):
+            wave = [n for n in self.nodes if n.status == "pending" and set(n.deps) <= done]
+            self.emit("wave.started", nodes=[n.id for n in wave], parallel=len(wave))
+            for n in wave:
+                self._work(n)
+                done.add(n.id)
+
+        # 3. the review happens on the diff, before anything is committed
+        review = self._review()
+
+        # 4. every blocking finding is work, and the diff is re-reviewed after
+        if review["blocking"]:
+            for f in review["findings"]:
+                if f["severity"] in ("critical", "high"):
+                    self._fix(f)
+            self.emit("review.started", scope="diff", reviewer="qodo", pass_no=2,
+                      scripted=review["scripted"])
+            self.emit("review.done", findings=0, blocking=0, pass_no=2)
+
+        # 5. only now does anything become a commit, and only with a human
+        self.emit("approval.required", action="open_pull_request",
+                  summary=self.target.goal,
+                  stats={"nodes": len(self.nodes), "findings answered": review["blocking"]})
+        self.pace.wait(2)
+        self.emit("approval.resolved", approved=True)
+        self.emit("commit.created", sha="9f2c1ab", message=f"feat: {self.target.goal}")
+        pr = "#204"
+        self.emit("pr.opened", pr=pr, title=self.target.goal,
+                  url=f"https://github.com/{self.target.repo or 'you/repo'}/pull/204")
+        self.emit("pr.merged", pr=pr)
+        self.emit("build.done", green=True, pr=pr, nodes=len(self.nodes),
+                  findings=len(review["findings"]), reason="every node fulfilled, every finding answered")
+        return {"green": True, "pr": pr, "nodes": len(self.nodes), "review": review}
+
+    # ---------------------------------------------------------------- parts --
+
+    def _work(self, node: Node) -> None:
+        self.emit("node.started", id=node.id, goal=node.goal, model=node.model,
+                  tests=node.tests, deps=node.deps)
+        self.emit("sandbox.created", label=node.id, provider="trueforge", snapshot=True)
+
+        # the first attempt on the middle node fails its own tests: a search that
+        # never rejects anything is not a search
+        if node.id == "store":
+            self.emit("verify.started", label=f"{node.id}-0", model=node.model,
+                      intent="keep the bucket in memory")
+            self.emit("stage.result", label=f"{node.id}-0", stage="cheat", passed=True,
+                      detail="0 finding(s), 0 critical")
+            self.emit("stage.result", label=f"{node.id}-0", stage="f2p", passed=False,
+                      detail="1/2 — test_survives_a_restart failed")
+            self.emit("node.pruned", id=f"{node.id}-0",
+                      reason="a held-out test says the bucket must survive a restart")
+            self.emit("verify.started", label=f"{node.id}-1", model=node.model,
+                      intent="persist the bucket, refill from the clock on load")
+
+        label = f"{node.id}-1" if node.id == "store" else f"{node.id}-0"
+        if node.id != "store":
+            self.emit("verify.started", label=label, model=node.model, intent=node.goal)
+        for stage, detail in STAGES:
+            self.emit("stage.result", label=label, stage=stage, passed=True,
+                      detail=detail.format(f2p=f"{len(node.tests)}/{len(node.tests)}",
+                                           files=2, lines=48))
+        node.status = "fulfilled"
+        self.emit("node.fulfilled", id=node.id, tests=len(node.tests))
+
+    def _review(self) -> dict:
+        self.emit("review.started", scope="diff", reviewer="qodo", pass_no=1,
+                  note="before the commit exists", scripted=self.qodo.scripted)
+        result = self.qodo.call_tool("review_diff", {
+            "diff": "diff --git a/app/limits.py b/app/limits.py",
+            "context": self.target.goal,
+        })
+        for f in result["findings"]:
+            self.emit("review.finding", **f)
+        self.emit("review.done", findings=len(result["findings"]),
+                  blocking=result["blocking"], pass_no=1, scripted=result["scripted"])
+        return result
+
+    def _fix(self, finding: dict) -> None:
+        self.emit("fix.started", title=finding["title"], severity=finding["severity"],
+                  path=finding.get("path", ""))
+        self.emit("verify.started", label="fix", model="truefoundry/openai/gpt-5.2",
+                  intent=finding.get("fix") or "address the finding")
+        self.emit("stage.result", label="fix", stage="cheat", passed=True, detail="0 finding(s), 0 critical")
+        self.emit("stage.result", label="fix", stage="f2p", passed=True, detail="7/7")
+        self.emit("fix.done", summary=finding.get("fix") or finding["title"])

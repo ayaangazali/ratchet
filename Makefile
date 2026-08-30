@@ -1,4 +1,4 @@
-.PHONY: dev test lint fmt demo pipeline redteam evals bench run run-offline run-graph proof docs console dashboard mascot replay audit tree clean image fixture
+.PHONY: dev test lint fmt demo build pipeline redteam evals bench run run-offline run-graph proof docs console dashboard mascot replay audit tree clean image fixture
 
 dev:
 	pip install -e ".[dev]"
@@ -34,6 +34,10 @@ run-offline:
 # The whole shape of the product in a minute: harness routes it, the verifier
 # rejects one attempt and accepts another, a human clears the gate, Qodo reviews
 # the pull request, every finding becomes work, it merges.
+# A goal, a repo or an issue in; a reviewed pull request out. The one to show.
+build:
+	python -m ratchet.cli build "https://github.com/acme/api/issues/42"
+
 pipeline:
 	python -m ratchet.cli pipeline
 
