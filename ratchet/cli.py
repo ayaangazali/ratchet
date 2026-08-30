@@ -32,7 +32,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from .config import Settings, load_task
+from .config import Settings, load_task, resolve_data_path
 from .sandbox import WorktreeProvider, bench_snapshot
 
 
@@ -100,12 +100,10 @@ def _provider(settings: Settings, repo: Path, run_id: str):
 
 
 def _library(settings, repo: Path):
+    from .config import resolve_data_path
     from .research.skills import SkillLibrary
 
-    root = Path(settings.skills_dir)
-    if not root.is_absolute():
-        root = Path.cwd() / root
-    return SkillLibrary.load(root)
+    return SkillLibrary.load(resolve_data_path(settings.skills_dir))
 
 
 def _backend(settings, scripted: str | None):
@@ -130,6 +128,23 @@ def _papers(scraper, query: str, limit: int):
         found += papers
         problems += [f"{source}: {p}" for p in probs]
     return rank(found, query, limit=limit), problems
+
+
+def cmd_doctor(args) -> int:
+    """Check everything a run depends on, before the run depends on it."""
+    from . import doctor
+
+    s = Settings.from_env()
+    if args.repo:
+        s.repo = args.repo
+    if args.task:
+        s.task_path = args.task
+    # `demo-repo` is a default, not a promise about the current directory.
+    s.repo = str(resolve_data_path(s.repo))
+    s.task_path = str(resolve_data_path(s.task_path))
+    checks, ok = doctor.run(s, live=not args.offline)
+    print(doctor.render(checks, ok))
+    return 0 if ok else 1
 
 
 def cmd_research(args) -> int:
@@ -720,6 +735,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="seconds to wait for a human at the approval gate (default 900)")
     p.add_argument("--no-skills", action="store_true", help="ignore skills/ for this run")
     p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("doctor", help="check everything a run depends on, before it does not work")
+    p.add_argument("--repo")
+    p.add_argument("--task")
+    p.add_argument("--offline", action="store_true", help="skip the live model call")
+    p.set_defaults(fn=cmd_doctor)
 
     p = sub.add_parser("research", help="read papers, distil skills, and trial them")
     rsub = p.add_subparsers(dest="research_cmd", required=True)

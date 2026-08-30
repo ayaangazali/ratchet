@@ -1,134 +1,97 @@
-# Ratchet scraper configuration.
-#
-# This file is the data pipeline's source of truth, and it lives in git for the
-# same reason schemas do: when a docs site restructures, the fix shows up as a
-# reviewable diff with a timestamp and a reason, not as a mystery.
-#
-# Each source declares:
-#   url            a template; {library} {version} {symbol} {topic} are substituted
-#   extract        how to slice the fetched markdown down to what the agent needs
-#   expect         the validation contract; failing it triggers self-repair
-#   collector_id   optional Bright Data Scraper Studio collector, for `bdata scraper heal`
-#   auto_approve   whether a repair may land without a human looking at the diff
-#
-# The `history` list under a source is written by the oracle itself every time it
-# repairs an extractor. Do not hand-edit it; it is the audit trail.
-
 defaults:
   max_age_s: 86400
   fallback:
-    url: null            # null means: use Bright Data SERP to find the page
+    url: null
     extract:
       section: changelog
       max_chars: 6000
       drop_patterns:
-        - '^\s*\[Skip to content\].*$'
-        - '^\s*Edit this page.*$'
+      - ^\s*\[Skip to content\].*$
+      - ^\s*Edit this page.*$
     expect:
       min_chars: 300
       must_not_contain:
-        - "Just a moment"
-        - "Enable JavaScript"
-        - "Access denied"
-        - "captcha"
-
+      - Just a moment
+      - Enable JavaScript
+      - Access denied
+      - captcha
 sources:
   fastapi:
-    url: "https://fastapi.tiangolo.com/release-notes/"
+    url: https://fastapi.tiangolo.com/release-notes/
     extract:
-      section: "{version}"
+      section: '{version}'
       max_chars: 5000
     expect:
       min_chars: 200
-      must_contain: ["fastapi"]
-
+      must_contain:
+      - fastapi
   pydantic:
-    url: "https://docs.pydantic.dev/{version}/changelog/"
+    url: https://docs.pydantic.dev/{version}/changelog/
     extract:
-      section: "v{version}"
+      section: v{version}
       max_chars: 6000
     expect:
       min_chars: 300
-
   httpx:
-    url: "https://www.python-httpx.org/changelog/"
+    url: https://www.python-httpx.org/changelog/
     extract:
-      section: "{version}"
+      section: 0.27 (final release)
       max_chars: 4000
     expect:
       min_chars: 200
-
+    history:
+    - at: '2026-08-29T23:47:37Z'
+      from: '{version}'
+      to: 0.27 (final release)
+      why:
+      - 'section heading not found: ''0.27.0'''
   requests:
-    url: "https://requests.readthedocs.io/en/latest/community/updates/"
+    url: https://requests.readthedocs.io/en/latest/community/updates/
     extract:
-      section: "{version}"
+      section: '{version}'
       max_chars: 4000
     expect:
       min_chars: 200
-
-  # Example of a source backed by a Scraper Studio collector, so that a structural
-  # change on the site is repaired by Bright Data's own self-healing rather than by
-  # our heading heuristic. Replace the id with your own from `bdata scraper create`.
-  #
-  # sqlalchemy:
-  #   url: "https://docs.sqlalchemy.org/en/20/changelog/changelog_20.html"
-  #   collector_id: c_replace_me
-  #   auto_approve: false
-  #   extract:
-  #     section: "{version}"
-  #   expect:
-  #     min_chars: 400
-
-# --------------------------------------------------------------------------- #
-# Research mode: papers.
-#
-# Same pipeline as the docs sources above, pointed at a different corner of the
-# web. Extraction is by the `arXiv:<id>` marker rather than by a CSS selector,
-# because arXiv can restyle its search page whenever it likes -- the day it stops
-# printing an id beside each result is the day it stops being arXiv.
-#
-# `history` below is written by the scraper itself when it repairs an extractor.
-# Do not hand-edit it: it is the audit trail, and it is the evidence.
-# --------------------------------------------------------------------------- #
-
 papers:
   sources:
     arxiv:
-      url: "https://arxiv.org/search/?searchtype=all&query={query}&size=50"
-      # The unblocker zone refuses arxiv.org without KYC; an ISP zone serves it.
-      # Access policy is per-host, so the zone belongs next to the host.
-      zones: [isp_proxy1, isp_proxy2, mcp_unlocker]
+      url: https://arxiv.org/search/?searchtype=all&query={query}&size=50
+      zones:
+      - isp_proxy1
+      - isp_proxy2
+      - mcp_unlocker
       parse:
-        id_pattern: '(?:arXiv:|/abs/)(\d{4}\.\d{4,5})'
+        id_pattern: (?:arXiv:|/abs/)(\d{4}\.\d{4,5})
         authors_label: '^Authors?\s*:?\s*$|^Authors?\s*:'
         abstract_label: '^Abstract\s*:?\s*$|^Abstract\s*:'
         max_authors: 12
       expect:
         min_entries: 3
         min_chars: 800
-        must_contain: ["arXiv"]
-
+        must_contain:
+        - arXiv
     huggingface:
-      # Note: `?q=` is applied client-side, so this returns the trending list rather
-      # than a filtered search. That is still the signal we want from Hugging Face --
-      # what practitioners are reading now -- and it is relevance-filtered locally.
-      url: "https://huggingface.co/papers?q={query}"
-      zones: [mcp_unlocker, isp_proxy1]
+      url: https://huggingface.co/papers?q={query}
+      zones:
+      - mcp_unlocker
+      - isp_proxy1
       parse:
-        id_pattern: '/papers/(\d{4}\.\d{4,5})'
-        authors_label: '^(Authors?|By)\b\s*:?'
-        abstract_label: '^(Abstract|Summary)\b\s*:?'
+        id_pattern: /papers/(\d{4}\.\d{4,5})
+        authors_label: ^(Authors?|By)\b\s*:?
+        abstract_label: ^(Abstract|Summary)\b\s*:?
         max_authors: 8
       expect:
         min_entries: 1
         min_chars: 400
-        must_contain: ["papers"]
-
+        must_contain:
+        - papers
     arxiv_abs:
-      # One paper, by id. Used to fill in an abstract for a Hugging Face listing
-      # entry that only carried a title -- on demand, never for the whole page.
-      url: "https://arxiv.org/abs/{id}"
-      zones: [isp_proxy1, isp_proxy2, mcp_unlocker]
+      url: https://arxiv.org/abs/{id}
+      zones:
+      - isp_proxy1
+      - isp_proxy2
+      - mcp_unlocker
       expect:
         min_chars: 400
-        must_contain: ["Abstract"]
+        must_contain:
+        - Abstract

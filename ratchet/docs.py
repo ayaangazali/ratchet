@@ -84,7 +84,11 @@ class DocsOracle:
         self.s = settings
         self.cache_dir = self.repo / settings.docs_cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.config_path = self.repo / settings.scrapers_path
+        from .config import resolve_data_path
+
+        # Not repo-relative: the repo under repair is somebody else's checkout and
+        # has no scrapers.yaml. The extractors belong to Ratchet, not to the target.
+        self.config_path = resolve_data_path(settings.scrapers_path, self.repo)
         self.config = self._load_config()
 
     # ------------------------------------------------------------- config --

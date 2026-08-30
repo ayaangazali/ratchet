@@ -24,22 +24,63 @@ except Exception:  # pragma: no cover
 DEFAULT_GENERATORS = ["anthropic/claude-sonnet-4-6", "openai/gpt-5.2", "google-gemini/gemini-3-pro"]
 
 
-def load_dotenv(path: str | Path = ".env") -> None:
+def _package_root() -> Path:
+    """The installed `ratchet/` package directory."""
+    return Path(__file__).resolve().parent
+
+
+def resolve_data_path(rel: str, base: Path | str | None = None) -> Path:
+    """Find a config file or data directory from anywhere on the filesystem.
+
+    `ratchet` is a console script: people run it from the repository they are
+    working on, or from their home directory, not from this checkout. Resolving
+    `ratchet/scrapers.yaml` against the current directory therefore finds nothing
+    and the failure reads as "no paper source configured", which sends you looking
+    at the config rather than at where you are standing.
+
+    Order: an explicit absolute path, then `base` if one is given (the docs oracle
+    passes the repository under repair, which may carry its own extractors), then the
+    current directory so a checkout can override, then the copy that shipped inside
+    the package.
+    """
+    p = Path(rel).expanduser()
+    if p.is_absolute():
+        return p
+    if base is not None and (Path(base) / p).exists():
+        return (Path(base) / p).resolve()
+    if p.exists():
+        return p.resolve()
+    packaged = _package_root() / p.name          # ratchet/scrapers.yaml
+    if packaged.exists():
+        return packaged
+    alongside = _package_root().parent / p       # <checkout>/skills
+    if alongside.exists():
+        return alongside
+    return p
+
+
+def load_dotenv(path: str | Path | None = None) -> None:
     """Read `.env` into the environment, without overriding what is already set.
 
-    A real key in a gitignored file is the difference between a demo that works and
-    one that needs three exports typed correctly under pressure. Existing variables
-    win, so an explicit export still beats the file.
+    Looked for in the current directory first, then beside the installed package,
+    for the same reason `resolve_data_path` exists: `ratchet` is run from wherever
+    the user happens to be. Finding the keys only when you stand in the checkout is
+    a footgun that presents as "BRIGHTDATA_API_KEY not set" while the key is sitting
+    in a file two directories up.
+
+    Existing variables win, so an explicit export still beats the file.
     """
-    p = Path(path)
-    if not p.exists():
-        return
-    for line in p.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    candidates = [Path(path)] if path else [Path(".env"), _package_root().parent / ".env"]
+    for p in candidates:
+        if not p.exists():
             continue
-        key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+        for line in p.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+        return
 
 
 def _env(name: str, default: str | None = None) -> str | None:
