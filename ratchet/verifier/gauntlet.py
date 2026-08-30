@@ -128,7 +128,9 @@ class Gauntlet:
         ran = parsers.suite_ran(log)
         consistent = parsers.exit_code_consistent(log, status_map)
         g = grade(status_map, f2p_visible=task.f2p_visible, f2p_hidden=task.f2p_hidden, p2p=task.p2p)
-        failure = parsers.failure_excerpt(log, status_map)
+        # held-out test names must never reach anything the agent reads (CLAUDE.md
+        # invariant 5); last_failure flows into the next prompt via context.assemble
+        failure = parsers.failure_excerpt(log, status_map, redact=task.f2p_hidden)
 
         if not ran and not status_map:
             stages["f2p"] = _stage("f2p", False, 0.0, "no evidence the suite ran", t0)
