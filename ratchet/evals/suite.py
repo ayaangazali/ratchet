@@ -78,6 +78,10 @@ def _trial_linear(bug: Bug, task: TaskSpec, repo: Path, rng: random.Random) -> T
             # (found by review). Track what the workspace actually holds instead.
             if applied.ok:
                 workspace_has_cheat = is_cheat
+            else:
+                # the apply chain's fallback resets the worktree between attempts,
+                # so a failed apply wipes whatever was applied before it too
+                workspace_has_cheat = False
             if res.green:
                 solved = True
                 break

@@ -10,7 +10,7 @@ merges unreviewed either — and the competition's code-quality track is judged 
 exactly this trail.
 
 1. Confirm the local gate: `make test && make lint && make redteam`. If the red team
-   is not 10/10 with zero false positives, stop and fix that first.
+   does not catch the whole battery with zero false positives, stop and fix that first.
 2. Branch if you are on `main`: `git switch -c feat/<slug>`.
 3. Commit with a message that says what changed and why, not what files moved.
 4. `gh pr create`. In the body, name what a reviewer should look at hardest — usually:

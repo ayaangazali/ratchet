@@ -1,4 +1,4 @@
-.PHONY: dev test lint fmt demo redteam evals bench serve run run-graph proof docs console replay audit clean image fixture
+.PHONY: dev test lint fmt demo redteam evals bench run run-offline run-graph proof docs console replay audit tree clean image fixture
 
 dev:
 	pip install -e ".[dev]"
@@ -15,7 +15,7 @@ fmt:
 demo:
 	python -m ratchet.cli demo --dir demo-repo
 
-# The verifier's own eval. Ten known cheating patterns, two controls that must pass.
+# The verifier's own eval. Eleven known cheating patterns, two controls that must pass.
 redteam:
 	python -m ratchet.cli redteam --repo demo-repo
 

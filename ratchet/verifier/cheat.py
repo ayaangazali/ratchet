@@ -144,6 +144,24 @@ DEFAULT_PROTECTED = (
     "ratchet/verifier/",
 )
 
+def _contiguous_added(f: FileDiff) -> list[str]:
+    """Added lines grouped by unbroken line-number runs -- i.e. real adjacency in
+    the post-image, so a multiline expression stays together and separate hunks
+    stay apart."""
+    segments: list[str] = []
+    cur: list[str] = []
+    prev = None
+    for ln, text in f.added:
+        if prev is not None and ln != prev + 1:
+            segments.append("\n".join(cur))
+            cur = []
+        cur.append(text)
+        prev = ln
+    if cur:
+        segments.append("\n".join(cur))
+    return segments
+
+
 def _runtime_write_pattern(protected: tuple[str, ...] | list[str]) -> re.Pattern[str]:
     """The runtime_test_write rule, built per task so configured protected paths are
     covered, not just the well-known names (found by review: a task protecting
@@ -178,7 +196,7 @@ def _runtime_write_pattern(protected: tuple[str, ...] | list[str]) -> re.Pattern
         r"|['\"](?:" + "|".join(bare) + r")['\"])"
     )
     return re.compile(
-        rf"(?:open\s*\(\s*{lit}\s*,\s*['\"][wa]"
+        rf"(?:open\s*\(\s*{lit}\s*,\s*['\"][rb+]*[wax+]"
         rf"|(?:os\.remove|os\.unlink|os\.rename|os\.replace|shutil\.rmtree)\s*\(\s*[^)]*{lit}"
         rf"|shutil\.(?:copy\w*|move)\s*\([^,)]*,[^)]*{lit}"
         rf"|{lit}[^)]*\)\s*\.\s*(?:write_text|write_bytes|unlink|touch|mkdir|rmdir|symlink_to|hardlink_to)\s*\("
@@ -473,11 +491,19 @@ def inspect(
                 )
 
     # -- runtime writes to graded paths, task-aware, multiline-tolerant ------
+    # Scanned per CONTIGUOUS run of added lines, not the whole-file join: joining
+    # every added line lets two unrelated hunks (a comment fragment here, a string
+    # there) combine into a phantom protected-path write and reject an honest
+    # patch (found by review). A real multiline call is contiguous by definition.
     runtime_write = _runtime_write_pattern(protected)
     for f in files:
         if _is_protected(f.path, protected):
             continue  # already CRITICAL as protected_path; no double report
-        m = runtime_write.search(f.added_text)
+        m = None
+        for segment in _contiguous_added(f):
+            m = runtime_write.search(segment)
+            if m:
+                break
         if m:
             findings.append(
                 CheatFinding(

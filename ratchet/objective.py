@@ -31,6 +31,7 @@ do not exist is an opinion, not a plan.
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -196,8 +197,18 @@ def _validate_tests_exist(graph: ObjectiveGraph, repo: Path) -> None:
             f = repo / path
             if not f.is_file():
                 problems.append(f"node {node.id!r}: test file {path} does not exist")
-            elif name and name.split("::")[-1] not in f.read_text(errors="replace"):
-                problems.append(f"node {node.id!r}: {name} not found in {path}")
+            elif name:
+                fn = name.split("::")[-1]
+                text = f.read_text(errors="replace")
+                # for python files, demand an actual definition -- a mention in a
+                # comment or a longer test's name is not a test (found by review)
+                defined = (
+                    re.search(rf"def\s+{re.escape(fn)}\s*\(", text)
+                    if f.suffix == ".py"
+                    else fn in text
+                )
+                if not defined:
+                    problems.append(f"node {node.id!r}: {name} not defined in {path}")
     if problems:
         raise ValueError("objective graph failed validation:\n  - " + "\n  - ".join(problems))
 
@@ -208,6 +219,13 @@ def load_graph(source: str | Path, repo: Path | None = None) -> ObjectiveGraph:
     if yaml is None:  # pragma: no cover
         raise RuntimeError("pip install pyyaml")
     data = yaml.safe_load(text)
+    raw_nodes = data.get("nodes") or []
+    ids = [d["id"] for d in raw_nodes]
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    if dupes:
+        # a dict comprehension would silently keep only the last entry, and the
+        # overwritten objective's tests would vanish before validation ever ran
+        raise ValueError(f"duplicate node ids: {dupes}")
     nodes = {
         d["id"]: ObjectiveNode(
             id=d["id"],
@@ -217,7 +235,7 @@ def load_graph(source: str | Path, repo: Path | None = None) -> ObjectiveGraph:
             deps=list(d.get("deps") or []),
             max_attempts=int(d.get("max_attempts", 3)),
         )
-        for d in data.get("nodes") or []
+        for d in raw_nodes
     }
     if not nodes:
         raise ValueError("graph has no nodes")
@@ -268,12 +286,16 @@ today and fails today. Do not invent test names. Do not add nodes without tests 
 a step whose completion cannot be checked is not a step, it is a hope."""
 
 
-def decompose(goal: str, repo: Path, subagents: Subagents, *, model_role: str = "cartographer") -> ObjectiveGraph:
+def decompose(
+    goal: str, repo: Path, subagents: Subagents, *, model_role: str = "cartographer"
+) -> tuple[ObjectiveGraph, str]:
     """Ask a planner model for the graph, then hold it to the validator.
 
     The model proposes; the validator disposes. A graph naming tests that do not
-    exist is rejected with the exact reasons, so a caller can retry with the
-    problems appended -- but nothing unvalidated ever reaches execution.
+    exist is rejected with the exact reasons -- nothing unvalidated ever reaches
+    execution. Returns (graph, yaml_text) so the caller can write the plan to a
+    file for human review; the CLI refuses to execute a decomposed graph in the
+    same invocation on purpose.
     """
     listing = tree_listing(repo, [])
     prompt = _DECOMPOSE_PROMPT.format(goal=goal, listing=listing[:6000])
@@ -282,7 +304,7 @@ def decompose(goal: str, repo: Path, subagents: Subagents, *, model_role: str = 
     )
     block = text.split("```yaml", 1)[-1].split("```", 1)[0] if "```" in text else text
     graph = load_graph(block, repo)
-    return graph
+    return graph, block
 
 
 # --------------------------------------------------------------------------- #
@@ -384,7 +406,6 @@ class GraphRun:
         failure = ""
         for i in range(node.max_attempts):
             node.attempts = i + 1
-            model = self.agents.roles.generator_for(i)  # a retry is a different prior
             label = f"{node.id}-a{i}"
             docs_text = ""
             if self.docs is not None and failure:
@@ -403,9 +424,9 @@ class GraphRun:
                 # restated in full so the child's work is attributable to this node
                 hint=f"You are working branch {label} of objective node {node.id!r}.",
             )
-            cands = self.agents.generate(ctx.render(), n=1)
+            cands = self.agents.generate(ctx.render(), n=1, start=i)
             cand = cands[0]
-            self.bus.emit(GRAPH_NODE_ATTEMPT, node=node.id, attempt=i + 1, model=model,
+            self.bus.emit(GRAPH_NODE_ATTEMPT, node=node.id, attempt=i + 1, model=cand.model,
                           intent=cand.intent, empty=cand.empty)
             if cand.empty:
                 # a reply with no patch -- including "the task is complete" prose --
@@ -418,11 +439,18 @@ class GraphRun:
                 res = gauntlet.run(sb, cand.patch, base_commit=self.state_commit)
                 self.receipts.record_result(f"{node.id}-a{i}", res)
                 if res.green:
-                    # the ONLY path to fulfilled: the verifier said green
-                    sha = self.git.commit_node(
-                        f"[graph {node.id}] attempt {i + 1} green · {cand.intent}",
-                        cwd=getattr(sb, "workdir", None),
-                    )
+                    # the ONLY path to fulfilled: the verifier said green.
+                    # A worktree sandbox has a local checkout we can commit; a
+                    # harness sandbox's workdir is remote, so its restorable state
+                    # is the snapshot reference instead (found by review).
+                    wd = getattr(sb, "workdir", None)
+                    if wd is not None and Path(wd).exists():
+                        sha = self.git.commit_node(
+                            f"[graph {node.id}] attempt {i + 1} green · {cand.intent}",
+                            cwd=wd,
+                        )
+                    else:
+                        sha = sb.snapshot()
                     self._advance(node, sha)
                     return
             finally:

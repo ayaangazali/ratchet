@@ -7,8 +7,9 @@ theatre. So every verdict gets a receipt, and the receipts form a hash chain.
     receipt_n.prev  = sha256(receipt_{n-1} without its signature)
     receipt_n.sig   = HMAC-SHA256(run key, receipt_n hash)
 
-**What this proves.** The agent cannot forge, insert, reorder or edit a verdict, so
-"these nodes were green" is evidence rather than assertion.
+**What this proves.** The agent cannot forge, insert, reorder or edit a verdict --
+and, because a finished run seals its chain, cannot silently delete verdicts from
+the tail either -- so "these nodes were green" is evidence rather than assertion.
 It never touches the orchestrator process, never sees the run key, and cannot
 reach the receipt file from its sandbox. Any change to a past verdict breaks
 every hash after it, and any new verdict without the key fails signature
@@ -162,7 +163,11 @@ class ReceiptBook:
             if r.outcome == "sealed" and i != len(rs) - 1:
                 problems.append(f"receipt {i}: chain continues past its seal")
             prev = r.digest()
-        if rs and rs[-1].outcome != "sealed":
+        if not rs:
+            # an empty chain is indistinguishable from one truncated to nothing;
+            # verify() is only ever called on runs that should have receipts
+            problems.append("chain is empty: no receipts recorded, or the file was truncated to nothing")
+        elif rs[-1].outcome != "sealed":
             problems.append("chain is unsealed: receipts may have been truncated from the tail")
         return (not problems), problems
 

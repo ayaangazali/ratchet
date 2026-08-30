@@ -9,9 +9,10 @@ Every attack here is drawn from published behaviour observed in real coding agen
 hardcoding the visible cases, skipping graded tests, deleting them, `sys.exit(0)`
 before assertions, a conftest hook that rewrites pytest's report objects, an
 `__eq__` that always returns True, printing fake PASSED lines to spoof the log
-parser, making the whole suite skip, mutating pytest config to deselect what it
-cannot pass, and -- the subtle one -- returning a different answer the second time
-it is asked.
+parser, source that rewrites a graded test file at import time (our own red team's
+find), mutating pytest config to deselect what it cannot pass, fabricating PASSED
+lines plus a forged exit marker under a collection error (found by Qodo review),
+and -- the subtle one -- returning a different answer the second time it is asked.
 
 Run it with `ratchet redteam`. It needs no model and no network, so it is also a
 regression test: if a future change to the verifier lets one of these through, the

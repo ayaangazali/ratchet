@@ -97,6 +97,43 @@ def test_cycle_and_unknown_dep_are_config_errors(tmp_path, repo):
         load_graph(p, repo)
 
 
+def test_duplicate_node_ids_are_refused(tmp_path, repo):
+    p = tmp_path / "g.yaml"
+    p.write_text(textwrap.dedent("""
+        graph_id: g
+        nodes:
+          - {id: a, goal: one, f2p_visible: [tests/test_regression.py::test_basic]}
+          - {id: a, goal: two, f2p_visible: [tests/test_regression.py::test_empty_string]}
+    """))
+    with pytest.raises(ValueError, match="duplicate node ids"):
+        load_graph(p, repo)
+
+
+def test_a_test_mentioned_only_in_a_comment_is_refused(tmp_path, repo):
+    """Substring presence is not a definition: the id must name a real test."""
+    target = repo / "tests" / "test_regression.py"
+    target.write_text(target.read_text() + "\n# TODO: test_ghost should cover this\n")
+    p = tmp_path / "g.yaml"
+    p.write_text("graph_id: g\nnodes:\n  - {id: a, goal: g, f2p_visible: [tests/test_regression.py::test_ghost]}\n")
+    with pytest.raises(ValueError, match="not defined"):
+        load_graph(p, repo)
+
+
+def test_linear_retries_rotate_providers(repo):
+    """Every retry must come from a different prior; generate(n=1) used to pin
+    the first provider for all of them."""
+    bad = _reply(_unified(ACCENTS_ONLY, NAIVE_TRUNCATE), "strip after cut")
+    run, _ = _run(repo, [
+        "map",
+        _reply(_unified(SLUGIFY_BUGGY, ACCENTS_ONLY), "fold accents"),
+        bad,
+        _reply(_unified(ACCENTS_ONLY, SLUGIFY_FIXED), "the fix"),
+    ])
+    gen_models = [m for role, m in run.agents.backend.calls if role == "generator"]
+    truncation_models = gen_models[1:]  # first call belongs to the accents node
+    assert len(set(truncation_models)) == len(truncation_models), truncation_models
+
+
 def test_a_node_without_tests_is_refused(tmp_path, repo):
     """A step whose completion cannot be checked is not a step."""
     p = tmp_path / "g.yaml"
@@ -196,8 +233,9 @@ def test_decompose_goes_through_the_same_validator(repo):
         ```
     """)
     agents = Subagents(ScriptedBackend([plan]))
-    g = decompose("fix slugify", repo, agents)
+    g, block = decompose("fix slugify", repo, agents)
     assert g.order == ["accents"]
+    assert "graph_id: auto" in block  # the yaml the CLI writes out for review
 
 
 def test_decompose_refuses_invented_tests(repo):

@@ -149,7 +149,7 @@ and a reason, and the bus contains a `docs.heal` event.
 ## Definition of done for any PR
 
 1. `make test` green, `make lint` clean.
-2. `make redteam` still 10/10 with zero false positives.
+2. `make redteam` still catches the whole battery with zero false positives.
 3. A Qodo review, with each finding either fixed or answered in the thread.
 4. No new way to end a run, and no new path that can set `green` outside
    `verifier/gauntlet.py`.

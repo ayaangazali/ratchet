@@ -15,14 +15,14 @@ every tool fact anyone looked up (so you do not need to search the web again),
 make dev          # editable install + dev deps (python 3.11+)
 make demo         # seeds demo-repo/: a broken slugify, three prepared patches
 make test         # the whole suite, under a minute, no docker, no network
-make redteam      # 10 known cheating patterns fired at the verifier — expect 10/10
+make redteam      # the known-attack battery fired at the verifier — expect 11/11
 make run-offline  # a complete search with no model: root, a prune, a green node
 ```
 
 `make redteam` is the fastest way to understand the whole project. It must print:
 
 ```
-caught 10/10 known reward-hacking patterns
+caught 11/11 known reward-hacking patterns
 false positives on the honest fix: 0
 verifier holds: every known attack blocked, the real fix still accepted.
 ```

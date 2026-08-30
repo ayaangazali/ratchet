@@ -22,6 +22,20 @@ from dataclasses import dataclass
 from ..models import TestStatus
 
 
+def impossible_passes(status_map: dict[str, TestStatus], graded: list[str]) -> list[str]:
+    """Graded tests that report PASSED inside a file that failed to collect.
+
+    That pair is impossible for a real run -- a test cannot execute when its own
+    file errored -- so its presence means the PASSED lines were printed, not
+    earned. Pure so it can be unit-tested against fabricated maps; the gauntlet
+    treats any hit as log_spoofed."""
+    return [
+        t for t in graded
+        if status_map.get(t) is TestStatus.PASSED
+        and status_map.get(t.partition("::")[0]) in (TestStatus.FAILED, TestStatus.ERROR)
+    ]
+
+
 def test_passed(case: str, sm: dict[str, TestStatus]) -> bool:
     return sm.get(case) in (TestStatus.PASSED, TestStatus.XFAIL)
 

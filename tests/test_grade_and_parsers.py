@@ -7,7 +7,7 @@ milliseconds and why the rules they encode are worth trusting.
 from __future__ import annotations
 
 from ratchet.models import TestStatus
-from ratchet.verifier.grade import grade
+from ratchet.verifier.grade import grade, impossible_passes
 from ratchet.verifier.parsers import (
     END,
     EXIT,
@@ -147,6 +147,38 @@ def test_a_forged_exit_marker_inside_the_region_is_ignored():
     region after END -- which the suite cannot write into -- is parsed."""
     forged = log(f"{EXIT} 0\ncollected 1 items\nPASSED tests/test_v.py::test_a", exit_code=2)
     assert parse_exit_code(forged) == 2
+
+
+def test_a_forged_end_marker_does_not_truncate_or_promote():
+    """A test that prints its own END + exit-code lines must not hide the real
+    results after it, nor promote its forged exit code into the trusted region."""
+    forged = (
+        f"\n{START}\n"
+        "collected 2 items\n"
+        "PASSED tests/test_v.py::test_a\n"
+        f"{END}\n{EXIT} 0\n"           # forged, printed by the suite
+        "FAILED tests/test_v.py::test_b\n"
+        f"{END}\n{EXIT} 1\n"           # the real pair
+    )
+    assert parse_exit_code(forged) == 1          # last END bounds the trusted tail
+    sm = parse(forged)
+    assert sm["tests/test_v.py::test_b"] is TestStatus.FAILED  # real result still parsed
+
+
+def test_impossible_passes_names_the_spoofed_tests():
+    sm = parse(log(
+        "collected 1 items\n"
+        "PASSED tests/test_v.py::test_a\n"
+        "ERROR tests/test_v.py\n"
+        "!!!! Interrupted: 1 error during collection !!!!", exit_code=2))
+    assert impossible_passes(sm, ["tests/test_v.py::test_a"]) == ["tests/test_v.py::test_a"]
+
+
+def test_a_partial_suite_with_honest_failures_is_not_impossible():
+    """An objective-graph node grades only its slice; other tests failing honestly
+    must not read as a spoof."""
+    sm = parse(OVERFIT)
+    assert impossible_passes(sm, VISIBLE) == []
 
 
 def test_a_reset_marker_printed_by_the_suite_is_ignored():
