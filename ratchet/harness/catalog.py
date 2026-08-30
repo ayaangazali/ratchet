@@ -21,6 +21,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..subagents import Roles
 
 #: Substrings that mark a model as the cheap tier. Ordered by how strong a signal
 #: each one is, and matched against the model name only -- providers rename models
@@ -123,7 +127,7 @@ def resolve_one(requested: str, available: list[str], *, prefer_small: bool, thr
     return Resolution(requested, fallback, exact=False, reason=f"no match, fell back to the {tier}")
 
 
-def resolve_roles(roles, available: list[str]) -> tuple[object, list[Resolution]]:
+def resolve_roles(roles: Roles, available: list[str]) -> tuple[Roles, list[Resolution]]:
     """Return a copy of `roles` routed onto real models, plus what changed.
 
     `roles` is a `subagents.Roles`. It is not mutated: the caller keeps the requested

@@ -87,10 +87,16 @@ def test_approval_items_travel_alone_and_carry_deny_reason():
 class _FakeClient:
     """Replays canned turn events; records what the backend asked for."""
 
+    base = "http://fake:0"
+
     def __init__(self, events):
         self._events = events
         self.sessions_created: list[dict] = []
         self.turns: list[tuple[str, list[dict]]] = []
+
+    def models(self):
+        # serve exactly what the tests ask for, so _resolve_model is a no-op
+        return [{"name": "openai/gpt-5-mini"}, {"name": "m"}]
 
     def create_session(self, *, manifest=None, **_):
         self.sessions_created.append(manifest)
@@ -106,11 +112,13 @@ def _stream(*payloads):
 
 
 def test_backend_assembles_text_from_deltas_and_reads_usage():
+    # deltas are the stream; turn.done carries the authoritative usage (and,
+    # when present, the final text) in state.output
     events = _stream(
         {"type": "model.message.delta", "content": "def slug"},
         {"type": "model.message.delta", "content": "ify(): ..."},
-        {"type": "model.message", "content": "", "usage": {"input_tokens": 120, "output_tokens": 30}},
-        {"type": "turn.done", "state": {"status": "completed"}},
+        {"type": "turn.done", "state": {"status": "completed",
+                                        "output": {"usage": {"input_tokens": 120, "output_tokens": 30}}}},
     )
     fake = _FakeClient(events)
     backend = HarnessBackend(fake, instructions="be terse")
@@ -126,14 +134,22 @@ def test_backend_assembles_text_from_deltas_and_reads_usage():
     assert items == [{"type": "user.message", "content": "fix slugify"}]
 
 
+def _ok_stream(text="ok"):
+    # a turn that writes nothing is a failure now, so every canned turn says something
+    return _stream(
+        {"type": "model.message.delta", "content": text},
+        {"type": "turn.done", "state": {"status": "completed"}},
+    )
+
+
 def test_backend_reuses_one_session_per_role_and_model():
-    fake = _FakeClient(_stream({"type": "turn.done", "state": {}}))
+    fake = _FakeClient(_ok_stream())
     backend = HarnessBackend(fake, instructions="x")
     backend.complete("a", model="m", role="reviewer")
-    fake._events = _stream({"type": "turn.done", "state": {}})
+    fake._events = _ok_stream()
     backend.complete("b", model="m", role="reviewer")
     assert len(fake.sessions_created) == 1  # same role+model = same session
-    fake._events = _stream({"type": "turn.done", "state": {}})
+    fake._events = _ok_stream()
     backend.complete("c", model="m", role="cartographer")
     assert len(fake.sessions_created) == 2  # new role = new session
 
@@ -141,7 +157,7 @@ def test_backend_reuses_one_session_per_role_and_model():
 def test_backend_estimates_tokens_when_usage_is_absent():
     fake = _FakeClient(_stream(
         {"type": "model.message.delta", "content": "x" * 400},
-        {"type": "turn.done", "state": {}},
+        {"type": "turn.done", "state": {"status": "completed"}},
     ))
     backend = HarnessBackend(fake, instructions="x")
     text, tokens, _cost = backend.complete("p" * 80, model="m", role="generator")
