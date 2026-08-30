@@ -725,6 +725,7 @@ def cmd_live(args) -> int:
     from .buildview import BuildView
     from .bus import Bus
     from .live import LiveRun
+    from .models import Outcome
     from .qodo_mcp import QodoUnavailable
 
     repo = Path(args.repo or ".").resolve()
@@ -766,8 +767,11 @@ def cmd_live(args) -> int:
             # ends red here rather than printing a green summary over a silent gate.
             view.line(str(e)[:160], "#e5675c")
             # No `green` here: this path never ran the gauntlet, and `green` is set in
-            # exactly one place. What a live run knows is what the reviewer said.
-            run.finish(blocking=1, pr=args.pr, nodes=0, findings=0, reason=str(e)[:160])
+            # exactly one place. What a live run knows is what the reviewer said --
+            # and INFRA, because a reviewer we could not reach is our failure, not a
+            # verdict. Recording it as a rejection would blame the diff for our outage.
+            run.finish(blocking=1, outcome=Outcome.INFRA.value, pr=args.pr, nodes=0,
+                       findings=0, reason=str(e)[:160])
             drain()
             print(f"\n  bus: {bus_path}")
             return 1
@@ -775,7 +779,7 @@ def cmd_live(args) -> int:
 
     blocking = int(review["blocking"]) if review else 0
     findings = len(review["findings"]) if review else 0
-    run.finish(blocking=blocking, pr=args.pr or "", nodes=0, findings=findings,
+    run.finish(blocking=blocking, outcome="reviewed", pr=args.pr or "", nodes=0, findings=findings,
                reason=(f"{blocking} blocking finding(s) — the reviewer said no"
                        if blocking else
                        "live run complete — every call above actually happened"))

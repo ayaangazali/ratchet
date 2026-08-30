@@ -30,15 +30,18 @@ from . import debuglog
 SEVERITIES = ("critical", "high", "medium", "low")
 QODO_BOT = "qodo-code-review"
 
-#: Qodo leaves this heading on a pull request when a review finishes, whether or not
-#: it found anything. It is the completion signal; the inline findings are its output.
-#: Waiting on the findings alone cannot tell a clean review from a reviewer that never
-#: answered, and those two must never be confused.
+#: What Qodo leaves behind when a review *finishes*, whether or not it found anything.
+#: The first review posts a "Code Review by Qodo" summary; every re-review posts a fresh
+#: "[Code review](...)" link and edits that first summary in place. Both are new
+#: comments, so a new comment id is the signal.
 #:
-#: On a re-review Qodo *edits* this comment in place rather than posting a second one
-#: (measured on #17: same id, `updated_at` moved), so watching for a new id alone waits
-#: forever on the second pass. What is watched is the (id, updated_at) pair.
-REVIEW_DONE = "Code Review by Qodo"
+#: `updated_at` is deliberately not the signal, though it looks like the obvious one for
+#: an edit-in-place reviewer. Qodo edits the summary *while the review is still running*
+#: — measured on #17: summary touched at 05:19:49, review actually finished at 05:20:44
+#: — so treating an edit as completion returns "clean, no findings" on a review that has
+#: not happened yet. A false clean is the worst answer a gate can give, worse than the
+#: stale one this branch started out fixing.
+BUSY = "Qodo is busy working"
 
 #: How long a run waits for Qodo. Measured twice on this repository at ~104s; the
 #: margin is for a queue, not for hope. Past it the gate raises rather than merging
@@ -157,16 +160,21 @@ class QodoMCP:
         ]
         return Review(findings=findings, pr=f"#{number}", calls=list(self.calls))
 
-    def _bot_comments(self, number: str, *, endpoint: str, mark: str = "") -> set[tuple[int, str]]:
-        """The bot's comments as (id, updated_at) pairs, optionally only those carrying
-        `mark`. A pair is compared for equality, never for order -- so an edit counts as
-        a change, and no clock skew or one-second tie can get the answer wrong."""
+    def _bot_comments(self, number: str, *, endpoint: str) -> list[dict]:
         raw = self._gh_list(f"repos/{self.repo_slug}/{endpoint}/{number}/comments")
+        return [c for c in raw if QODO_BOT in str(c.get("user", {}).get("login", ""))]
+
+    def _completions(self, number: str) -> set[int]:
+        """Ids of the comments that mean a review finished.
+
+        The in-progress marker is not one of them: Qodo posts it when it starts and
+        deletes it when it is done, so counting it would end the wait at the moment
+        the review begins.
+        """
         return {
-            (int(c.get("id") or 0), str(c.get("updated_at", "")))
-            for c in (raw or [])
-            if QODO_BOT in str(c.get("user", {}).get("login", ""))
-            and (not mark or mark in str(c.get("body", "")))
+            int(c.get("id") or 0)
+            for c in self._bot_comments(number, endpoint="issues")
+            if BUSY not in str(c.get("body", ""))
         }
 
     def review_pr(self, pr: str, *, wait: float = 0.0, poll: float = 10.0) -> Review:
@@ -178,11 +186,12 @@ class QodoMCP:
         reviewer that never replied -- a genuinely clean review has no findings, and
         blocking on that would jam the gate shut on exactly the good pull requests.
 
-        So the wait watches Qodo's own "review finished" comment rather than the
-        findings, and it watches it as an (id, updated_at) pair tested for *equality*
-        against a snapshot -- because a re-review edits that comment instead of adding
-        one. Nothing here compares two clocks: a timestamp read as an opaque string
-        cannot be skewed early or tied inside the same second.
+        So the wait watches for a new comment from Qodo that is not its in-progress
+        marker -- that is what "the review finished" looks like -- rather than for
+        findings, and it identifies it by comment id. Not by timestamp: two clocks at
+        one-second resolution can skew or tie. Not by `updated_at` either, because Qodo
+        edits its summary while the review is still running, and an in-flight edit read
+        as completion produces a clean verdict on a review nobody has done.
 
         A wait that expires raises -- silence is not approval.
         """
@@ -190,8 +199,8 @@ class QodoMCP:
         if not wait:
             return self.fetch_findings(number)
 
-        seen_reviews = self._bot_comments(number, endpoint="issues", mark=REVIEW_DONE)
-        seen_findings = {cid for cid, _ in self._bot_comments(number, endpoint="pulls")}
+        seen_reviews = self._completions(number)
+        seen_findings = {int(c.get("id") or 0) for c in self._bot_comments(number, endpoint="pulls")}
         self._gh("--method", "POST", f"repos/{self.repo_slug}/issues/{number}/comments",
                  "-f", "body=/review")
         debuglog.log("info", f"asked qodo to review #{number}; {len(seen_reviews)} prior review(s)")
@@ -199,7 +208,7 @@ class QodoMCP:
         deadline = time.time() + wait
         while (remaining := deadline - time.time()) > 0:
             time.sleep(min(poll, remaining))
-            if self._bot_comments(number, endpoint="issues", mark=REVIEW_DONE) - seen_reviews:
+            if self._completions(number) - seen_reviews:
                 time.sleep(SETTLE)  # let the inline findings catch up with the summary
                 review = self.fetch_findings(number, exclude=seen_findings)
                 debuglog.log("info", f"qodo reviewed #{number}: {len(review.findings)} finding(s)")
