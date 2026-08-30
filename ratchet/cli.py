@@ -36,6 +36,20 @@ def _run_id(args) -> str:
     return getattr(args, "run_id", None) or f"run-{uuid.uuid4().hex[:6]}"
 
 
+def _docs_oracle(settings, repo: Path, bus):
+    """The Bright Data docs oracle, or None when no key is configured.
+
+    Built only when BRIGHTDATA_API_KEY is set, so an offline run is a clean no-op
+    rather than a failed fetch. When present, a red verdict that looks like API
+    drift attaches current upstream docs for the pinned version to the next prompt.
+    """
+    if not settings.brightdata_api_key:
+        return None
+    from .docs import DocsOracle
+
+    return DocsOracle(repo, bus, settings)
+
+
 def _provider(settings: Settings, repo: Path, run_id: str):
     """Harness first, worktree fallback. `bench-snapshot` is how you choose."""
     if settings.provider in ("harness", "auto"):
@@ -91,6 +105,7 @@ def cmd_run(args) -> int:
     if args.fanout:
         scheduler.patience = 0 if args.fanout > 1 else scheduler.patience
 
+    bus = Bus(repo / ".ratchet" / f"{run_id}.bus.jsonl")
     run = SearchRun(
         task=task,
         repo=repo,
@@ -98,7 +113,8 @@ def cmd_run(args) -> int:
         subagents=agents,
         run_id=run_id,
         scheduler=scheduler,
-        bus=Bus(repo / ".ratchet" / f"{run_id}.bus.jsonl"),
+        bus=bus,
+        docs=_docs_oracle(s, repo, bus),
         parallel=s.parallel,
     )
     print(f"run {run_id} · task {task.task_id} · provider {run.provider.name}")
@@ -142,15 +158,17 @@ def cmd_graph(args) -> int:
     else:
         graph = load_graph(Path(args.file), repo)
 
+    gbus = Bus(repo / ".ratchet" / f"{run_id}.bus.jsonl")
     run = GraphRun(
         graph=graph,
         repo=repo,
         provider=_provider(s, repo, run_id),
         subagents=agents,
         run_id=run_id,
-        bus=Bus(repo / ".ratchet" / f"{run_id}.bus.jsonl"),
+        bus=gbus,
         escalation_budget=s.budget(),
         parallel=s.parallel,
+        docs=_docs_oracle(s, repo, gbus),
     )
     print(f"graph {graph.graph_id} · run {run_id} · {len(graph.order)} node(s) · provider {run.provider.name}")
     summary = run.run()
@@ -362,6 +380,24 @@ def cmd_console(args) -> int:
     return 0
 
 
+def cmd_docs(args) -> int:
+    """Exercise the Bright Data docs oracle: fetch, extract by heading, validate,
+    and self-heal on drift -- the whole pipeline, standalone."""
+    from .bus import Bus
+    from .docs import DocsOracle
+
+    s = Settings.from_env()
+    repo = Path(args.repo or s.repo).resolve()
+    if not s.brightdata_api_key:
+        print("BRIGHTDATA_API_KEY is not set. Add it to .env; see ratchet/scrapers.yaml for sources.",
+              file=sys.stderr)
+        return 1
+    bus = Bus(repo / ".ratchet" / f"docs-{uuid.uuid4().hex[:6]}.bus.jsonl")
+    oracle = DocsOracle(repo, bus, s)
+    print(oracle.lookup(args.library, symbol=args.symbol or "", topic=args.topic or ""))
+    return 0
+
+
 def cmd_demo(args) -> int:
     from .demo import seed
 
@@ -470,6 +506,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--repo")
     p.add_argument("--run")
     p.set_defaults(fn=cmd_console)
+
+    p = sub.add_parser("docs", help="fetch upstream docs for a library through Bright Data")
+    p.add_argument("library")
+    p.add_argument("--symbol")
+    p.add_argument("--topic")
+    p.add_argument("--repo")
+    p.set_defaults(fn=cmd_docs)
 
     p = sub.add_parser("demo", help="seed the demo repository")
     p.add_argument("--dir")

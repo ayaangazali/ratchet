@@ -304,8 +304,10 @@ class GraphRun:
         bus: Bus | None = None,
         escalation_budget: Budget | None = None,
         parallel: bool = True,
+        docs=None,
     ) -> None:
         self.graph = graph
+        self.docs = docs
         self.repo = Path(repo).resolve()
         self.provider = provider
         self.agents = subagents
@@ -384,6 +386,11 @@ class GraphRun:
             node.attempts = i + 1
             model = self.agents.roles.generator_for(i)  # a retry is a different prior
             label = f"{node.id}-a{i}"
+            docs_text = ""
+            if self.docs is not None and failure:
+                # a red verdict that looks like an import/attr/kwarg drift gets the
+                # current upstream docs for the pinned version attached, via Bright Data
+                docs_text = self.docs.hint_for_failure(failure) or ""
             ctx = Context(
                 task=task.statement,
                 repo_map=self.repo_map,
@@ -391,6 +398,7 @@ class GraphRun:
                 diff_so_far=self.git.diff(self.base_commit, self.state_commit)
                 if self.state_commit != self.base_commit else "",
                 dead_ends=dead_ends,
+                docs=docs_text,
                 # sub-agents share no history with this process; the branch label is
                 # restated in full so the child's work is attributable to this node
                 hint=f"You are working branch {label} of objective node {node.id!r}.",
