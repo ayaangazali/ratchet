@@ -983,10 +983,23 @@ one running on defaults.
 | [#9](https://github.com/ayaangazali/ratchet/pull/9) | the objective graph | 10 (provider rotation, duplicate ids, substring validation, review-before-run, harness commit path, …) | 4 in [#10](https://github.com/ayaangazali/ratchet/pull/10), 6 in [#12](https://github.com/ayaangazali/ratchet/pull/12) |
 | [#10](https://github.com/ayaangazali/ratchet/pull/10) | resolve Qodo round 1 | 6 (forged END; zero-byte truncation; `x`/`r+` modes; hunk-join phantom; stale-cheat flag; missing unit pair) | all fixed in [#12](https://github.com/ayaangazali/ratchet/pull/12) |
 | [#11](https://github.com/ayaangazali/ratchet/pull/11) | Bright Data docs oracle wired into runs | none yet | — |
+| [#17](https://github.com/ayaangazali/ratchet/pull/17) | the Qodo gate waits for *this* review, not the last one | 8 over five passes (stale verdict; clean review read as silence; unpaginated completion check; timeout reported green; `green` set outside the gauntlet; timeout not classified INFRA; substring bot-login match; PR summary counted as a review) | all fixed across six passes; one — gating the `/review` post itself — [answered in-thread](https://github.com/ayaangazali/ratchet/pull/17) and `gate.IRREVERSIBLE` made an enforced registry instead |
 
 Two of Qodo's findings were real verifier bypasses this repo's own battery had
 missed; both are now attacks in the battery. That is the tool doing exactly what
 this project preaches.
+
+[#17](https://github.com/ayaangazali/ratchet/pull/17) is the same argument turned on
+the review gate itself. The gate asked Qodo for a review and then returned whatever
+findings the pull request already carried — on a branch Qodo had seen before, an old
+verdict came back in about a second and was recorded against the current diff. Six
+review passes later it waits for the review it asked for, and the failures found on
+the way were each worse than the one before: a clean review that read as silence and
+jammed the gate shut, a completion check that could not see past page one of GitHub's
+comments, a timeout that printed green and exited 0, and — found by running the gate
+against its own pull request rather than by review — an in-flight summary edit read as
+completion, which returned *clean* on a review that had not finished and hid a real
+finding while doing it.
 
 ## Prior art
 
