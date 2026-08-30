@@ -112,6 +112,57 @@ def cmd_run(args) -> int:
     return 0 if result.green else 2
 
 
+def cmd_graph(args) -> int:
+    """Run an objective graph: each node fulfilled only by its own tests."""
+    from .bus import Bus
+    from .objective import GraphRun, decompose, load_graph
+    from .subagents import ModelBackend, ScriptedBackend, Subagents
+
+    s = Settings.from_env()
+    if args.repo:
+        s.repo = args.repo
+    repo = Path(s.repo).resolve()
+    run_id = _run_id(args)
+
+    backend: ModelBackend
+    if args.scripted:
+        backend = ScriptedBackend(json.loads(Path(args.scripted).read_text()))
+    else:
+        from .harness.backend import HarnessBackend
+        from .harness.client import TrueForgeClient
+
+        backend = HarnessBackend(TrueForgeClient(s.trueforge_base_url))
+    agents = Subagents(backend, s.roles())
+
+    if args.decompose:
+        graph = decompose(args.decompose, repo, agents)
+        if args.out:
+            print(f"decomposed graph validated; write it to {args.out} and review it before running")
+        print(" · ".join(f"{n}" for n in graph.order))
+    else:
+        graph = load_graph(Path(args.file), repo)
+
+    run = GraphRun(
+        graph=graph,
+        repo=repo,
+        provider=_provider(s, repo, run_id),
+        subagents=agents,
+        run_id=run_id,
+        bus=Bus(repo / ".ratchet" / f"{run_id}.bus.jsonl"),
+        escalation_budget=s.budget(),
+        parallel=s.parallel,
+    )
+    print(f"graph {graph.graph_id} · run {run_id} · {len(graph.order)} node(s) · provider {run.provider.name}")
+    summary = run.run()
+    for node_id in graph.order:
+        n = graph.nodes[node_id]
+        mark = {"fulfilled": "✓", "failed": "✗", "blocked": "∅"}.get(n.status, "·")
+        extra = " (escalated to tree search)" if n.escalated else ""
+        print(f"  {mark} {node_id:<14} {n.status:<10} attempts {n.attempts}{extra}")
+    print("green" if summary["green"] else "not green", "·", json.dumps(summary))
+    return 0 if summary["green"] else 2
+
+
 def cmd_tree(args) -> int:
     from .node import Tree
 
@@ -344,6 +395,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--scripted", help="a JSON list of canned model responses; runs with no harness")
     p.add_argument("--no-ship", action="store_true", help="stop before the approval gate")
     p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("graph", help="run an objective graph: nodes fulfilled only by their tests")
+    p.add_argument("--file", help="a graph yaml (see objectives/demo-graph.yaml)")
+    p.add_argument("--decompose", help="a goal to decompose into a graph via the planner model")
+    p.add_argument("--out", help="where to write a decomposed graph")
+    p.add_argument("--repo")
+    p.add_argument("--run-id")
+    p.add_argument("--scripted", help="a JSON list of canned model responses; runs with no harness")
+    p.set_defaults(fn=cmd_graph)
 
     p = sub.add_parser("tree", help="the search tree")
     p.add_argument("--repo")
