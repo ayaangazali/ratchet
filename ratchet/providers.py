@@ -397,11 +397,11 @@ class ChatBackend:
                 except ValueError:
                     continue
                 text = _describe(ev)
-                if not text:
-                    continue
-                # the closing summary arrives twice -- once as the assistant's last
-                # message, once as the result envelope. Say it once.
-                if text == last:
+                # The closing summary arrives twice -- once as the assistant's last
+                # message, once as the result envelope -- and the two are truncated
+                # at different lengths, so comparing them whole never matched. A
+                # shared prefix is what actually identifies the repeat.
+                if not text or text[:80] == last[:80]:
                     continue
                 last = text
                 if ev.get("type") == "result":
