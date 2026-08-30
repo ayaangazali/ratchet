@@ -35,7 +35,7 @@ user's working directory; every turn becomes one git commit the user can revert.
 Working directory listing:
 {listing}
 
-{sources}{history}User request:
+{sources}{history}{review}User request:
 {prompt}
 
 Reply with ONE line starting `intent:` describing the change, then the change itself:
@@ -62,10 +62,11 @@ class Turn:
 
 
 class ChatSession:
-    def __init__(self, repo: Path, backend: ChatBackend | None = None, bus=None) -> None:
+    def __init__(self, repo: Path, backend: ChatBackend | None = None, bus=None, qodo=None) -> None:
         self.repo = Path(repo).resolve()
         self.backend = backend or ChatBackend.from_env()
         self.bus = bus
+        self.qodo = qodo  # advisory Qodo review context, or None
         self.cancel = threading.Event()
         self.turns: list[Turn] = []
         self._label = "turn-1"          # the current turn's node id, for the console
@@ -340,10 +341,17 @@ class ChatSession:
                      for t in self.turns[-3:]]
             history = "Recent turns:\n" + "\n".join(lines) + "\n\n"
         self._focus = prompt
+        review = ""
+        if self.qodo is not None:
+            text = self.qodo.findings_for_prompt(cap=1500)
+            if text:
+                review = ("Latest Qodo review of this repo's open PR "
+                          "(advisory -- may lag local changes):\n" + text + "\n\n")
         return _PROMPT.format(
             listing=tree_listing(self.repo, [])[:4000],
             sources=self._sources_block(),
             history=history,
+            review=review,
             prompt=prompt,
         )
 

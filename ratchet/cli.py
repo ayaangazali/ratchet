@@ -77,6 +77,16 @@ def _docs_oracle(settings, repo: Path, bus):
     return DocsOracle(repo, bus, settings)
 
 
+def _qodo_oracle(settings, repo: Path, bus):
+    """Hosted Qodo review context, or None. Advisory only -- never gates anything.
+
+    Built only when RATCHET_QODO is on, `gh` is on PATH and the repo has a GitHub
+    remote, so an offline or remote-less run is a clean no-op."""
+    from .qodo import oracle_or_none
+
+    return oracle_or_none(settings, repo, bus)
+
+
 def _provider(settings: Settings, repo: Path, run_id: str):
     """Harness first, worktree fallback. `bench-snapshot` is how you choose."""
     if settings.provider in ("harness", "auto"):
@@ -322,6 +332,7 @@ def cmd_run(args) -> int:
         scheduler=scheduler,
         bus=bus,
         docs=_docs_oracle(s, repo, bus),
+        qodo=_qodo_oracle(s, repo, bus),
         skills=None if args.no_skills else _library(s, repo),
         parallel=s.parallel,
     )
@@ -530,7 +541,7 @@ def cmd_replay(args) -> int:
     events = Bus(path).read_all()
     keep = ("run_id", "task", "provider", "node", "id", "parent", "score", "green", "outcome", "intent",
             "model", "stage", "passed", "detail", "label", "fanout", "depth", "findings", "reason",
-            "winner", "library", "new_section", "approved")
+            "winner", "library", "new_section", "approved", "pr", "counts")
     t0 = events[0].ts if events else 0
     try:
         for e in events:
@@ -633,6 +644,100 @@ def cmd_docs(args) -> int:
     oracle = DocsOracle(repo, bus, s)
     print(oracle.lookup(args.library, symbol=args.symbol or "", topic=args.topic or ""))
     return 0
+
+
+def cmd_qodo_mcp(args) -> int:
+    """The QODO MCP server, stdio. Register once; any MCP client drives reviews."""
+    from .qodo_mcp import main as qodo_mcp_main
+
+    qodo_mcp_main()
+    return 0
+
+
+def cmd_qodo_fix(args) -> int:
+    """The review->revise loop: Qodo reviews the PR, its per-finding agent prompts
+    drive chat turns, the push waits at the human gate, then Qodo re-reviews.
+
+    Advisory in, gated out: findings only ever become prompts, and nothing is
+    pushed without a yes at the gate (invariant 7).
+    """
+    import subprocess as sp
+
+    from .bus import Bus
+    from .chat import ChatSession
+    from .gate import Gate
+    from .qodo import QodoOracle
+
+    repo = Path(args.repo or ".").resolve()
+    bus = Bus(repo / ".ratchet" / "qodo-fix.bus.jsonl")
+    oracle = QodoOracle(repo, bus)
+    if not oracle.available():
+        print("qodo-fix needs `gh` on PATH and a GitHub origin remote", file=sys.stderr)
+        return 2
+    pr = args.pr
+
+    # the one real foot-gun: fixing PR N while a different branch is checked out
+    head = sp.run(["gh", "pr", "view", str(pr), "--repo", str(oracle.slug),
+                   "--json", "headRefName", "--jq", ".headRefName"],
+                  capture_output=True, text=True, timeout=30).stdout.strip()
+    branch = sp.run(["git", "-C", str(repo), "branch", "--show-current"],
+                    capture_output=True, text=True, timeout=30).stdout.strip()
+    if not head or head != branch:
+        print(f"PR #{pr} head is {head or '?'} but the checked-out branch is {branch or '?'} -- "
+              "check out the PR branch first", file=sys.stderr)
+        return 2
+
+    gate = Gate(repo, bus=bus)
+    session = ChatSession(repo, bus=bus)  # the finding IS the prompt; no self-injection
+    emit = lambda kind, text: print(f"  {text}")  # noqa: E731 - console narration
+
+    review = oracle.latest_review(pr, fresh=True)
+    if review is None or not review.findings:
+        print(f"no Qodo review on PR #{pr} yet -- commanding one (/review, ~2 min)")
+        oracle.trigger_review(pr)
+        review = oracle.wait_for_review(pr, since=review.reviewed_at if review else "",
+                                        timeout_s=args.timeout)
+    if review is None or not review.findings:
+        print("Qodo reports no findings -- nothing to fix")
+        return 0
+
+    for rnd in range(1, args.rounds + 1):
+        todo = [f for f in review.findings if f.agent_prompt]
+        print(f"round {rnd}: {len(review.findings)} finding(s), {len(todo)} with agent prompts")
+        before = sp.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                        capture_output=True, text=True, timeout=30).stdout.strip()
+        for f in todo:
+            print(f"* fixing {f.n}. {f.title}")
+            session.run_turn(f"Qodo review finding {f.n}: {f.title}\n\n{f.agent_prompt}", emit)
+        after = sp.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                       capture_output=True, text=True, timeout=30).stdout.strip()
+        if after == before:
+            print("no turn produced a commit -- stopping")
+            return 2
+
+        diff = sp.run(["git", "-C", str(repo), "diff", f"{before}..{after}"],
+                      capture_output=True, text=True, timeout=30).stdout
+        req = gate.request(action="push",
+                           summary=f"qodo-fix PR #{pr} round {rnd}: {len(todo)} finding(s) addressed",
+                           diff=diff, stats={"pr": pr, "round": rnd, "findings": len(todo)})
+        decision = gate.wait(req)
+        if not decision.allow:
+            print(f"push denied at the gate: {decision.reason or 'no reason given'}")
+            return 2
+        sp.run(["git", "-C", str(repo), "push"], check=True, timeout=120)
+        print("pushed -- commanding a fresh Qodo review")
+
+        since = review.reviewed_at
+        oracle.trigger_review(pr)
+        review = oracle.wait_for_review(pr, since=since, timeout_s=args.timeout)
+        if review is None:
+            print("no fresh review landed in time -- stopping")
+            return 2
+        if not review.findings:
+            print(f"Qodo review is clean after round {rnd}")
+            return 0
+    print(f"rounds exhausted; {len(review.findings)} finding(s) remain")
+    return 2
 
 
 def cmd_dashboard(args) -> int:
@@ -840,6 +945,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--topic")
     p.add_argument("--repo")
     p.set_defaults(fn=cmd_docs)
+
+    p = sub.add_parser("qodo-mcp", help="the QODO review MCP server, stdio")
+    p.set_defaults(fn=cmd_qodo_mcp)
+
+    p = sub.add_parser("qodo-fix", help="Qodo reviews the PR; its findings drive fix turns; the push waits at the gate")
+    p.add_argument("--pr", type=int, required=True)
+    p.add_argument("--rounds", type=int, default=2)
+    p.add_argument("--repo")
+    p.add_argument("--timeout", type=float, default=900, help="seconds to wait for each hosted review pass")
+    p.set_defaults(fn=cmd_qodo_fix)
 
     p = sub.add_parser("dashboard", help="the same run, in a browser")
     p.add_argument("--bus")

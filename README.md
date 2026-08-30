@@ -965,6 +965,26 @@ criteria, `CLAUDE.md` the contract (read the invariants before writing code here
 the runbook, `SUBMISSION.md` the checklist. Four slash commands live in
 `.claude/commands/`: `/verify`, `/harden`, `/ship`, `/demo`.
 
+## Qodo in the loop — the QODO MCP server
+
+The Qodo Command CLI is discontinued upstream, so ratchet wraps the surface that
+works — the hosted `qodo-code-review[bot]` on this repo's pull requests — as an
+**MCP server** and as loop context:
+
+```bash
+ratchet qodo-mcp            # the QODO MCP server, stdio (registered in .mcp.json)
+ratchet qodo-fix --pr N     # Qodo reviews the PR; each finding's own "Agent prompt"
+                            # drives a fix turn; the push waits at the human gate;
+                            # Qodo re-reviews. Repeat until clean or --rounds runs out.
+```
+
+Four tools: `qodo_status`, `qodo_findings`, `qodo_request_review`, `qodo_wait_review`.
+During any run or chat turn, the latest review's findings are injected into the next
+prompt as an advisory section, and `qodo.review.*` events light up the console and the
+dashboard (a `qodo·reviewer` takes a desk). `RATCHET_QODO=0` turns all of it off.
+
+**Qodo is advisory context — only the gauntlet sets green.**
+
 ## Qodo code review evidence
 
 Every change goes through a pull request. Configuration is committed at

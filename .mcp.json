@@ -2,12 +2,21 @@
   "mcpServers": {
     "bright-data": {
       "command": "npx",
-      "args": ["-y", "@brightdata/mcp"],
+      "args": [
+        "-y",
+        "@brightdata/mcp"
+      ],
       "env": {
         "API_TOKEN": "${BRIGHTDATA_API_KEY}",
         "WEB_UNLOCKER_ZONE": "${BRIGHTDATA_UNLOCKER_ZONE:-mcp_unlocker}",
         "PRO_MODE": "false"
       }
+    },
+    "qodo": {
+      "command": "ratchet",
+      "args": [
+        "qodo-mcp"
+      ]
     }
   }
 }

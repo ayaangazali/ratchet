@@ -784,6 +784,8 @@ function summarize(a) {
       return a.libs.length
         ? `Fetched fresh upstream documentation (${a.libs.join(", ")}) so the model works from real docs, not memory.`
         : "Stands by to fetch real upstream docs when an error looks like an API mismatch.";
+    case "qodo":
+      return `Drives the hosted <b>Qodo MCP</b> reviewer on the repo's pull request \u2014 its findings are fed into the agent's next prompt. Advisory, never a gate: only the gauntlet sets green.`;
     case "scheduler":
       return `Decides where the next unit of compute goes: <b>${state.expands}</b> expansion(s) so far${state.stalls ? `, and forked ${state.stalls} stalled branch(es) into parallel attempts` : ""}.`;
     case "gatekeeper":
@@ -1124,6 +1126,21 @@ function apply(kind, p, ts) {
       const a = spawn("oracle", "docs·oracle", { role: "oracle", desk: true });
       setDid(a, `healed scraper for ${p.library}`);
       log(a, `repair: ${JSON.stringify(p.old_section)} → ${JSON.stringify(p.new_section)}`, "warn");
+      break;
+    }
+    case "qodo.review.requested": {
+      const a = spawn("qodo", "qodo\u00b7reviewer", { role: "qodo", now: "requesting a hosted review", desk: true });
+      setNow(a, `Qodo MCP reviewing PR #${p.pr}\u2026`);
+      log(a, `posted /review on PR #${p.pr}`, "faint");
+      break;
+    }
+    case "qodo.review.done": {
+      const a = spawn("qodo", "qodo\u00b7reviewer", { role: "qodo", desk: true });
+      const n = (p.findings || []).length;
+      a.nodeId = `PR #${p.pr}`;
+      setDid(a, `review done \u2014 ${n} finding(s) on PR #${p.pr}`);
+      setNow(a, n ? `${n} finding(s) for the next prompt` : "clean review");
+      log(a, `findings: ${(p.findings || []).join("; ") || "none"}`, n ? "warn" : "ok");
       break;
     }
     case "approval.required":

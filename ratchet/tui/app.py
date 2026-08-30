@@ -612,6 +612,7 @@ class RatchetApp(App):
         log.write(Text("   ratchet demo --dir demo-repo      seed a playground repo", style=m.DIM))
         log.write(Text("   ratchet run --repo demo-repo      search until the verifier says green", style=m.DIM))
         log.write(Text("   ratchet redteam --repo demo-repo  score the verifier itself", style=m.DIM))
+        log.write(Text("   ratchet qodo-fix --pr N           let Qodo MCP review, then fix what it found", style=m.DIM))
         log.write(Text("\n   then run `ratchet` here again to watch it live.", style=m.MUTED))
 
     # -------------------------------------------------------------- animation --
@@ -754,6 +755,15 @@ class RatchetApp(App):
             elif k == "docs.heal":
                 self._step(log, "ScraperRepair", str(p.get("library", "")), m.VIOLET)
                 self._note(log, f"{p.get('old_section')!r} → {p.get('new_section')!r}", style=m.VIOLET)
+
+            elif k == "qodo.review.requested":
+                self._step(log, "Qodo", f"PR #{p.get('pr')}", m.VIOLET)
+                self._note(log, "● Qodo MCP — hosted review requested (/review posted to the PR)", style=m.VIOLET)
+
+            elif k == "qodo.review.done":
+                n = len(p.get("findings") or [])
+                self._step(log, "Qodo", f"PR #{p.get('pr')} reviewed", m.VIOLET)
+                self._note(log, f"● Qodo MCP found {n} finding(s) — fed to the next prompt (advisory)", style=m.VIOLET)
 
             elif k == "approval.required":
                 self.pending_id = p.get("id")
@@ -902,8 +912,11 @@ class RatchetApp(App):
     def _chat_session(self):
         if self._chat is None:
             from ..chat import ChatSession
+            from ..config import Settings
+            from ..qodo import oracle_or_none
 
-            self._chat = ChatSession(self.repo, bus=self.bus)
+            self._chat = ChatSession(self.repo, bus=self.bus,
+                                     qodo=oracle_or_none(Settings.from_env(), self.repo, self.bus))
         return self._chat
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
