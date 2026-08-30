@@ -29,10 +29,13 @@ Stopping the agent isn't a prompt asking nicely. It's a rollback it can't argue 
 run. Partial credit is a scalar, so the search can hill-climb instead of flipping a
 boolean.
 
-**2. Forking is cheap because we snapshot the sandbox, not just the repo.** A branch
-inherits its parent's installed dependencies and warm build cache. `ratchet
-bench-snapshot` times the round trip and tells you, before noon, whether to run the
-full tree search or take the documented worktree fallback.
+**2. Every step is a restorable state, and forking one is a first-class operation.**
+The sandbox interface has two providers: harness-backed snapshots, where a branch
+inherits its parent's installed dependencies and warm build cache, and the shipped
+default — git worktrees off a prebuilt base sharing a pre-warmed venv. `ratchet
+bench-snapshot` times a fork round trip and decides between them, and the search and
+the verifier are identical either way. Wiring the snapshot provider to a live
+TrueForge deployment is open work, tracked as T2 in `BUILD_PLAN.md`.
 
 **3. The harness carries the weight.** Sub-agents, sandboxes, approvals, session
 persistence and multi-provider routing all come from TrueForge. We built the search
@@ -60,7 +63,7 @@ npx @truefoundry/trueforge@latest     # the harness: localhost:8790, SQLite, no 
 git clone <this repo> && cd ratchet
 make dev
 make demo                              # seeds demo-repo/ with a broken slugify
-make test                              # 41 tests, ~40s, no docker, no network
+make test                              # the whole suite, under a minute, no docker, no network
 ```
 
 **The forty-second version — no model, no key, no network:**
@@ -309,7 +312,7 @@ ratchet/
 make test
 ```
 
-41 tests, no Docker and no network. They cover the pure functions (parsing, grading,
+No Docker and no network anywhere in the suite. The tests cover the pure functions (parsing, grading,
 the cheat rules, novelty, budgets), run a complete search offline against a scripted
 generator and the real verifier, put real patches through the real gauntlet, run the
 entire red-team battery so a hole in the verifier fails CI, and try to tamper with

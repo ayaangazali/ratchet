@@ -27,6 +27,10 @@ enforces. Prioritise, in order:
 5. Silent exception swallowing in a verifier stage -- an error that grades as a pass
    is the worst bug this codebase can have.
 6. A pruned node that is dropped without being parked at refs/ratchet/pruned/.
+
+Those six come first because they are this repository's failure modes. Beyond them,
+review as usual across correctness, reliability, maintainability and performance --
+the list above is a priority order, not a boundary.
 """
 
 [pr_code_suggestions]

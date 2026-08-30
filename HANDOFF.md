@@ -14,7 +14,7 @@ every tool fact anyone looked up (so you do not need to search the web again),
 ```bash
 make dev          # editable install + dev deps (python 3.11+)
 make demo         # seeds demo-repo/: a broken slugify, three prepared patches
-make test         # 41 tests, ~40s, no docker, no network
+make test         # the whole suite, under a minute, no docker, no network
 make redteam      # 10 known cheating patterns fired at the verifier — expect 10/10
 make run-offline  # a complete search with no model: root, a prune, a green node
 ```

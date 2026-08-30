@@ -129,9 +129,11 @@ Four things, each under ten seconds to start, because judges interrupt.
 
 ## Questions you will get
 
-**"What stops the agent editing the verifier?"** It is not in the graded tree. It runs
-in the orchestrator process, and `ratchet/verifier/` is in `protected_paths`. The
-agent's only way to change anything is a patch that goes through the gauntlet.
+**"What stops the agent editing the verifier?"** It is not in the graded tree. The
+verifier runs in the orchestrator process, outside the sandbox, and the agent's only
+way to change anything is a patch to the *target* repo that goes through the gauntlet.
+For runs pointed at Ratchet's own repo, `ratchet/verifier/` is in the default
+protected set, so a diff that touches it is a critical finding before it executes.
 
 **"Isn't this just running tests in a loop?"** Two differences. Held-out tests, so a
 patch fitted to what it was shown loses score rather than winning. And restorable
