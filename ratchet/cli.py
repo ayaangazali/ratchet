@@ -765,7 +765,9 @@ def cmd_live(args) -> int:
             # A reviewer that never answered is not a reviewer that approved. The run
             # ends red here rather than printing a green summary over a silent gate.
             view.line(str(e)[:160], "#e5675c")
-            run.finish(green=False, pr=args.pr, nodes=0, findings=0, reason=str(e)[:160])
+            # No `green` here: this path never ran the gauntlet, and `green` is set in
+            # exactly one place. What a live run knows is what the reviewer said.
+            run.finish(blocking=1, pr=args.pr, nodes=0, findings=0, reason=str(e)[:160])
             drain()
             print(f"\n  bus: {bus_path}")
             return 1
@@ -773,7 +775,7 @@ def cmd_live(args) -> int:
 
     blocking = int(review["blocking"]) if review else 0
     findings = len(review["findings"]) if review else 0
-    run.finish(green=not blocking, pr=args.pr or "", nodes=0, findings=findings,
+    run.finish(blocking=blocking, pr=args.pr or "", nodes=0, findings=findings,
                reason=(f"{blocking} blocking finding(s) — the reviewer said no"
                        if blocking else
                        "live run complete — every call above actually happened"))
