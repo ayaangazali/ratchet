@@ -195,13 +195,21 @@ class QodoOracle:
     # --------------------------------------------------------------- reviews --
 
     def _latest_review_comment(self, pr: int) -> tuple[str, str] | None:
-        """(body, updated_at) of the bot's review comment, or None."""
-        out = self._gh("api", f"repos/{self.slug}/issues/{pr}/comments")
+        """(body, updated_at) of the bot's review comment, or None.
+
+        Paginated on purpose: GitHub serves 30 comments a page, and a PR that has
+        been through a few review rounds pushes the bot's comment off page one —
+        at which point an unpaginated read reports "no review" on a reviewed PR.
+        ``--slurp`` makes the pages one JSON array of arrays (gh >= 2.42).
+        """
+        out = self._gh("api", "--paginate", "--slurp",
+                       f"repos/{self.slug}/issues/{pr}/comments?per_page=100")
         if not out:
             return None
         try:
-            comments = json.loads(out)
-        except ValueError:
+            pages = json.loads(out)
+            comments = [c for page in pages for c in page]
+        except (ValueError, TypeError):
             return None
         reviews = [c for c in comments
                    if c.get("user", {}).get("login") == BOT_LOGIN

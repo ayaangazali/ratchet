@@ -100,13 +100,18 @@ def test_oracle_is_a_noop_without_gh(monkeypatch, tmp_path):
     assert oracle_or_none(SimpleNamespace(qodo=False), tmp_path) is None
 
 
-def _comments_json(body: str, updated_at: str) -> str:
-    return json.dumps([{
+def _bot_comment(body: str, updated_at: str) -> dict:
+    return {
         "user": {"login": "qodo-code-review[bot]"},
         "body": "Code Review by Qodo\n" + body,
         "updated_at": updated_at,
         "created_at": "2026-01-01T00:00:00Z",
-    }])
+    }
+
+
+def _comments_json(body: str, updated_at: str) -> str:
+    """`gh api --paginate --slurp` output: one array per page."""
+    return json.dumps([[_bot_comment(body, updated_at)]])
 
 
 def _approver(repo: Path, *, allow: bool) -> threading.Thread:
@@ -215,6 +220,26 @@ def test_wait_for_review_timeout_is_none_not_the_previous_pass(monkeypatch, tmp_
                                  findings=[], counts={"bugs": 0}))
 
     assert oracle.wait_for_review(9, since="2026-01-01T00:00:00Z", timeout_s=0) is None
+
+
+def test_review_comment_is_found_past_the_first_page(monkeypatch, tmp_path):
+    """GitHub serves comments 30 to a page. On a PR with a few review rounds the
+    bot's comment is not on page one, and an unpaginated read calls a reviewed PR
+    unreviewed — which qodo-fix then reports as 'nothing to fix'."""
+    monkeypatch.setattr(qodo.shutil, "which", lambda _: "/usr/bin/gh")
+    oracle = QodoOracle(tmp_path, slug="owner/repo")
+    chatter = [{"user": {"login": "someone"}, "body": "nice", "updated_at": "2026-01-01T00:00:00Z"}]
+    slurped = json.dumps([
+        chatter * 30,                                              # page 1: no bot
+        [_bot_comment(FIXTURE, "2026-01-02T00:00:00Z")],           # page 2: the review
+    ])
+    monkeypatch.setattr(subprocess, "run",
+                        lambda argv, **kw: SimpleNamespace(stdout=slurped, returncode=0))
+
+    review = oracle.latest_review(5, fresh=True)
+    assert review is not None
+    assert review.reviewed_at == "2026-01-02T00:00:00Z"
+    assert review.counts.get("bugs") == 8
 
 
 def test_qodo_mcp_exposes_four_tools():
