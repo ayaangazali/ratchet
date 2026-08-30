@@ -31,6 +31,9 @@ PROVIDERS: dict[str, tuple[str | None, str, str]] = {
     "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-5.2"),
     "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "llama-3.3-70b-versatile"),
     "kimi": ("https://api.moonshot.ai/v1", "MOONSHOT_API_KEY", "kimi-k2-0905-preview"),
+    # the Claude Code CLI you are already signed into: no API key, no wire call --
+    # ratchet shells out to `claude -p` and grades what comes back like any other
+    "claude-code": (None, "", "default"),
     "trueforge": (None, "", "auto"),  # the local agent harness; TRUEFORGE_BASE_URL, no key
     # the TrueFoundry AI Gateway (cloud): OpenAI-compatible, key from
     # https://shryukg.truefoundry.cloud/gateway-onboarding — base overridable via TFY_BASE_URL
@@ -61,6 +64,12 @@ MODEL_CATALOG: dict[str, list[tuple[str, str]]] = {
         ("kimi-k2-0905-preview", "k2 flagship"),
         ("kimi-k2-turbo-preview", "k2, faster"),
         ("moonshot-v1-32k", "long context"),
+    ],
+    "claude-code": [
+        ("default", "your signed-in Claude Code — no API key needed"),
+        ("opus", "deepest reasoning"),
+        ("sonnet", "fast + sharp"),
+        ("haiku", "quick edits"),
     ],
     "trueforge": [("auto", "whatever the harness routes — needs TrueForge on :8790")],
     "truefoundry": [("auto", "first model on the gateway — /connect truefoundry with your TFY key")],
@@ -109,6 +118,12 @@ def validate_key(provider: str, key: str, *, timeout: float = 20.0) -> str:
     makes /connect honest -- a saved key that never worked is worse than none."""
     if provider == "demo":
         return "demo needs no key"
+    if provider == "claude-code":
+        import shutil
+
+        if shutil.which("claude"):
+            return "connected — using your signed-in Claude Code"
+        raise ChatProviderError("the `claude` CLI is not on PATH; install Claude Code first")
     if provider == "trueforge":
         if trueforge_alive(ttl=0):
             return "connected — the harness is answering"
@@ -186,7 +201,11 @@ def connected_providers() -> dict[str, bool]:
     load_saved_keys()
     out = {}
     for name, (_b, key_env, _m) in PROVIDERS.items():
-        if name == "trueforge":
+        if name == "claude-code":
+            import shutil
+
+            out[name] = bool(shutil.which("claude"))
+        elif name == "trueforge":
             out[name] = trueforge_alive()
         else:
             out[name] = not key_env or bool(os.environ.get(key_env))
@@ -238,6 +257,8 @@ class ChatBackend:
     def _complete(self, prompt: str, *, max_tokens: int, timeout: float) -> str:
         if self.provider == "demo":
             return _demo_reply(prompt)
+        if self.provider == "claude-code":
+            return self._claude_code_complete(prompt, timeout=timeout)
         if self.provider == "trueforge":
             return self._trueforge_complete(prompt, max_tokens=max_tokens)
         base, key_env, _default = PROVIDERS[self.provider]
@@ -302,6 +323,42 @@ class ChatBackend:
         except (KeyError, IndexError, ValueError) as e:
             raise ChatProviderError(f"{self.provider} returned an unexpected payload: {e}") from e
 
+
+    def _claude_code_complete(self, prompt: str, *, timeout: float) -> str:
+        """Ask the local Claude Code CLI, headless.
+
+        The point is that there is nothing to connect: if `claude` runs on this
+        machine, the user is already authenticated, and ratchet borrows that
+        session. Tools are disallowed -- Claude Code is asked for the same fenced
+        answer every other provider gives, so the reply still goes through the
+        cheat gate and lands as one reviewable commit rather than editing the
+        working tree behind ratchet's back.
+        """
+        import shutil
+        import subprocess
+
+        from . import debuglog
+
+        exe = shutil.which("claude")
+        if not exe:
+            raise ChatProviderError(
+                "the `claude` CLI is not on PATH — install Claude Code, or /model something else"
+            )
+        argv = [exe, "-p", prompt, "--output-format", "text", "--disallowed-tools",
+                "Edit,Write,NotebookEdit,Bash"]
+        if self.model and self.model != "default":
+            argv += ["--model", self.model]
+        debuglog.log("info", f"exec claude -p (model={self.model}) timeout={timeout}s")
+        try:
+            r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            raise ChatProviderError(f"claude -p timed out after {timeout}s") from e
+        except OSError as e:
+            raise ChatProviderError(f"could not run claude: {e}") from e
+        debuglog.log("info", f"claude exited {r.returncode} · {len(r.stdout)} chars")
+        if r.returncode != 0:
+            raise ChatProviderError(f"claude exited {r.returncode}: {(r.stderr or r.stdout).strip()[:200]}")
+        return r.stdout
 
     def _trueforge_complete(self, prompt: str, *, max_tokens: int) -> str:
         """Route the turn through the TrueForge agent harness -- the same machinery

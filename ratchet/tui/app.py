@@ -526,6 +526,7 @@ class RatchetApp(App):
         self._resize_banner()
         self._fit()
         self._idle_splash()
+        self.call_after_refresh(self._warn_about_the_directory)
         self.call_after_refresh(self._first_run_connect)
         self.set_interval(0.2, self.drain)
         self.set_interval(0.12, self.animate_status)
@@ -562,6 +563,19 @@ class RatchetApp(App):
         if compact != banner.compact:
             banner.compact = compact
             banner.draw()
+
+    def _warn_about_the_directory(self) -> None:
+        """`ratchet` in $HOME cannot commit and will feed the model your whole home
+        directory. Say so before the first prompt, not after it fails."""
+        from ..gitstate import is_repo
+
+        log = self.query_one("#activity", RichLog)
+        if self.repo == Path.home():
+            self._step(log, "heads up", "this is your home directory", m.AMBER)
+            self._note(log, "make a project folder first — `mkdir mysite && cd mysite && git init && ratchet`", m.AMBER)
+        elif not is_repo(self.repo):
+            self._step(log, "heads up", "not a git repository", m.AMBER)
+            self._note(log, "run `git init` here so each turn becomes a commit you can /undo", m.AMBER)
 
     def _first_run_connect(self) -> None:
         """Nothing connected means the first thing on screen is the connect picker:

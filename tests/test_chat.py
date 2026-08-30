@@ -212,7 +212,7 @@ def test_palette_autocompletes_commands_and_models():
     assert [r.label for r in rows_for("/mo")] == ["/model"]
     assert len(rows_for("/")) == len(COMMANDS)
     models = rows_for("/model ")
-    assert len(models) == 15 and all(r.kind == "model" for r in models)  # +trueforge, +truefoundry
+    assert len(models) == 19 and all(r.kind == "model" for r in models)  # incl. claude-code, trueforge, truefoundry
     kimi = [r.label for r in rows_for("/model kimi")]
     assert kimi and all("kimi" in label for label in kimi)
     providers = [r.label for r in rows_for("/connect")]
@@ -652,3 +652,46 @@ def test_provider_errors_read_as_sentences_not_json(monkeypatch):
         assert "Incorrect API key provided" in str(e)
         assert "/connect" in str(e)      # tells you what to do
         assert "{" not in str(e)         # not a JSON dump
+
+
+def test_a_turn_that_writes_nothing_is_not_a_success(repo):
+    """The reported failure: gpt-5.2 replied with 10k characters, the diff did not
+    apply to a directory it could not see, and the session report said "1 turn,
+    ok, 0 files". A turn that produced nothing is a failed turn."""
+
+    class DiffAgainstNothing:
+        provider, model = "d", "d"
+
+        def complete(self, prompt, **kw):
+            return ("intent: restyle the site\n```diff\n"
+                    "--- a/does_not_exist.html\n+++ b/does_not_exist.html\n"
+                    "@@ -1,1 +1,1 @@\n-old\n+new\n```\n")
+
+    turn, lines = _run(ChatSession(repo, backend=DiffAgainstNothing()), "make a website")
+    assert not turn.ok
+    assert "did not apply" in turn.error and "does_not_exist.html" in turn.error
+    assert any(kind == "error" for kind, _t in lines)
+
+
+def test_prose_only_reply_is_a_failure_not_an_empty_success(repo):
+    class AllTalk:
+        provider, model = "t", "t"
+
+        def complete(self, prompt, **kw):
+            return "intent: plan it out\n\nFirst we should discuss the architecture..."
+
+    turn, _ = _run(ChatSession(repo, backend=AllTalk()), "make a website")
+    assert not turn.ok
+
+
+def test_claude_code_provider_is_available_without_a_key(monkeypatch):
+    """No /connect step: if the CLI is installed, the user is already signed in."""
+    import shutil
+
+    import ratchet.providers as prov
+
+    monkeypatch.setattr(prov.shutil if hasattr(prov, "shutil") else shutil, "which",
+                        lambda name: "/usr/local/bin/claude" if name == "claude" else None)
+    assert prov.validate_key("claude-code", "") .startswith("connected")
+    assert "claude-code" in prov.MODEL_CATALOG
+    assert prov.PROVIDERS["claude-code"][1] == ""   # no key env at all
