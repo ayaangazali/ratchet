@@ -68,6 +68,7 @@ class ChatSession:
         self.bus = bus
         self.cancel = threading.Event()
         self.turns: list[Turn] = []
+        self._label = "turn-1"          # the current turn's node id, for the console
         self._focus = ""  # the live prompt, so _sources_block can prefer named files
 
     # ----------------------------------------------------------------- turn --
@@ -80,8 +81,7 @@ class ChatSession:
             debuglog.exception("turn crashed", e)
             t = Turn(prompt=prompt, error=f"{type(e).__name__}: {e}")
             emit("error", t.error)
-            self.turns.append(t)
-            return t
+            return self._finish(t, time.time())
 
     def _run_turn(self, prompt: str, emit: Callable[[str, str], None]) -> Turn:
         """One chat turn. `emit(kind, text)` receives the ultra-summary lines the
@@ -97,6 +97,21 @@ class ChatSession:
             emit("error", turn.error)
             return self._finish(turn, t0)
         self._bus("chat.turn", prompt=redact(prompt[:200]), provider=self.backend.provider, model=self.backend.model)
+
+        # The console's panes -- tree, gauntlet rail, counters, waiting-on -- are fed
+        # by run events. A chat turn used to emit only chat.*, which the renderer
+        # skips, so four panes sat dead through every session and the tool looked
+        # broken while it worked. A turn IS a node: it has an intent, it gets
+        # graded, it produces files, it lands as a commit. Say so in that language.
+        self._label = f"turn-{len(self.turns) + 1}"
+        self._bus("expand", node=self._label, fanout=1, depth=len(self.turns), dead_ends=0)
+        self._bus("verify.started", label=self._label, parent="chat",
+                  intent=redact(prompt[:80]), model=f"{self.backend.provider}/{self.backend.model}")
+        for stage in ("build", "f2p", "p2p", "types", "lint", "hygiene"):
+            # honest: a chat turn runs the static gate and nothing else, so the
+            # rest of the rail is reported skipped rather than left blank
+            self._bus("stage.result", label=self._label, stage=stage, passed=True,
+                      detail="not run for a chat turn", skipped=True)
 
         if getattr(self.backend, "agentic", False):
             return self._run_agentic(prompt, emit, turn, t0)
@@ -149,9 +164,13 @@ class ChatSession:
         findings = cheat_mod.inspect(synth, protected_paths=list(cheat_mod.DEFAULT_PROTECTED))
         crit = [f for f in findings if f.severity.value == "critical"]
         if crit:
+            self._bus("stage.result", label=self._label, stage="cheat", passed=False,
+                      detail=f"{crit[0].rule} — blocked")
             turn.error = f"gauntlet blocked the turn: {crit[0].one_line()}"
             emit("error", turn.error)
             return self._finish(turn, t0)
+        self._bus("stage.result", label=self._label, stage="cheat", passed=True,
+                  detail=f"{len(findings)} finding(s), 0 critical")
         emit("step", "gauntlet cheat check: clean" if not findings
              else f"gauntlet cheat check: {len(findings)} warning(s), none blocking")
 
@@ -212,10 +231,19 @@ class ChatSession:
         from .verifier import cheat as cheat_mod
 
         emit("step", f"claude code session · {self.backend.model}")
+        self._bus("sandbox.created", label=self._label, provider="claude-code")
         started_at = time.time()
+
+        def relay(kind: str, text: str) -> None:
+            """One step of the session: to the activity pane, to the waiting-on
+            panel, and onto the bus so the browser and a replay see it too."""
+            emit(kind, text)
+            self._bus("chat.step", label=self._label, text=text)
+
+        
         before = self._tracked_state()
         try:
-            self.backend.run_agentic(prompt, self.repo, emit)
+            self.backend.run_agentic(prompt, self.repo, relay)
         except ChatProviderError as e:
             turn.error = str(e)
             debuglog.log("error", f"agentic session failed: {e}")
@@ -249,9 +277,13 @@ class ChatSession:
             # the session already wrote; reverting is the only honest response
             subprocess.run(["git", "checkout", "--", *turn.files], cwd=self.repo,
                            capture_output=True, timeout=60)
+            self._bus("stage.result", label=self._label, stage="cheat", passed=False,
+                      detail=f"{crit[0].rule} — blocked, session reverted")
             turn.error = f"gauntlet blocked the session and reverted it: {crit[0].one_line()}"
             emit("error", turn.error)
             return self._finish(turn, t0)
+        self._bus("stage.result", label=self._label, stage="cheat", passed=True,
+                  detail=f"{len(findings)} finding(s), 0 critical")
         emit("step", "gauntlet cheat check: clean" if not findings
              else f"gauntlet cheat check: {len(findings)} warning(s), none blocking")
 
@@ -380,7 +412,6 @@ class ChatSession:
     def _commit_and_finish(self, turn: Turn, t0: float) -> Turn:
         if turn.files:
             turn.commit = self._commit(turn, turn.intent or "chat turn")
-        self.turns.append(turn)
         return self._finish(turn, t0)
 
     def _commit(self, turn: Turn, intent: str) -> str:
@@ -408,6 +439,28 @@ class ChatSession:
 
     def _finish(self, turn: Turn, t0: float) -> Turn:
         turn.seconds = round(time.time() - t0, 2)
+        # Every turn is recorded, not just the ones that committed. A failed turn
+        # vanishing from the session made /export read "0 turns" for a session that
+        # had plainly just run one -- the report said nothing happened while the
+        # user watched it happen.
+        if turn not in self.turns:
+            self.turns.append(turn)
+        node: dict[str, object] = {
+            "id": getattr(self, "_label", "turn"),
+            "parent": None,
+            "score": 1.0 if turn.ok else 0.0,
+            "green": turn.ok,
+            "outcome": "green" if turn.ok else ("cancelled" if turn.cancelled else "broken"),
+            # redacted: the intent falls back to the prompt, and a refused
+            # key-shaped prompt would otherwise be written to the bus by the very
+            # event that draws it on screen
+            "intent": redact(turn.intent or turn.prompt[:60]),
+            "model": f"{self.backend.provider}/{self.backend.model}",
+            "depth": max(0, len(self.turns) - 1),
+            "findings": [],
+            "reason": redact(turn.error or f"{len(turn.files)} file(s)"),
+        }
+        self._bus("node.added" if turn.ok else "node.pruned", **node)
         self._bus("chat.done", intent=turn.intent, files=turn.files, commit=turn.commit,
                   error=turn.error, cancelled=turn.cancelled, seconds=turn.seconds)
         return turn

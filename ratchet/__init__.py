@@ -5,4 +5,4 @@ every rejected step is rolled back and handed back as the next observation, and
 the only irreversible action in the system waits for a human.
 """
 
-__version__ = "0.7.2"
+__version__ = "0.8.0"

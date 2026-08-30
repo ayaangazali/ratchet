@@ -29,6 +29,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.timer import Timer
 from textual.widgets import Button, Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
@@ -478,6 +479,7 @@ class RatchetApp(App):
         self._palette_rows: list = []                        # rows behind the visible options
         self._awaiting_key: str | None = None                # /connect: which provider's key comes next
         self._heartbeat: Timer | None = None                 # ticks while a turn is in flight
+        self._splash_showing = False                         # the idle dolphin, not the session
         self._turn_started = 0.0
 
     # ----------------------------------------------------------------- layout --
@@ -594,9 +596,16 @@ class RatchetApp(App):
         box.focus()
         box.cursor_position = len(box.value)
 
+    def _clear_splash(self, log: RichLog) -> None:
+        """The dolphin and the quick start go once real work starts, and only then."""
+        if self._splash_showing:
+            log.clear()
+            self._splash_showing = False
+
     def _idle_splash(self) -> None:
         """Until the first event lands, the console is a dolphin and a promise."""
         log = self.query_one("#activity", RichLog)
+        self._splash_showing = True
         log.write(Text())
         log.write(m.render(m.FIN, indent=6, dim=0.55))
         log.write(Text("   nothing on the bus yet. quick start:\n", style=m.MUTED))
@@ -617,23 +626,39 @@ class RatchetApp(App):
     # -------------------------------------------------------------------- bus --
 
     def drain(self) -> None:
-        tree = self.query_one(TreePane)
-        rail = self.query_one(GauntletRail)
-        counters = self.query_one(Counters)
-        waiting = self.query_one(WaitingOn)
-        status = self.query_one(StatusLine)
+        # A timer callback that raises takes the whole app down with it. The panes
+        # are gone during teardown and can be absent mid-relayout, and neither is
+        # worth killing a session over -- the next tick will find them.
+        try:
+            tree = self.query_one(TreePane)
+            rail = self.query_one(GauntletRail)
+            counters = self.query_one(Counters)
+            waiting = self.query_one(WaitingOn)
+            status = self.query_one(StatusLine)
+        except NoMatches:
+            return
         log = self.query_one("#activity", RichLog)
 
         for ev in self.bus.tail():
             p, k = ev.payload, ev.kind
+            if k == "chat.step":
+                # the live pulse of an agentic session: the activity pane already
+                # has it from the worker, but the waiting-on panel only learns what
+                # the session is doing from here
+                waiting.show("claude code", str(p.get("text", ""))[:70])
+                continue
             if k.startswith("chat."):
-                # chat turns already narrate themselves into the activity pane from
-                # the worker; their bus records are for the dashboard and replay,
-                # and must not count as "the run started" (which clears the log)
+                # the turn's own start/end records: for the dashboard and replay.
+                # They must not count as "the run started", which clears the log.
+                if k == "chat.done":
+                    waiting.clear()
                 continue
             if not self.seen_any:
                 self.seen_any = True
-                log.clear()
+                # Clear the idle splash, not the session. A chat turn writes its own
+                # narration first and its bus events arrive second, so clearing the
+                # whole log here erased the very lines the user was reading.
+                self._clear_splash(log)
                 # from now, not from the event's timestamp: attaching to an
                 # existing bus file made the clock read hours (found live)
                 status.started = time.time()
@@ -820,8 +845,10 @@ class RatchetApp(App):
         box.value = ""
         box.placeholder = "ask for code, or / for commands — Enter runs · Esc interrupts"
         self._close_palette()
-        self.bus = Bus(self.bus.path)   # a fresh reader: re-drains from byte zero
-        self.seen_any = False
+        # deliberately NOT a fresh reader: rewinding to byte zero replays the whole
+        # session into the freshly cleared pane and buries the restart notice under
+        # the history the restart was meant to get away from
+        self.seen_any = True
         status = self.query_one(StatusLine)
         status.end_work()
         status.state = "idle"
@@ -1104,6 +1131,7 @@ class RatchetApp(App):
             self._note(log, "a turn is already running — Esc to interrupt it first", m.AMBER)
             return
         self._turn_started = time.time()
+        self._clear_splash(log)
         self.query_one(StatusLine).begin_work()
         if self._heartbeat is None:
             # "is it dead or just slow?" is the question that made this whole

@@ -820,3 +820,55 @@ def test_the_gate_still_applies_to_an_agentic_session_without_git(tmp_path):
 
     turn, _ = _run(ChatSession(tmp_path, backend=Sneaky()), "make an app")
     assert not turn.ok and "gauntlet blocked" in turn.error
+
+
+def test_a_chat_turn_drives_every_pane(repo, monkeypatch):
+    """The complaint, as a test: the tree, the gauntlet rail, the counters and the
+    waiting-on panel all sat dead through a whole session, because they are fed by
+    run events and a chat turn only ever emitted chat.*, which the renderer skips.
+    A turn is a node -- it has an intent, it is graded, it produces files -- so it
+    has to say so in the language the console reads."""
+    import asyncio
+
+    from textual.widgets import Input as _Input
+    from textual.widgets import RichLog as _RichLog
+
+    from ratchet.tui.app import Counters, GauntletRail, RatchetApp, TreePane
+
+    monkeypatch.setenv("RATCHET_CHAT_PROVIDER", "demo")
+    (repo / ".ratchet").mkdir(exist_ok=True)
+    bus = repo / ".ratchet" / "session.bus.jsonl"
+    bus.touch()
+
+    async def drive():
+        app = RatchetApp(bus, repo)
+        async with app.run_test(size=(150, 46)) as pilot:
+            await pilot.pause(0.4)
+            box = app.query_one("#chat", _Input)
+            box.focus()
+            box.value = "make a page"
+            await pilot.press("enter")
+            for _ in range(80):
+                await pilot.pause(0.25)
+                text = "\n".join(str(line.text) for line in app.query_one("#activity", _RichLog).lines)
+                if "done in" in text or "error" in text.lower():
+                    break
+            await pilot.pause(0.8)
+            return (
+                dict(app.query_one(TreePane).nodes),
+                {k: v[0] for k, v in app.query_one(GauntletRail).state.items()},
+                app.query_one(Counters).subagents,
+                text,
+            )
+
+    nodes, rail, subagents, text = asyncio.run(drive())
+
+    assert nodes, "the tree stayed empty through a whole turn"
+    node = next(iter(nodes.values()))
+    assert node.get("green") and node.get("intent")
+    assert rail["cheat"] == "pass", "the gauntlet rail never showed the stage that ran"
+    # honest about the stages a chat turn does not run, rather than blank
+    assert rail["f2p"] == "skip" and rail["build"] == "skip"
+    assert subagents >= 1, "the counters never noticed the session"
+    # and the session's own narration survives the bus events that follow it
+    assert "wrote index.html" in text
