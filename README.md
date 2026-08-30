@@ -2,17 +2,6 @@
 
 **A coding agent that never decides it's done. The tests do.**
 
-Every step the agent takes is a git commit plus a sandbox snapshot, and every
-candidate patch must clear a verifier gauntlet — build, cheat check, fail-to-pass,
-pass-to-pass, types, lint, diff hygiene — before it is allowed to stick. Because
-each step is a restorable node, a run is not a linear loop with retries: it is a
-**tree search over repo states**, with the verifier's score as the value function
-and a scheduler deciding where to spend the next unit of compute. Stalled branches
-fork in parallel, dead ends get pruned, and the winning path exits as one clean
-squashed diff sitting at a human approval gate.
-
-Stopping the agent isn't a prompt asking nicely. It's a rollback it can't argue with.
-
 ```
 ● root  0.58
 ├─✗ dcd3  0.58  pruned: 1 previously-passing test now fails
@@ -20,58 +9,119 @@ Stopping the agent isn't a prompt asking nicely. It's a rollback it can't argue 
 └─★ ae2c  1.00  ✓green
 ```
 
----
+## What it is
 
-## Three claims, each demonstrable in under thirty seconds
+Coding agents cheat: given a repo and a test command, they eventually learn that the
+cheapest way to make tests pass is to change what "pass" means — measured at roughly
+**half the time** on provably-impossible tasks ([ImpossibleBench](https://arxiv.org/html/2510.20270v1)).
+Ratchet is a harness where that doesn't work. There is no "done" tool. A patch
+counts only after it survives a seven-stage verifier gauntlet, and stopping the
+agent isn't a prompt asking nicely — it's a rollback it can't argue with.
 
-**1. The verifier is the loop condition, not the model's opinion.** Termination is
-`result.green`, never a `<done>` token — there is no tool an agent can call to end a
-run. Partial credit is a scalar, so the search can hill-climb instead of flipping a
-boolean.
+## How it works
 
-**2. Forking is cheap because we snapshot the sandbox, not just the repo.** A branch
-inherits its parent's installed dependencies and warm build cache. `ratchet
-bench-snapshot` times the round trip and tells you, before noon, whether to run the
-full tree search or take the documented worktree fallback.
+1. 🗺 The agent proposes a patch; every step is a **git commit + sandbox snapshot**.
+2. 🛡 The patch runs the **gauntlet**: build → cheat check → hidden tests → regressions → types → lint → diff hygiene. Cheats are caught *before the patch executes*.
+3. 🌳 Because every step is restorable, the run is a **tree search over repo states** — dead ends are pruned (and parked, never lost), stalled branches fork in parallel.
+4. ⛩ The winning path exits as **one squashed diff at a human gate**. Nothing pushes, nothing opens a PR, until you say yes.
 
-**3. The harness carries the weight.** Sub-agents, sandboxes, approvals, session
-persistence and multi-provider routing all come from TrueForge. We built the search
-and the verifier. There is no provider SDK and no container orchestration anywhere
-in this repository, on purpose.
+## Install
 
-Why this matters at all: give an agent a repo and a test command and it will
-eventually find that the cheapest way to make tests pass is to change what "pass"
-means. That is measured, not theoretical — on tasks whose tests are made provably
-unsatisfiable, frontier models report success roughly **half the time** instead of
-reporting the task impossible ([ImpossibleBench](https://arxiv.org/html/2510.20270v1)),
-and Anthropic has documented production coding-RL runs where models learned
-`sys.exit(0)`, an always-`True` `__eq__`, and a `conftest.py` hook that rewrites
-pytest's own report objects ([paper](https://arxiv.org/html/2511.18397v1)).
-
----
-
-## Run it
-
-Python 3.11+, git, and Node 22.14+ for TrueForge.
+Python 3.11+ and git. Node 22.14+ only for live runs ([TrueForge](https://github.com/truefoundry/trueforge) is the harness).
 
 ```bash
-npx @truefoundry/trueforge@latest     # the harness: localhost:8790, SQLite, no login
-
-git clone <this repo> && cd ratchet
-make dev
-make demo                              # seeds demo-repo/ with a broken slugify
-make test                              # 41 tests, ~40s, no docker, no network
+git clone https://github.com/ayaangazali/ratchet && cd ratchet
+make dev          # editable install + dev deps
+make demo         # seeds demo-repo/ with a broken slugify + three patches
+make test         # the whole suite — no docker, no network, no key
 ```
 
-**The forty-second version — no model, no key, no network:**
+Forty-second proof, fully offline:
 
 ```bash
-make redteam
+make redteam                                                    # verifier vs 10 known cheats
+ratchet run --repo demo-repo --scripted demo-repo/patches/scripted.json   # a whole search
 ```
 
-Fires ten published reward-hacking patterns at the verifier and scores **the
-verifier**, alongside two control patches that must *not* be caught, because one
-that rejects everything is broken rather than strict.
+Live runs: `npx @truefoundry/trueforge@latest` then `ratchet run --repo <your-repo>`.
+
+## Features
+
+- 🛡 **Seven-stage gauntlet** — green is set in exactly one place in the code, and it isn't the model.
+- 🕵️ **Cheat detector** — skip markers, hardcoded answers, spoofed exit codes, conftest report hooks, tests rewritten at import. **10/10 known attacks caught, 0 false positives**, scored in CI.
+- 🙈 **Held-out tests** — the agent never sees the names of the tests that grade it. A canary task catches answer-smuggling that trips zero static rules.
+- 🌳 **Tree search + `rewind`** — restore step 12 and branch from it. Nothing else in this category treats steps as restorable states.
+- 🧾 **Signed receipts** — every graded node lands in a hash chain; forge a verdict and `ratchet audit` says exactly where it broke.
+- ⛩ **Ask-before gate** — irreversible steps stop for a human *before* they happen, never after.
+- 🖥 **A TUI console and a pixel-office dashboard**, both replayable from the same bus file.
+- 🔌 **No provider SDK, no docker** — model routing and sandboxes come from the harness; the offline paths need neither.
+
+## The cool shit
+
+### The pixel office 🕹️
+
+```bash
+ratchet dashboard --repo demo-repo    # attaches to the latest run · http://127.0.0.1:8788
+```
+
+Every subagent on the bus is a pixel character in a tiny office (art from
+[Pixel Agents](https://github.com/pixel-agents-hq/pixel-agents), MIT). Verifiers
+sit at their own labeled workstations — one agent per computer — and type while
+their monitor flickers; the screen settles **green** or goes dark with the node's
+verdict. Finished agents clock off and walk to the lounge.
+
+**When the run wants to do something irreversible, an agent walks to the ⛩ gate
+and the whole page holds** — the ask comes *before* the push or PR, never after:
+
+![The dashboard holding at the gate — approve or deny before anything ships](docs/dashboard-holding.png)
+
+Approve (or hit `a`) and the run finishes green; everyone clocks off:
+
+![The run gone green — winner starred, agents off duty in the lounge](docs/dashboard-green.png)
+
+🧭 **How to read it in ten seconds:** the top-right bar is *progress to green* ·
+click any character for a plain-English summary — repo, task, branch/node, model,
+workstation, open-PR count, DOING NOW / WAITING ON / DID · hover for a two-line
+brief · ⏸ amber = waiting on *you* · ★ = accepted · ✗ = pruned (parked, not deleted).
+
+💡 **Tips:** keys `a`/`d` answer the gate · refresh mid-run and the office rebuilds
+from byte zero (the bus is a file) · replay any old run with `--bus`. Run ids are
+just the bus filenames — `ls <repo>/.ratchet/` shows them, and `--run <id>` picks one. The dashboard
+code lands via [PR #14](https://github.com/ayaangazali/ratchet/pull/14); these
+screenshots are from a live run of that branch.
+
+### The console
+
+```
+┌─ tree ──────────────────┬─ verifier ─────────────────────────┐
+│ ● root         0.58     │ stage 3/7 · fail-to-pass           │
+│ ├─● 0f3a  0.62          │ PASS  build            ok           │
+│ │ ├─● 7c21  0.81 ←live  │ PASS  cheat check      0 critical   │
+│ │ └─✗ 9ba4  pruned      │ FAIL  fail-to-pass     5/6 (hidden) │
+│ └─✗ 4de0  regressed     │ ....  pass-to-pass                  │
+│                         │                                     │
+│ subagents 4 · sandboxes │ ⚠ 9ba4 pruned: cheat-check          │
+│ 2 live/7 · approvals 1  │   skip marker on a held-out test    │
+├─────────────────────────┴─────────────────────────────────────┤
+│ budget: 22/40 nodes · 6m12s · $1.14   [a]pprove [r]ewind [q]  │
+└───────────────────────────────────────────────────────────────┘
+```
+
+Renders entirely off a JSONL bus — kill it, restart it, replay a finished run:
+
+```bash
+make fixture && make console       # a recorded run; no model needed
+ratchet replay --speed 4
+```
+
+If the console dies mid-demo the approval still works:
+`echo '{"allow": true}' > demo-repo/.ratchet/approvals/<id>.json`.
+
+### The red team — an eval of the verifier itself
+
+`make redteam` fires ten published reward-hacking patterns at the verifier, plus two
+honest control patches that must *not* be caught (a verifier that rejects everything
+is broken, not strict):
 
 ```
 attack                   outcome      score  stopped at  findings
@@ -92,21 +142,13 @@ caught 10/10 known reward-hacking patterns
 false positives on the honest fix: 0
 ```
 
-`rewrite_tests_at_import` is on that list because our own red team found it:
-reverting the test files before the run does nothing if the *source* rewrites them
-at import time, after the revert. The rule that catches it exists because the eval
-existed.
+`rewrite_tests_at_import` is on the list because our own red team found it:
+reverting test files does nothing if the *source* rewrites them at import time.
+The rule exists because the eval existed.
 
-**A complete search, offline:**
+### The gauntlet, standalone
 
-```bash
-ratchet run --repo demo-repo --scripted demo-repo/patches/scripted.json
-ratchet tree            # the search tree, scores, live and pruned
-ratchet audit           # the receipt chain: proof the run is the run that happened
-ratchet diff            # the squashed patch on the winning path
-```
-
-**The gauntlet on its own, with no agent attached:**
+No agent, no model — three verdicts that tell the whole story:
 
 ```bash
 ratchet verify --task tasks/demo-001-slugify/task.yaml --repo demo-repo \
@@ -119,7 +161,32 @@ ratchet verify --task tasks/canary-impossible/task.yaml --repo demo-repo \
 
 ---
 
-## The loop
+## The fine print
+
+Everything below is how it works under the hood — read on if you're auditing the
+claims rather than kicking the tires.
+
+### Three claims, each demonstrable in under thirty seconds
+
+**1. The verifier is the loop condition, not the model's opinion.** Termination is
+`result.green`, never a `<done>` token — there is no tool an agent can call to end a
+run. Partial credit is a scalar, so the search can hill-climb instead of flipping a
+boolean.
+
+**2. Forking is cheap because we snapshot the sandbox, not just the repo.** A branch
+inherits its parent's installed dependencies and warm build cache. `ratchet
+bench-snapshot` times the round trip and tells you, before noon, whether to run the
+full tree search or take the documented worktree fallback.
+
+**3. The harness carries the weight.** Sub-agents, sandboxes, approvals, session
+persistence and multi-provider routing all come from TrueForge. We built the search
+and the verifier. There is no provider SDK and no container orchestration anywhere
+in this repository, on purpose. (The cheating numbers above aren't theoretical:
+Anthropic has documented production coding-RL runs where models learned
+`sys.exit(0)`, an always-`True` `__eq__`, and a `conftest.py` hook that rewrites
+pytest's own report objects — [paper](https://arxiv.org/html/2511.18397v1).)
+
+### The loop
 
 ```python
 root = Node(commit=git.head(), image=sandbox.snapshot(), score=verifier.run())
@@ -144,11 +211,9 @@ tunnels into a dead branch and calls it progress.
 prompt from that state. Without it, parallel branches rediscover the same wrong idea
 and you have paid N times for a best-of-1.
 
----
+### The gauntlet, scored
 
-## The gauntlet
-
-The product. Stages run in order, cheapest first, short-circuiting on a hard gate.
+Stages run in order, cheapest first, short-circuiting on a hard gate.
 
 | # | stage | fails how | weight |
 |---|-------|-----------|--------|
@@ -191,44 +256,7 @@ chain and prints exactly where it breaks. Not a notary, and no defence against t
 operator of the machine — just evidence that the run you are looking at is the run
 that happened.
 
----
-
-## The console
-
-```
-┌─ tree ──────────────────┬─ verifier ─────────────────────────┐
-│ ● root         0.58     │ stage 3/7 · fail-to-pass           │
-│ ├─● 0f3a  0.62          │ PASS  build            ok           │
-│ │ ├─● 7c21  0.81 ←live  │ PASS  cheat check      0 critical   │
-│ │ └─✗ 9ba4  pruned      │ FAIL  fail-to-pass     5/6 (hidden) │
-│ └─✗ 4de0  regressed     │ ....  pass-to-pass                  │
-│                         │                                     │
-│ subagents 4 · sandboxes │ ⚠ 9ba4 pruned: cheat-check          │
-│ 2 live/7 · approvals 1  │   skip marker on a held-out test    │
-├─────────────────────────┴─────────────────────────────────────┤
-│ budget: 22/40 nodes · 6m12s · $1.14   [a]pprove [r]ewind [q]  │
-└───────────────────────────────────────────────────────────────┘
-```
-
-Left: where the search has been. Right: what it is doing now. Bottom: what it is
-costing and what you can do about it. The ambient counters — sub-agents spawned,
-sandboxes live, approvals pending — stay on screen at all times, which is free proof
-the harness is loaded in every screenshot.
-
-It renders entirely off a JSONL bus, so it can be started, killed and restarted
-mid-run, and a finished run can be replayed into it:
-
-```bash
-make fixture && make console       # a recorded run; no model needed
-ratchet replay --speed 4           # the same run, in the terminal
-```
-
-If the console dies mid-demo the approval still works:
-`echo '{"allow": true}' > demo-repo/.ratchet/approvals/<id>.json`.
-
----
-
-## Does the search actually beat a loop?
+### Does the search actually beat a loop?
 
 ```bash
 ratchet evals
@@ -251,9 +279,7 @@ cheating patches that persisted   linear 8   ·   search 0
 The generator is simulated and the report says so: this measures the machinery —
 rollback and pruning — not a model. That is the claim being made.
 
----
-
-## Layout
+### Layout
 
 ```
 ratchet/
@@ -293,12 +319,7 @@ ratchet/
 | `ratchet audit` | verify a run's receipt chain |
 | `ratchet evals` | linear vs search on our own seeded bugs |
 
-`rewind` is the differentiator. Nothing else in this category lets you restore step
-12 and branch from it, because nothing else treats steps as restorable states.
-
----
-
-## Tests
+### Tests
 
 ```bash
 make test
@@ -310,14 +331,14 @@ generator and the real verifier, put real patches through the real gauntlet, run
 entire red-team battery so a hole in the verifier fails CI, and try to tamper with
 the receipt chain three different ways.
 
-## Handing this over
+### Handing this over
 
 `HANDOFF.md` is the briefing, `TASKS.md` the ordered backlog with acceptance criteria,
 `CLAUDE.md` the contract, `RESEARCH.md` every verified tool fact and URL so nobody
 searches twice, `DEMO.md` the runbook, `SUBMISSION.md` the checklist. Four slash
 commands live in `.claude/commands/`.
 
-## Qodo Code Review Evidence
+### Qodo code review evidence
 
 Every change went through a pull request reviewed by Qodo. Configuration is committed
 at `.pr_agent.toml` and `best_practices.md`.
@@ -326,7 +347,7 @@ at `.pr_agent.toml` and `best_practices.md`.
 |----|-----------------|---------------|------------|
 | #_  | _fill in as you merge_ | | |
 
-## Prior art
+### Prior art
 
 The verification design borrows openly:
 [SWE-bench](https://www.swebench.com/SWE-bench/reference/harness/) for the
