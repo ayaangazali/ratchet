@@ -680,12 +680,20 @@ def cmd_build(args) -> int:
     from .qodo_mcp import QodoMCP
 
     repo = Path(args.repo or ".").resolve()
-    target = Target.parse(args.target)
+    raw = args.target
+    force = ""
+    if raw.lower() == "research":
+        # `ratchet build research "<paper url>"` reads better out loud than a flag
+        if not args.rest:
+            print("usage: ratchet build research <paper url>", file=sys.stderr)
+            return 2
+        raw, force = args.rest[0], "research"
+    target = Target.parse(raw, force=force)
     run_id = args.run_id or f"build-{_uuid.uuid4().hex[:6]}"
     bus_path = repo / ".ratchet" / f"{run_id}.bus.jsonl"
     bus_path.parent.mkdir(parents=True, exist_ok=True)
 
-    view = BuildView(animate=not args.no_animate)
+    view = BuildView(animate=not args.no_animate, label_demo=args.label_demo)
     reader, done = Bus(bus_path), threading.Event()
 
     def follow() -> None:
@@ -944,12 +952,15 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(fn=cmd_export)
 
     p = sub.add_parser("build", help="a goal, repo or issue in; a reviewed pull request out")
-    p.add_argument("target", help="a prompt, a github repo url, or an issue url")
+    p.add_argument("target", help="a prompt, a repo url, an issue url, a paper url, or `research`")
+    p.add_argument("rest", nargs="*", help="the paper url, when the target is `research`")
     p.add_argument("--repo", help="where to work (default: here)")
     p.add_argument("--run-id")
     p.add_argument("--pace", type=float, default=0.35, help="seconds per beat; 0 runs it instantly")
     p.add_argument("--no-animate", action="store_true", help="plain lines, for logs and CI")
     p.add_argument("--live", action="store_true", help="use real services instead of the demo script")
+    p.add_argument("--label-demo", action="store_true",
+                   help="say on screen which stages are scripted (the stream always records it)")
     p.set_defaults(fn=cmd_build)
 
     p = sub.add_parser("pipeline", help="the whole shape of a run: harness, verifier, gate, review, merge")

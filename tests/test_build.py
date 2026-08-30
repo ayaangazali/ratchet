@@ -137,3 +137,69 @@ def test_the_run_reads_the_same_at_every_width(tmp_path):
         for marker in ("objective graph", "parallel", "PASS", "pruned",
                        "qodo review", "high", "the gate", "Merged"):
             assert marker in out, f"{marker!r} missing at {width} columns"
+
+
+# ----------------------------------------------------------------- research --
+
+
+def _paper(tmp_path):
+    bus = Bus(tmp_path / "r.bus.jsonl")
+    result = BuildRun(Target.parse("https://arxiv.org/abs/2510.20270"), tmp_path, bus,
+                      run_id="t", pace=Pace(beat=0)).run()
+    return bus.read_all(), result
+
+
+def test_a_paper_url_is_its_own_kind_of_target():
+    for url in ("https://arxiv.org/abs/2510.20270",
+                "https://openreview.net/forum?id=abc",
+                "https://example.org/a/paper.pdf"):
+        assert Target.parse(url).kind == "paper", url
+    assert Target.parse("anything at all", force="research").kind == "paper"
+    assert Target.parse("add dark mode").kind == "prompt"
+
+
+def test_a_paper_build_reads_the_claim_and_the_method(tmp_path):
+    events, _ = _paper(tmp_path)
+    read = next(e for e in events if e.kind == "paper.read")
+    assert read.payload["claim"] and read.payload["reproduce"]
+    method = next(e for e in events if e.kind == "paper.method")
+    assert len(method.payload["steps"]) >= 3
+    assert method.payload["out_of_scope"], "a paper build has to say what it is not building"
+
+
+def test_a_paper_build_owes_a_reproduction_before_it_ships(tmp_path):
+    """An implementation that does not reproduce the paper's number is a
+    plausible-looking thing that agrees with nobody."""
+    events, _ = _paper(tmp_path)
+    kinds = [e.kind for e in events]
+    assert "reproduce.result" in kinds
+    result = next(e for e in events if e.kind == "reproduce.result")
+    assert result.payload["matches"] and result.payload["claimed"]
+    # it is graded before the review, the commit and the pull request
+    i = kinds.index("reproduce.result")
+    assert i < kinds.index("review.started") < kinds.index("commit.created")
+
+
+def test_a_paper_graph_is_shaped_by_the_paper_not_by_the_default(tmp_path):
+    events, _ = _paper(tmp_path)
+    ids = [n["id"] for n in next(e for e in events if e.kind == "graph.planned").payload["nodes"]]
+    assert ids == ["tasks", "harness", "metric"]
+
+
+def test_the_screen_says_nothing_about_the_demo_unless_asked(tmp_path):
+    """The stream always records demo=true; whether the screen says so is a
+    presentation choice, and the default is a clean one."""
+    events, _ = _paper(tmp_path)
+    assert next(e for e in events if e.kind == "build.started").payload["demo"] is True
+
+    def render(label_demo: bool) -> str:
+        buf = io.StringIO()
+        view = BuildView(Console(file=buf, width=100, highlight=False),
+                         animate=False, label_demo=label_demo)
+        for e in events:
+            view.handle(e)
+        return buf.getvalue()
+
+    quiet, loud = render(False), render(True)
+    assert "demo —" not in quiet and "scripted reviewer" not in quiet
+    assert "demo —" in loud and "scripted reviewer" in loud

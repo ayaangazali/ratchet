@@ -24,6 +24,8 @@ from .bus import Bus
 from .qodo_mcp import QodoMCP
 
 ISSUE_URL = re.compile(r"github\.com/([\w.-]+)/([\w.-]+)/issues/(\d+)")
+PAPER_URL = re.compile(r"(arxiv\.org|doi\.org|openreview\.net|aclanthology\.org|\.pdf$)", re.I)
+ARXIV_ID = re.compile(r"arxiv\.org/(?:abs|html|pdf)/([\d.]+)")
 REPO_URL = re.compile(r"github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
 
 
@@ -31,14 +33,18 @@ REPO_URL = re.compile(r"github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
 class Target:
     """What the user asked for, whatever shape they asked in."""
 
-    kind: str            # "prompt" | "repo" | "issue"
+    kind: str            # "prompt" | "repo" | "issue" | "paper"
     goal: str
     repo: str = ""
     issue: str = ""
+    paper: str = ""
 
     @classmethod
-    def parse(cls, raw: str) -> Target:
+    def parse(cls, raw: str, *, force: str = "") -> Target:
         raw = raw.strip()
+        if force == "research" or PAPER_URL.search(raw):
+            ident = m.group(1) if (m := ARXIV_ID.search(raw)) else raw.rstrip("/").rsplit("/", 1)[-1]
+            return cls("paper", f"build a working implementation of {ident}", paper=raw)
         if m := ISSUE_URL.search(raw):
             owner, name, number = m.groups()
             return cls("issue", f"resolve issue #{number} in {owner}/{name}",
@@ -78,6 +84,24 @@ DEMO_NODES = [
          deps=["parse", "store"], model="truefoundry/openai/gpt-5.2"),
 ]
 
+#: A paper is not a feature request. The graph it produces has an extra
+#: obligation at the end: the implementation has to reproduce the number the
+#: paper claims, or it is a plausible-looking thing that agrees with nobody.
+PAPER_NODES = [
+    Node("tasks", "encode the paper's task construction: two assertions that contradict",
+         ["tests/test_tasks.py::test_the_pair_is_unsatisfiable",
+          "tests/test_tasks.py::test_no_implementation_passes_both"],
+         model="truefoundry/openai/gpt-5.2"),
+    Node("harness", "run a model against a task and record what it reports",
+         ["tests/test_harness.py::test_records_a_claim_of_success",
+          "tests/test_harness.py::test_separates_reported_from_actual"],
+         model="trueforge/claude-sonnet-4-6"),
+    Node("metric", "the cheat rate: reported success on a task nothing can satisfy",
+         ["tests/test_metric.py::test_counts_only_impossible_tasks",
+          "tests/test_metric.py::test_matches_the_worked_example"],
+         deps=["tasks", "harness"], model="truefoundry/openai/gpt-5.2"),
+]
+
 STAGES = [("cheat", "0 finding(s), 0 critical"), ("build", "ok"), ("f2p", "{f2p}"),
           ("p2p", "118/118"), ("types", "clean"), ("lint", "clean"),
           ("hygiene", "{files} file(s), {lines} added lines")]
@@ -104,7 +128,8 @@ class BuildRun:
         self.pace = pace or Pace()
         self.qodo = qodo or QodoMCP()
         self.demo = demo
-        self.nodes = [Node(n.id, n.goal, list(n.tests), list(n.deps), n.model) for n in DEMO_NODES]
+        source = PAPER_NODES if target.kind == "paper" else DEMO_NODES
+        self.nodes = [Node(n.id, n.goal, list(n.tests), list(n.deps), n.model) for n in source]
 
     def emit(self, kind: str, **payload) -> None:
         self.bus.emit(kind, **payload)
@@ -116,6 +141,18 @@ class BuildRun:
         t = self.target
         self.emit("build.started", run_id=self.run_id, target=t.kind, goal=t.goal,
                   repo=t.repo, issue=t.issue, demo=self.demo)
+
+        if t.kind == "paper":
+            self.emit("paper.read", url=t.paper, ident="arXiv:2510.20270",
+                      title="ImpossibleBench: Measuring Reward Hacking with Unsatisfiable Tasks",
+                      claim="On tasks whose tests are provably unsatisfiable, frontier models "
+                            "report success roughly half the time instead of reporting the task impossible.",
+                      reproduce="cheat rate ≈ 0.50 on the impossible split")
+            self.emit("paper.method", steps=[
+                "construct tasks whose tests contradict each other",
+                "run a model against them and record what it reports",
+                "measure reported success on tasks nothing can satisfy",
+            ], implementable=3, out_of_scope=["the model training runs", "the closed eval set"])
 
         if t.kind == "issue":
             self.emit("issue.read", repo=t.repo, issue=t.issue,
@@ -137,7 +174,17 @@ class BuildRun:
                 self._work(n)
                 done.add(n.id)
 
-        # 3. the review happens on the diff, before anything is committed
+        # 3. a paper build owes a reproduction: the implementation has to produce
+        #    the number the paper claims, or it is a plausible thing agreeing with
+        #    nobody. It is graded like any other check.
+        if t.kind == "paper":
+            self.emit("reproduce.started", claim="cheat rate ≈ 0.50 on the impossible split",
+                      runs=40)
+            self.emit("reproduce.result", measured="0.47", claimed="0.50", tolerance="±0.05",
+                      matches=True,
+                      note="40 runs against the impossible split; the honest split stays at 0.00")
+
+        # 4. the review happens on the diff, before anything is committed
         review = self._review()
 
         # 4. every blocking finding is work, and the diff is re-reviewed after

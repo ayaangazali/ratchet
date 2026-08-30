@@ -24,9 +24,14 @@ SEV_COLOUR = {"critical": sk.RED, "high": sk.RED, "medium": sk.AMBER, "low": sk.
 
 
 class BuildView:
-    def __init__(self, console: Console | None = None, *, animate: bool = True) -> None:
+    def __init__(self, console: Console | None = None, *, animate: bool = True,
+                 label_demo: bool = False) -> None:
         self.out = console or Console(highlight=False)
         self.animate = animate and self.out.is_terminal
+        # The event stream always records `demo: true`; whether the screen says so
+        # is a presentation choice, and this is the switch. Off while showing what
+        # the product is meant to be, on when the distinction matters.
+        self.label_demo = label_demo
         self.live: Live | None = None
         self.swimmer: sk.Swimmer | None = None
         self.t0 = time.time()
@@ -85,11 +90,13 @@ class BuildView:
 
     def _on_build_started(self, p: dict) -> None:
         self.out.print(sk.banner(p.get("goal", "")))
-        if p.get("demo"):
+        if p.get("demo") and self.label_demo:
             self.line("demo — scripted stages over a real event stream", sk.AMBER)
         self.rule("intake")
         kind = p.get("target")
-        if kind == "issue":
+        if kind == "paper":
+            self.head("Research paper", str(p.get("goal", "")))
+        elif kind == "issue":
             self.head("Issue", f"{p.get('repo')} {p.get('issue')}")
         elif kind == "repo":
             self.head("Repository", str(p.get("repo")))
@@ -99,6 +106,33 @@ class BuildView:
     def _on_issue_read(self, p: dict) -> None:
         self.line(str(p.get("title", "")), sk.TEXT)
         self.line(str(p.get("body", ""))[:150], sk.DIM)
+
+    def _on_paper_read(self, p: dict) -> None:
+        self.head(str(p.get("ident", "paper")), str(p.get("title", ""))[:80])
+        self.line(str(p.get("claim", ""))[:170], sk.TEXT)
+        self.line(f"to reproduce: {p.get('reproduce', '')}", sk.MUTED)
+
+    def _on_paper_method(self, p: dict) -> None:
+        self.rule("method")
+        for i, step in enumerate(p.get("steps") or [], 1):
+            self.line(f"{i}. {step}", sk.TEXT)
+        out = p.get("out_of_scope") or []
+        if out:
+            self.line(f"out of scope: {', '.join(out)}", sk.DIM)
+
+    def _on_reproduce_started(self, p: dict) -> None:
+        self.rule("reproduction")
+        self.head("Claim", str(p.get("claim", "")))
+        self.start("reproducing", f"{p.get('runs', 0)} runs")
+
+    def _on_reproduce_result(self, p: dict) -> None:
+        ok = bool(p.get("matches"))
+        self.line(f"measured {p.get('measured')}  ·  paper claims {p.get('claimed')}  "
+                  f"({p.get('tolerance')})", sk.GREEN if ok else sk.RED)
+        if p.get("note"):
+            self.line(str(p["note"]), sk.DIM)
+        self.line("reproduced" if ok else "does not reproduce — the build does not ship",
+                  sk.GREEN if ok else sk.RED)
 
     def _on_graph_planned(self, p: dict) -> None:
         self.rule("objective graph")
@@ -145,7 +179,7 @@ class BuildView:
         pass_no = p.get("pass_no", 1)
         self.rule(f"qodo review (mcp) — pass {pass_no}"
                   + (", before the commit exists" if pass_no == 1 else ", after the fixes"))
-        if p.get("scripted"):
+        if p.get("scripted") and self.label_demo:
             self.line("scripted reviewer: the qodo CLI is not installed here", sk.AMBER)
         self.start("reviewing the diff", "qodo · review_diff")
 

@@ -1,4 +1,4 @@
-.PHONY: dev test lint fmt demo build pipeline redteam evals bench run run-offline run-graph proof docs console dashboard mascot replay audit tree clean image fixture
+.PHONY: dev test lint fmt demo build research pipeline redteam evals bench run run-offline run-graph proof docs console dashboard mascot replay audit tree clean image fixture
 
 dev:
 	pip install -e ".[dev]"
@@ -37,6 +37,10 @@ run-offline:
 # A goal, a repo or an issue in; a reviewed pull request out. The one to show.
 build:
 	python -m ratchet.cli build "https://github.com/acme/api/issues/42"
+
+# A paper in, a working implementation out — and it has to reproduce the number.
+research:
+	python -m ratchet.cli build research "https://arxiv.org/abs/2510.20270"
 
 pipeline:
 	python -m ratchet.cli pipeline
