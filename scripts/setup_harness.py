@@ -39,7 +39,13 @@ KEY_ENV = {
     "moonshot": ("MOONSHOT_API_KEY",),
     "zai": ("ZAI_API_KEY",),
     "alibaba": ("ALIBABA_API_KEY", "DASHSCOPE_API_KEY"),
+    "truefoundry": ("TRUEFOUNDRY_API_KEY", "TFY_API_KEY"),
 }
+
+#: An OpenAI-compatible gateway registers as a `custom` provider: TrueForge's
+#: catalog cannot know what models sit behind somebody's gateway, so we ask the
+#: gateway itself. TrueFoundry's is the one we use, hence the default.
+DEFAULT_GATEWAY = "https://default.truefoundry.cloud/api/llm/api/inference/openai"
 
 
 def call(path: str, method: str = "GET", body: dict | None = None) -> dict:
@@ -62,11 +68,58 @@ def call(path: str, method: str = "GET", body: dict | None = None) -> dict:
         ) from e
 
 
+def _key_from_env(provider: str) -> str:
+    return next((os.environ[v] for v in KEY_ENV.get(provider, ()) if os.environ.get(v)), "")
+
+
+def _gateway(key: str, base_url: str) -> int:
+    """Register an OpenAI-compatible gateway as a `custom` provider.
+
+    The model list comes from the gateway rather than from TrueForge's catalog,
+    because the catalog cannot know what somebody has put behind their own endpoint.
+    """
+    if not key:
+        raise SystemExit("no API key: pass --key, or set TRUEFOUNDRY_API_KEY")
+    req = urllib.request.Request(f"{base_url}/models",
+                                 headers={"Authorization": f"Bearer {key}", "User-Agent": "ratchet/0.1"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310 - user-supplied gateway
+            models = json.loads(r.read())["data"]
+    except Exception as e:
+        raise SystemExit(f"cannot list models at {base_url}: {str(e)[:200]}") from e
+    if not models:
+        raise SystemExit(f"{base_url} exposes no models to this key")
+
+    manifest = {
+        "type": "custom",
+        "name": "truefoundry",
+        "base_url": base_url,
+        "auth": {"api_key": key},
+        "models": [
+            {"model_id": m["id"], "name": m["id"].replace("/", "-").replace(".", "-"),
+             "properties": {"context_length": 400000, "max_output_tokens": 32000}}
+            for m in models
+        ],
+    }
+    existing = {p.get("name") for p in (call("/api/v1/settings/model-providers").get("data") or [])}
+    call("/api/v1/settings/model-providers", "PUT" if "truefoundry" in existing else "POST",
+         {"manifest": manifest})
+    names = [m["name"] for m in manifest["models"]]
+    print(f"\n  truefoundry gateway registered: {len(names)} model(s)")
+    for n in names:
+        print(f"    - truefoundry/{n}")
+    print("\n  route Ratchet through it:")
+    print(f"    RATCHET_GENERATORS=truefoundry/{names[0]}")
+    print(f"    RATCHET_MODEL_CARTOGRAPHER=truefoundry/{names[0]}\n")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="configure a TrueForge model provider")
     ap.add_argument("provider", nargs="?", help="openai | anthropic | google-gemini | ...")
     ap.add_argument("--key", help="API key; defaults to the provider's usual env var")
     ap.add_argument("--list", action="store_true", help="show what is configured and stop")
+    ap.add_argument("--base-url", help=f"OpenAI-compatible gateway (default {DEFAULT_GATEWAY})")
     args = ap.parse_args()
 
     if args.list or not args.provider:
@@ -82,6 +135,9 @@ def main() -> int:
         print()
         return 0
 
+    if args.provider == "truefoundry":
+        return _gateway(args.key or _key_from_env("truefoundry"), args.base_url or DEFAULT_GATEWAY)
+
     catalog = {c["type"]: c for c in call("/api/v1/catalogs/model-providers").get("data") or []}
     entry = catalog.get(args.provider)
     if not entry:
@@ -89,7 +145,7 @@ def main() -> int:
     if not entry.get("models"):
         raise SystemExit(f"{args.provider} publishes no models in this harness version")
 
-    key = args.key or next((os.environ[v] for v in KEY_ENV.get(args.provider, ()) if os.environ.get(v)), "")
+    key = args.key or _key_from_env(args.provider)
     if not key:
         envs = " or ".join(KEY_ENV.get(args.provider, ("<PROVIDER>_API_KEY",)))
         raise SystemExit(f"no API key: pass --key, or set {envs}")

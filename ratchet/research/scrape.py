@@ -86,6 +86,18 @@ _INLINE = re.compile(r"(?is)</?(span|em|strong|b|i|u|mark|small|sub|sup|code|a|f
 _TAG = re.compile(r"(?s)<[^>]+>")
 
 
+#: A link target worth keeping when there is no link text: it names a paper.
+_PAPER_HREF = re.compile(r"/(?:papers|abs)/\d{4}\.\d{4,5}")
+
+
+def _link_text(m: re.Match) -> str:
+    text = m.group(1).strip()
+    if text:
+        return text
+    href = m.group(2).strip()
+    return href if _PAPER_HREF.search(href) else ""
+
+
 def to_text(body: str) -> str:
     """Markdown or HTML in, plain lines out.
 
@@ -97,12 +109,21 @@ def to_text(body: str) -> str:
         body = _SCRIPT.sub(" ", body)
         body = _INLINE.sub("", body)
         body = _TAG.sub("\n", body)
-    # Keep the target when the link text is empty. Hugging Face's listing marks
-    # each paper with a bare image link -- `![](/papers/2608.25518)` -- and the id
-    # in that target is the only thing identifying the entry. Collapsing it to the
-    # (empty) link text deletes every id on the page and the parser then reports
-    # "no papers found" for a page full of papers.
-    body = _MD_LINK.sub(lambda m: m.group(1).strip() or m.group(2), body)
+    # Link text normally survives and the target is dropped. Two exceptions, and
+    # both were bugs before they were rules:
+    #
+    #   Hugging Face marks each paper with a bare image link, `![](/papers/<id>)`.
+    #   The id in that target is the only thing identifying the entry, so dropping
+    #   it deletes every id on the page and the parser reports "no papers found"
+    #   for a page full of papers.
+    #
+    #   But keeping *every* empty-text target injects each avatar URL as its own
+    #   line, and those lines are long enough to beat the real title to "first
+    #   substantial line" -- so papers get listed under
+    #   `/avatars/57a620971ce3e1ec883dc0772a5fb0b1.svg`.
+    #
+    # So: keep a target only when it identifies a paper.
+    body = _MD_LINK.sub(_link_text, body)
     body = body.replace("&amp;", "&").replace("&#39;", "'").replace("&quot;", '"')
     body = body.replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ")
     lines = [ln.strip(" \t*#>") for ln in body.splitlines()]
@@ -327,6 +348,30 @@ class PaperScraper:
 
     # -------------------------------------------------------------- search --
 
+    #: Progressively broader forms of a topic. A five-word phrase is usually one
+    #: arXiv has nothing for -- its search ANDs the terms -- and "no results" is
+    #: indistinguishable from "the scraper is broken" unless you try again wider.
+    @staticmethod
+    def _broadenings(query: str) -> list[str]:
+        from .sources import terms as significant
+
+        words = significant(query)
+        ladder = [query.strip(), " ".join(words)]
+        if len(words) > 2:
+            # The trailing pair first. A technical topic usually ends with its
+            # domain phrase -- "program repair", "reward hacking", "coding agents"
+            # -- and leads with the qualifier. Picking by word length instead turns
+            # "verifier gated program repair" into "verifier program", which finds
+            # a quantum model checker.
+            ladder.append(" ".join(words[-2:]))
+            ladder.append(" ".join(words[:2]))
+        seen, out = set(), []
+        for q in ladder:
+            if q and q not in seen:
+                seen.add(q)
+                out.append(q)
+        return out
+
     def search(self, query: str, *, limit: int = 8, source: str = "arxiv") -> tuple[list[Paper], list[str]]:
         """Papers for a topic, plus whatever went wrong getting them.
 
@@ -337,14 +382,23 @@ class PaperScraper:
         if not cfg:
             return [], [f"no paper source {source!r} in {self.config_path}"]
 
-        url = str(cfg["url"]).format(query=urllib.parse.quote_plus(query), limit=limit)
-        got = self.fetch(url, zones=list(cfg.get("zones") or []))
-        if not got.ok:
-            return [], got.problems
-
-        text = to_text(got.text)
-        papers = parse_papers(text, cfg.get("parse"), source=source)
-        problems = self._validate(papers, text, cfg.get("expect") or {})
+        zones = list(cfg.get("zones") or [])
+        attempts = self._broadenings(query) if cfg.get("broaden", True) else [query]
+        papers: list[Paper] = []
+        problems: list[str] = []
+        text = ""
+        for i, q in enumerate(attempts):
+            url = str(cfg["url"]).format(query=urllib.parse.quote_plus(q), limit=limit)
+            got = self.fetch(url, zones=zones)
+            if not got.ok:
+                return [], got.problems
+            text = to_text(got.text)
+            papers = parse_papers(text, cfg.get("parse"), source=source)
+            if papers:
+                if i:
+                    problems.append(f"no results for {query!r}; broadened to {q!r}")
+                break
+        problems += self._validate(papers, text, cfg.get("expect") or {})
 
         if problems:
             papers, repaired = self._repair(source, cfg, text, problems)
