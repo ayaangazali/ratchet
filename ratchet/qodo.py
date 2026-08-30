@@ -61,6 +61,8 @@ class QodoFinding:
     description: str
     #: Qodo's own instruction to a coding agent — the qodo-fix payload
     agent_prompt: str
+    #: the bot's own ``✓ Resolved`` tag; the finding is history, not work
+    resolved: bool = False
 
 
 @dataclass
@@ -69,6 +71,17 @@ class QodoReview:
     reviewed_at: str
     findings: list[QodoFinding] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def open_findings(self) -> list[QodoFinding]:
+        """Findings still outstanding — what any caller acting on a review wants.
+
+        The bot never drops a finding it considers fixed; it strikes the title
+        through and re-tags it ``✓ Resolved``, agent prompt and all. Counting or
+        re-running those prompts makes a fixed PR look unfixed and asks the model
+        to redo (or undo) work that already landed.
+        """
+        return [f for f in self.findings if not f.resolved]
 
 
 def _clean(html: str) -> str:
@@ -101,13 +114,15 @@ def parse_findings(body: str) -> list[QodoFinding]:
         chunk = body[m.end(): matches[i + 1].start() if i + 1 < len(matches) else len(body)]
         pres = PRE_RE.findall(chunk)
         prompt = PROMPT_RE.search(chunk)
+        tags = [t for t in TAG_RE.findall(m.group(3)) if t]
         findings.append(QodoFinding(
             n=int(m.group(1)),
             title=title,
-            tags=[t for t in TAG_RE.findall(m.group(3)) if t],
+            tags=tags,
             description=_clean(pres[0]) if pres else "",
             agent_prompt=re.sub(r"^>\s?", "", prompt.group(1), flags=re.M).strip()
             if prompt else "",
+            resolved=any(t.lower() == "resolved" for t in tags),
         ))
     return findings
 
@@ -243,7 +258,7 @@ class QodoOracle:
                     self._cache_put(review)
                     self._emit(QODO_DONE, pr=pr, reviewed_at=at,
                                counts=review.counts,
-                               findings=[f.title for f in review.findings])
+                               findings=[f.title for f in review.open_findings])
                     return review
             time.sleep(poll_s)
         return None
@@ -258,13 +273,13 @@ class QodoOracle:
         if not pr:
             return ""
         review = self.latest_review(pr)
-        if review is None or not review.findings:
+        if review is None or not review.open_findings:
             return ""
         lines = [f"PR #{review.pr}, reviewed {review.reviewed_at}:"]
-        for f in review.findings:
+        for f in review.open_findings:
             lines.append(f"{f.n}. {f.title} [{', '.join(f.tags)}]")
         # the top findings' own agent prompts, while the budget lasts
-        for f in review.findings:
+        for f in review.open_findings:
             if not f.agent_prompt:
                 continue
             block = f"\nAgent prompt for finding {f.n}:\n{f.agent_prompt}"

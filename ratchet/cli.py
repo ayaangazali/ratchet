@@ -692,7 +692,7 @@ def cmd_qodo_fix(args) -> int:
     emit = lambda kind, text: print(f"  {text}")  # noqa: E731 - console narration
 
     review = oracle.latest_review(pr, fresh=True)
-    if review is None or not review.findings:
+    if review is None or not review.open_findings:
         print(f"no Qodo review on PR #{pr} yet -- commanding one (/review, ~2 min)")
         since = review.reviewed_at if review else ""
         if not oracle.trigger_review(pr):
@@ -706,13 +706,14 @@ def cmd_qodo_fix(args) -> int:
             print(f"no Qodo review landed on PR #{pr} within {args.timeout}s -- stopping",
                   file=sys.stderr)
             return 2
-    if not review.findings:
-        print("Qodo reports no findings -- nothing to fix")
+    if not review.open_findings:
+        print("Qodo reports no open findings -- nothing to fix")
         return 0
 
     for rnd in range(1, args.rounds + 1):
-        todo = [f for f in review.findings if f.agent_prompt]
-        print(f"round {rnd}: {len(review.findings)} finding(s), {len(todo)} with agent prompts")
+        open_findings = review.open_findings
+        todo = [f for f in open_findings if f.agent_prompt]
+        print(f"round {rnd}: {len(open_findings)} open finding(s), {len(todo)} with agent prompts")
         before = sp.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                         capture_output=True, text=True, timeout=30).stdout.strip()
         for f in todo:
@@ -745,10 +746,10 @@ def cmd_qodo_fix(args) -> int:
         if review is None:
             print("no fresh review landed in time -- stopping", file=sys.stderr)
             return 2
-        if not review.findings:
+        if not review.open_findings:
             print(f"Qodo review is clean after round {rnd}")
             return 0
-    print(f"rounds exhausted; {len(review.findings)} finding(s) remain")
+    print(f"rounds exhausted; {len(review.open_findings)} open finding(s) remain")
     return 2
 
 

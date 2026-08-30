@@ -42,6 +42,18 @@ def test_parse_findings_extracts_title_tags_description_and_agent_prompt():
     assert not any(line.startswith(">") for line in prompted[0].agent_prompt.splitlines())
 
 
+def test_resolved_findings_are_flagged_and_kept_out_of_open_findings():
+    # the bot keeps fixed findings in the comment, agent prompt and all; re-running
+    # those prompts asks the model to redo work that already landed
+    findings = parse_findings(FIXTURE)
+    resolved = [f for f in findings if f.resolved]
+    assert resolved, "fixture must carry at least one '✓ Resolved' finding"
+    assert all("Resolved" in f.tags for f in resolved)
+    review = QodoReview(pr=1, reviewed_at="t", findings=findings)
+    assert review.open_findings == [f for f in findings if not f.resolved]
+    assert len(review.open_findings) < len(findings)
+
+
 def test_parse_findings_dedupes_repeated_summaries():
     body = FIXTURE + FIXTURE  # the bot repeats finding summaries in later sections
     once = parse_findings(FIXTURE)

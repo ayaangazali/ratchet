@@ -53,7 +53,7 @@ def qodo_status() -> str:
     if pr is None:
         return f"QODO: gh ok · repo {o.slug} · no open PR to review"
     review = o.latest_review(pr)
-    tail = (f"last review {review.reviewed_at} · {len(review.findings)} finding(s) · "
+    tail = (f"last review {review.reviewed_at} · {len(review.open_findings)} open finding(s) · "
             f"{json.dumps(review.counts)}" if review else "no review yet — try qodo_request_review")
     return f"QODO: gh ok · repo {o.slug} · open PR #{pr} · {tail}"
 
