@@ -872,3 +872,101 @@ def test_a_chat_turn_drives_every_pane(repo, monkeypatch):
     assert subagents >= 1, "the counters never noticed the session"
     # and the session's own narration survives the bus events that follow it
     assert "wrote index.html" in text
+
+
+def test_a_deep_file_is_credited_even_when_a_tree_walk_would_miss_it(tmp_path):
+    """The failure this exists for: a session wrote ~/Documents/.../index.html while
+    the working directory was $HOME. Change detection walked the tree with a cap,
+    hit 5000 files before reaching it, and reported "the session finished without
+    changing any file" over a 30KB page that was plainly there. The session already
+    names every file it writes -- believe it rather than searching for it."""
+
+    class DeepWriter:
+        provider, model, agentic = "claude-code", "sonnet", True
+
+        def run_agentic(self, prompt, repo, on_event, **kw):
+            target = Path(repo) / "Documents" / "site" / "index.html"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("<h1>deep</h1>\n")
+            on_event("file", str(target))          # what the real stream reports
+            on_event("step", "write index.html")
+            return "done"
+
+    # bury it so a bounded walk would never reach the new file
+    noise = tmp_path / "noise"
+    noise.mkdir()
+    for i in range(60):
+        (noise / f"f{i}.txt").write_text("x")
+
+    session = ChatSession(tmp_path, backend=DeepWriter())
+    turn, _ = _run(session, "make a website")
+
+    assert turn.ok, turn.error
+    assert turn.files == ["Documents/site/index.html"]
+    assert (tmp_path / "Documents" / "site" / "index.html").exists()
+
+
+def test_a_file_written_outside_the_working_directory_is_still_reported(tmp_path):
+    """Dropping it would be the same blindness wearing a different coat."""
+
+    outside = tmp_path.parent / f"outside-{tmp_path.name}.txt"
+
+    class Stray:
+        provider, model, agentic = "claude-code", "sonnet", True
+
+        def run_agentic(self, prompt, repo, on_event, **kw):
+            outside.write_text("x")
+            on_event("file", str(outside))
+            return "done"
+
+    try:
+        turn, _ = _run(ChatSession(tmp_path, backend=Stray()), "write somewhere else")
+        assert turn.files and str(outside) in turn.files[0]
+    finally:
+        outside.unlink(missing_ok=True)
+
+
+def test_the_session_is_granted_the_tools_it_needs():
+    """Every Bash call in a real session failed with "This command requires
+    approval": acceptEdits permits writes but not commands, and headless `-p` has
+    nobody to approve. The agent could write a file but not read the tree, run a
+    build, or check its own work."""
+    import subprocess
+
+    from ratchet.providers import ChatBackend
+
+    captured = {}
+
+    class FakePopen:
+        returncode = 0
+        stdout: list = []
+        stderr = None
+
+        def __init__(self, argv, **kw):
+            captured["argv"] = argv
+
+        def wait(self, timeout=None):
+            return 0
+
+    import ratchet.providers as prov
+
+    real = prov.subprocess.Popen if hasattr(prov, "subprocess") else subprocess.Popen
+    try:
+        subprocess.Popen = FakePopen  # the module imports subprocess inside the call
+        ChatBackend("claude-code", "sonnet").run_agentic("x", Path("/tmp"), lambda *a: None)
+    finally:
+        subprocess.Popen = real
+
+    argv = captured["argv"]
+    assert "--allowedTools" in argv
+    granted = argv[argv.index("--allowedTools") + 1]
+    assert "Bash" in granted and "Write" in granted and "Read" in granted
+
+
+def test_a_failed_tool_call_is_loud():
+    from ratchet.providers import _describe
+
+    line = _describe({"type": "user", "message": {"content": [
+        {"type": "tool_result", "is_error": True, "content": "This command requires approval"},
+    ]}})
+    assert "tool failed" in line and "approval" in line

@@ -234,9 +234,18 @@ class ChatSession:
         self._bus("sandbox.created", label=self._label, provider="claude-code")
         started_at = time.time()
 
+        reported: list[str] = []
+
         def relay(kind: str, text: str) -> None:
             """One step of the session: to the activity pane, to the waiting-on
-            panel, and onto the bus so the browser and a replay see it too."""
+            panel, and onto the bus so the browser and a replay see it too.
+
+            `file` events are the session naming a path it wrote; they are the
+            authoritative record of what the turn did and never reach the pane.
+            """
+            if kind == "file":
+                reported.append(text)
+                return
             emit(kind, text)
             self._bus("chat.step", label=self._label, text=text)
 
@@ -255,7 +264,12 @@ class ChatSession:
             emit("error", turn.error)
             return self._finish(turn, t0)
 
-        turn.files = sorted(set(self._tracked_state()) - set(before)) or self._dirty_paths(started_at)
+        # What the session said it wrote beats what a tree walk can find: the walk
+        # is bounded, and on a large working directory it capped out before reaching
+        # the new file and reported that nothing had changed.
+        turn.files = self._relative(reported) or sorted(
+            set(self._tracked_state()) - set(before)
+        ) or self._dirty_paths(started_at)
         if not turn.files:
             turn.error = "the session finished without changing any file"
             emit("error", turn.error)
@@ -289,6 +303,21 @@ class ChatSession:
 
         turn.intent = turn.intent or f"claude code: {prompt[:80]}"
         return self._commit_and_finish(turn, t0)
+
+    def _relative(self, paths: list[str]) -> list[str]:
+        """Session-reported absolute paths, as repo-relative ones. A path outside
+        the working directory is kept whole -- it is still what the turn did, and
+        silently dropping it would be the same blindness in a new coat."""
+        out: list[str] = []
+        for raw in dict.fromkeys(paths):
+            path = Path(raw)
+            try:
+                rel = str(path.resolve().relative_to(self.repo.resolve()))
+            except ValueError:
+                rel = str(path)
+            if not rel.startswith(".ratchet"):
+                out.append(rel)
+        return sorted(out)
 
     def _tracked_state(self) -> list[str]:
         """Every file in the working directory -- the before/after of a session.

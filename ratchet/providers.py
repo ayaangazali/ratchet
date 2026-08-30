@@ -373,10 +373,27 @@ class ChatBackend:
         exe = shutil.which("claude")
         if not exe:
             raise ChatProviderError("the `claude` CLI is not on PATH — install Claude Code")
+        # Every Bash call in a real session came back "This command requires
+        # approval": acceptEdits permits writes but not commands, and in headless
+        # `-p` mode there is nobody to approve, so the tool simply fails. The agent
+        # was working half-blind -- it could write a file but not read the tree,
+        # run a build, or check its own output.
+        #
+        # Granting Bash is not a meaningfully larger hole than the write permission
+        # it already has (a session that can write any file can write a shell
+        # profile), and ratchet's guarantee is unchanged either way: the resulting
+        # diff still goes through the cheat gate and a critical finding reverts the
+        # whole session. Both knobs are overridable for anyone who disagrees.
+        mode = os.environ.get("RATCHET_CLAUDE_PERMISSION_MODE", "acceptEdits")
+        tools = os.environ.get(
+            "RATCHET_CLAUDE_TOOLS",
+            "Read Write Edit MultiEdit NotebookEdit Glob Grep Bash WebFetch WebSearch TodoWrite",
+        )
         argv = [
             exe, "-p", prompt,
             "--output-format", "stream-json", "--verbose",
-            "--permission-mode", "acceptEdits",   # it may edit; ratchet still gates the diff
+            "--permission-mode", mode,
+            "--allowedTools", tools,
             "--add-dir", str(repo),
         ]
         if self.model and self.model != "default":
@@ -396,6 +413,11 @@ class ChatBackend:
                     ev = _json.loads(line)
                 except ValueError:
                     continue
+                for path in _touched_paths(ev):
+                    # authoritative: the session says which file it wrote. Diffing
+                    # the tree instead capped out on a large working directory and
+                    # reported "changed nothing" over a file that was plainly there.
+                    on_event("file", path)
                 text = _describe(ev)
                 # The closing summary arrives twice -- once as the assistant's last
                 # message, once as the result envelope -- and the two are truncated
@@ -516,6 +538,23 @@ def _swap_token_param(r: httpx.Response, body: dict[str, object], model: str) ->
 _LOUD_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "Read", "Glob", "Grep", "WebFetch"}
 
 
+#: tools that put bytes on disk -- their file_path is what the turn actually did
+_WRITING_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
+
+def _touched_paths(ev: dict) -> list[str]:
+    """Absolute paths this event says were written."""
+    if ev.get("type") != "assistant":
+        return []
+    out = []
+    for block in ev.get("message", {}).get("content", []):
+        if block.get("type") == "tool_use" and block.get("name") in _WRITING_TOOLS:
+            target = (block.get("input") or {}).get("file_path") or (block.get("input") or {}).get("notebook_path")
+            if target:
+                out.append(str(target))
+    return out
+
+
 def _describe(ev: dict) -> str:
     """One activity line for one stream event, or "" for the ones nobody needs."""
     kind = ev.get("type")
@@ -540,7 +579,8 @@ def _describe(ev: dict) -> str:
     if kind == "user":
         for block in ev.get("message", {}).get("content", []):
             if block.get("type") == "tool_result" and block.get("is_error"):
-                return f"tool failed: {str(block.get('content', ''))[:80]}"
+                detail = " ".join(str(block.get("content", "")).split())[:90]
+                return f"⚠ tool failed — {detail}"
         return ""
     if kind == "result":
         return " ".join(str(ev.get("result", "")).split())[:140]
