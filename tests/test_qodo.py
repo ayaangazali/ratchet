@@ -6,12 +6,15 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
 from ratchet import context as ctx_mod
 from ratchet import qodo
 from ratchet.bus import Bus
+from ratchet.gate import Gate
 from ratchet.qodo import (
     QodoFinding,
     QodoOracle,
@@ -106,11 +109,29 @@ def _comments_json(body: str, updated_at: str) -> str:
     }])
 
 
+def _approver(repo: Path, *, allow: bool) -> threading.Thread:
+    """Answer the gate's request from the side, the way a human would while
+    `trigger_review` is blocked waiting for it."""
+    g = Gate(repo)
+
+    def run():
+        for _ in range(200):
+            pending = g.pending()
+            if pending:
+                g.decide(pending[0], allow)
+                return
+            time.sleep(0.02)
+
+    return threading.Thread(target=run)
+
+
 def test_trigger_emits_requested_and_wait_rejects_the_ack_edit(monkeypatch, tmp_path):
     monkeypatch.setattr(qodo.shutil, "which", lambda _: "/usr/bin/gh")
     monkeypatch.setattr(qodo.time, "sleep", lambda _s: None)
     bus = Bus(tmp_path / "bus.jsonl")
     oracle = QodoOracle(tmp_path, bus, slug="owner/repo")
+    approver = _approver(tmp_path, allow=True)
+    approver.start()
 
     # the ~7s ACK edit: newer timestamp but nothing parseable in the body
     ack = _comments_json("Qodo is busy working on this review", "2026-01-01T00:01:00Z")
@@ -122,7 +143,8 @@ def test_trigger_emits_requested_and_wait_rejects_the_ack_edit(monkeypatch, tmp_
     ])
     monkeypatch.setattr(subprocess, "run", lambda argv, **kw: next(responses))
 
-    assert oracle.trigger_review(14)
+    assert oracle.trigger_review(14, timeout_s=10)
+    approver.join()
     review = oracle.wait_for_review(14, since="2026-01-01T00:00:30Z", timeout_s=60, poll_s=0)
     assert review is not None
     assert review.reviewed_at == "2026-01-01T00:02:00Z"
@@ -131,6 +153,31 @@ def test_trigger_emits_requested_and_wait_rejects_the_ack_edit(monkeypatch, tmp_
     kinds = [e.kind for e in Bus(tmp_path / "bus.jsonl").read_all()]
     assert "qodo.review.requested" in kinds
     assert "qodo.review.done" in kinds
+
+
+def test_a_denied_gate_posts_no_review_comment(monkeypatch, tmp_path):
+    """The `/review` comment is remote state, so it is the gate's to make. A no
+    at the gate means no gh call at all, not a comment plus a sad log line."""
+    monkeypatch.setattr(qodo.shutil, "which", lambda _: "/usr/bin/gh")
+    calls = []
+
+    def record(argv, **kw):  # a gh that would happily succeed if it were called
+        calls.append(argv)
+        return SimpleNamespace(stdout="ok", returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", record)
+    bus = Bus(tmp_path / "bus.jsonl")
+    oracle = QodoOracle(tmp_path, bus, slug="owner/repo")
+
+    denier = _approver(tmp_path, allow=False)
+    denier.start()
+    assert oracle.trigger_review(14, timeout_s=10) is False
+    denier.join()
+    # and silence is a denial too: the window closing is not a way to post
+    assert oracle.trigger_review(14, timeout_s=0.5) is False
+
+    assert calls == []
+    assert "qodo.review.requested" not in [e.kind for e in Bus(tmp_path / "bus.jsonl").read_all()]
 
 
 def test_findings_for_prompt_respects_cap_and_serves_stale_cache(monkeypatch, tmp_path):

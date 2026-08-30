@@ -104,6 +104,23 @@ class Gate:
             subprocess.run(["git", "-C", str(self.repo), "push"], check=True, timeout=120)
         return dec
 
+    def pr_comment(self, *, slug: str, pr: int, body: str, summary: str,
+                   timeout_s: float = DEFAULT_TIMEOUT_S) -> Decision:
+        """Ask, wait, and — only on a yes — post the comment on the pull request.
+
+        A comment on a pull request is remote state on somebody else's server; we
+        cannot take it back, so it belongs here beside the push rather than at the
+        call site (invariant 7). The body travels as the request's diff because
+        the body is exactly what the human is being asked to approve.
+        """
+        req = self.request(action="pr_comment", summary=summary, diff=body,
+                           stats={"slug": slug, "pr": pr})
+        dec = self.wait(req, timeout_s=timeout_s)
+        if dec.allow:
+            subprocess.run(["gh", "pr", "comment", str(pr), "--repo", slug, "--body", body],
+                           check=True, timeout=120)
+        return dec
+
     def pending(self) -> list[str]:
         return [p.stem.replace(".request", "") for p in self.dir.glob("*.request.json")
                 if not (self.dir / f"{p.stem.replace('.request', '')}.json").exists()]

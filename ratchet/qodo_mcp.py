@@ -73,26 +73,28 @@ def qodo_findings(pr: int) -> str:
 
 @mcp.tool()
 def qodo_request_review(pr: int) -> str:
-    """Command the hosted QODO bot to review a PR (posts `/review`). The bot ACKs
-    in seconds and edits its full review into place ~2 minutes later."""
+    """Command the hosted QODO bot to review a PR (posts `/review`). Posting is a
+    remote change, so it waits for a yes at ratchet's approval gate first; the bot
+    then ACKs in seconds and edits its full review into place ~2 minutes later."""
     o = _oracle()
     if (msg := _unavailable(o)) is not None:
         return msg
     if not o.trigger_review(pr):
-        return f"QODO: could not post /review on PR #{pr} (gh failed)."
+        return f"QODO: no /review posted on PR #{pr} (denied at the approval gate, or gh failed)."
     return f"QODO: /review posted on PR #{pr} — poll with qodo_wait_review."
 
 
 @mcp.tool()
 def qodo_wait_review(pr: int, timeout_s: int = 240) -> str:
-    """Trigger a QODO review if needed, wait for the bot's pass, return it as JSON."""
+    """Trigger a QODO review if needed (via the approval gate), wait for the bot's
+    pass, return it as JSON."""
     o = _oracle()
     if (msg := _unavailable(o)) is not None:
         return msg
     prev = o.latest_review(pr, fresh=True)
     since = prev.reviewed_at if prev else ""
     if not o.trigger_review(pr):
-        return f"QODO: could not post /review on PR #{pr} (gh failed)."
+        return f"QODO: no /review posted on PR #{pr} (denied at the approval gate, or gh failed)."
     review = o.wait_for_review(pr, since=since, timeout_s=timeout_s)
     if review is None:
         return f"QODO: no review landed on PR #{pr} within {timeout_s}s."

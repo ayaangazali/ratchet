@@ -4,7 +4,9 @@ The Qodo Command CLI is discontinued upstream (the server refuses and points at
 the Git-provider bot), so the one working Qodo surface is the hosted
 ``qodo-code-review[bot]`` on this repository's GitHub pull requests: trigger a
 pass by commenting ``/review``, read the result back off the PR's comments. All
-of that goes through ``gh`` — argv lists only, never a shell.
+of that goes through ``gh`` — argv lists only, never a shell. Reading is free;
+the one write, that ``/review`` comment, is remote state and therefore goes
+through ``gate.py`` like every other irreversible action (invariant 7).
 
 Advisory by design: nothing in this module can set ``green`` (CLAUDE.md
 invariant 1). Findings feed prompts and consoles; the gauntlet stays the only
@@ -29,6 +31,8 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+from .gate import DEFAULT_TIMEOUT_S, Gate
 
 BOT_LOGIN = "qodo-code-review[bot]"
 REVIEW_MARK = "Code Review by Qodo"
@@ -223,14 +227,27 @@ class QodoOracle:
         self._cache_put(review)
         return review
 
-    def trigger_review(self, pr: int) -> bool:
-        """Post ``/review`` — Qodo's supported trigger since the CLI's discontinuation."""
-        out = self._gh("pr", "comment", str(pr), "--repo", str(self.slug), "--body", "/review")
-        ok = out is not None
-        if ok:
-            self._emit(QODO_REQUESTED, pr=pr, slug=self.slug)
-            self.cache_path.unlink(missing_ok=True)
-        return ok
+    def trigger_review(self, pr: int, *, timeout_s: float = DEFAULT_TIMEOUT_S) -> bool:
+        """Command a review by posting ``/review`` — Qodo's supported trigger
+        since the CLI's discontinuation — through the approval gate.
+
+        The comment is remote state on GitHub, so the ``gh`` call itself lives in
+        ``gate.py`` (invariant 7) and this method cannot make it without a human
+        yes. False covers a denial, a silent window and a failed post alike:
+        either way no review was commanded, which is all a caller can act on.
+        """
+        gate = Gate(self.repo, bus=self.bus)
+        try:
+            dec = gate.pr_comment(slug=str(self.slug), pr=pr, body="/review",
+                                  summary=f"post `/review` on {self.slug} PR #{pr}",
+                                  timeout_s=timeout_s)
+        except (OSError, subprocess.SubprocessError):
+            return False  # same contract as _gh: a broken gh is a no-op, not a traceback
+        if not dec.allow:
+            return False
+        self._emit(QODO_REQUESTED, pr=pr, slug=self.slug)
+        self.cache_path.unlink(missing_ok=True)
+        return True
 
     def wait_for_review(self, pr: int, *, since: str, timeout_s: float = 240,
                         poll_s: float = 10) -> QodoReview | None:
