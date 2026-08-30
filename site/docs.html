@@ -78,7 +78,11 @@
   <!-- ============ GETTING STARTED ============ -->
   <section class="doc-section" id="install">
     <h2>Install</h2>
-    <p>Requirements: Python 3.11+, git. Node 22.14+ only if you want the live TrueForge harness path.</p>
+    <p>The quick way — the <a href="https://github.com/ayaangazali/homebrew-ratchet">Homebrew package</a> bundles GNU timeout and puts <code>ratchet</code> on your PATH:</p>
+    <pre>brew install ayaangazali/ratchet/ratchet-agent    # macOS
+# or, anywhere with uv:
+uv tool install git+https://github.com/ayaangazali/ratchet</pre>
+    <p>From source (Python 3.11+, git; Node 22.14+ only for the live TrueForge harness path):</p>
     <pre>git clone https://github.com/ayaangazali/ratchet && cd ratchet
 make dev          # editable install + dev deps</pre>
     <div class="callout">macOS: the eval script uses GNU <code>timeout</code>. See
