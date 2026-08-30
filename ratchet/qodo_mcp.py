@@ -19,7 +19,7 @@ from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 
-from .qodo import QodoOracle
+from .qodo import PR_LOOKUP_FAILED, QodoOracle
 
 mcp = MCPServer(
     "qodo",
@@ -50,6 +50,11 @@ def qodo_status() -> str:
     if (msg := _unavailable(o)) is not None:
         return msg
     pr = o.current_pr()
+    if pr == PR_LOOKUP_FAILED:
+        # not the same as "no PR": reporting a failed lookup as an empty result
+        # tells the caller the branch is unreviewed when we never found out.
+        return (f"QODO: gh ok · repo {o.slug} · PR lookup failed — could not read the "
+                "checked-out branch or its open PRs")
     if pr is None:
         return f"QODO: gh ok · repo {o.slug} · no open PR for the checked-out branch"
     review = o.latest_review(pr)

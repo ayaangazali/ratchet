@@ -283,3 +283,35 @@ def test_current_pr_is_scoped_to_the_checked_out_branch(monkeypatch, tmp_path):
     open_prs.append({"number": 11, "head": "feat/mine"})
     fake_run.branch = "feat/mine"
     assert oracle.current_pr() is None
+
+
+def test_current_pr_failure_is_not_reported_as_no_pr(monkeypatch, tmp_path):
+    """A lookup that never ran must not read as "this branch has no PR"."""
+    monkeypatch.setattr(qodo.shutil, "which", lambda _: "/usr/bin/gh")
+    oracle = QodoOracle(tmp_path, slug="owner/repo")
+
+    def fake_run(argv, **kw):
+        if argv[0] == "git":
+            return SimpleNamespace(stdout=fake_run.git_out, returncode=fake_run.git_rc)
+        return SimpleNamespace(stdout=fake_run.gh_out, returncode=fake_run.gh_rc)
+
+    fake_run.git_out, fake_run.git_rc = "feat/mine\n", 0
+    fake_run.gh_out, fake_run.gh_rc = '[{"number": 9}]', 0
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert oracle.current_pr() == 9  # control: the working path still resolves
+
+    fake_run.git_rc = 128  # not a repo, or a git that fell over
+    assert oracle.current_pr() == qodo.PR_LOOKUP_FAILED
+
+    fake_run.git_rc = 0
+    fake_run.gh_rc = 1  # unauthenticated, offline, rate-limited...
+    assert oracle.current_pr() == qodo.PR_LOOKUP_FAILED
+
+    fake_run.gh_rc, fake_run.gh_out = 0, "not json"
+    assert oracle.current_pr() == qodo.PR_LOOKUP_FAILED
+
+    # and the status line says so instead of claiming the branch has no PR
+    from ratchet import qodo_mcp
+
+    monkeypatch.setattr(qodo_mcp, "_oracle", lambda: oracle)
+    assert "lookup failed" in qodo_mcp.qodo_status()

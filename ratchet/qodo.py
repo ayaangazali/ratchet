@@ -56,6 +56,12 @@ PROMPT_RE = re.compile(r"(The issue below was found.*?)>?\s*```", re.S)
 
 _GH_TIMEOUT = 30
 
+#: ``current_pr`` could not ask — git or gh failed, or answered something that is
+#: not the JSON it promised. Distinct from ``None`` ("asked, and this branch has
+#: no open PR"), because a status line that prints "no open PR" after a failed
+#: lookup states as fact something it never learned.
+PR_LOOKUP_FAILED = -1
+
 
 @dataclass
 class QodoFinding:
@@ -182,7 +188,8 @@ class QodoOracle:
             self.bus.emit(kind, **payload)
 
     def current_pr(self) -> int | None:
-        """The open PR whose head is the checked-out branch, or None.
+        """The open PR whose head is the checked-out branch, None, or
+        ``PR_LOOKUP_FAILED`` when the lookup could not be made at all.
 
         Branch-scoped on purpose: a repo-wide "first open PR" answer attaches
         some other branch's review to this branch's prompt, so the agent reads
@@ -190,25 +197,32 @@ class QodoOracle:
         about this code. No branch (detached HEAD) and more than one match
         (same branch name across forks) are both "no unambiguous PR" -> no
         context, which is the only safe answer for advisory text.
+
+        A broken git, a broken gh or unparseable output is a third answer, not
+        the second: it is the difference between "this branch has no PR" and
+        "we never found out", and only the first is safe to report as fact.
         """
         try:
-            branch = subprocess.run(
+            r = subprocess.run(
                 ["git", "-C", str(self.repo), "branch", "--show-current"],
                 capture_output=True, text=True, timeout=_GH_TIMEOUT,
-            ).stdout.strip()
+            )
         except (OSError, subprocess.SubprocessError):
-            return None
+            return PR_LOOKUP_FAILED
+        if r.returncode != 0:
+            return PR_LOOKUP_FAILED
+        branch = r.stdout.strip()
         if not branch:
-            return None
+            return None  # detached HEAD: no branch, so nothing to scope to
         out = self._gh("pr", "list", "--repo", str(self.slug), "--state", "open",
                        "--head", branch, "--limit", "2", "--json", "number")
-        if not out:
-            return None
+        if out is None:
+            return PR_LOOKUP_FAILED
         try:
             rows = json.loads(out)
             return int(rows[0]["number"]) if len(rows) == 1 else None
         except (ValueError, KeyError, IndexError, TypeError):
-            return None
+            return PR_LOOKUP_FAILED
 
     # --------------------------------------------------------------- reviews --
 
@@ -313,8 +327,8 @@ class QodoOracle:
         if not self.available():
             return ""
         pr = pr or self.current_pr()
-        if not pr:
-            return ""
+        if not pr or pr == PR_LOOKUP_FAILED:
+            return ""  # advisory text: no PR and no answer both mean no context
         review = self.latest_review(pr)
         if review is None or not review.open_findings:
             return ""
