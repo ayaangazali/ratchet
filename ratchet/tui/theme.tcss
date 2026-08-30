@@ -143,3 +143,34 @@ Screen, VerticalScroll, RichLog {
     color: #5f7186;
     padding: 0 1;
 }
+
+
+/* Narrow terminal: the three columns become one, and every pane keeps its place
+   in the reading order -- tree, then the work, then how it is being judged. The
+   alternative was hiding two of them, which is how the console came to look
+   broken on an ordinary 80-column window. */
+#main.stacked {
+    layout: vertical;
+}
+
+#main.stacked #left {
+    width: 100%;
+    height: auto;
+    max-height: 30%;
+}
+
+#main.stacked #activity-box {
+    width: 100%;
+    height: 1fr;
+    min-height: 8;
+}
+
+#main.stacked #right {
+    width: 100%;
+    height: auto;
+    max-height: 40%;
+}
+
+#main.stacked #tree-box {
+    max-height: 8;
+}

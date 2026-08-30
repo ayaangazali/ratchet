@@ -525,6 +525,8 @@ class RatchetApp(App):
         debuglog.log("info", f"console attached · repo {self.repo} · bus {self.bus.path.name}")
         self.query_one(StatusLine).draw()
         self._short = self.size.height < 40
+        self.query_one("#main").set_class(self.size.width < 104, "stacked")
+        self.query_one("#left").display = self.size.width >= 60
         self._resize_banner()
         self._fit()
         self._idle_splash()
@@ -541,8 +543,14 @@ class RatchetApp(App):
         is the last thing standing.
         """
         w, h = event.size.width, event.size.height
-        self.query_one("#right").display = w >= 104
-        self.query_one("#left").display = w >= 76
+        # Panes stack when they will not fit side by side; they do not disappear.
+        # Hiding them silently deleted the search tree, the gauntlet rail and the
+        # waiting-on panel on any terminal under 104 columns -- which is most of
+        # them -- with nothing on screen to say why, and the tool read as broken.
+        narrow = w < 104
+        self.query_one("#main").set_class(narrow, "stacked")
+        self.query_one("#right").display = True
+        self.query_one("#left").display = w >= 60
         self._short = h < 40
         self._resize_banner()
         self._fit()

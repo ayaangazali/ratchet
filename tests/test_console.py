@@ -130,3 +130,40 @@ def test_approval_id_guard_rejects_anything_that_is_not_an_id(bad: str) -> None:
 
 def test_approval_id_guard_accepts_a_real_one() -> None:
     assert SAFE_ID.match("a1b2c3d4")
+
+
+def test_no_pane_disappears_on_an_ordinary_terminal(tmp_path):
+    """The console was reported dead: "search tree doesn't work, the gauntlet
+    doesn't work, waiting-on doesn't work". None of them were broken -- the layout
+    hid the entire right column below 104 columns and the tree below 76, silently,
+    on what is a perfectly ordinary 80-column window. Panes may stack. They may not
+    vanish."""
+    import asyncio
+    import os
+
+    from ratchet.tui.app import RatchetApp
+
+    (tmp_path / ".ratchet").mkdir()
+    bus = tmp_path / ".ratchet" / "s.bus.jsonl"
+    bus.touch()
+    os.chdir(tmp_path)
+
+    async def widths():
+        out = {}
+        for w in (60, 80, 100, 120, 150):
+            app = RatchetApp(bus, tmp_path)
+            async with app.run_test(size=(w, 40)) as pilot:
+                await pilot.pause(0.3)
+                out[w] = (
+                    app.query_one("#left").display,
+                    app.query_one("#activity-box").display,
+                    app.query_one("#right").display,
+                    app.query_one("#main").has_class("stacked"),
+                )
+        return out
+
+    for width, (left, activity, right, stacked) in asyncio.run(widths()).items():
+        assert activity, f"the activity pane vanished at {width} columns"
+        assert right, f"the gauntlet and waiting-on vanished at {width} columns"
+        assert left, f"the search tree vanished at {width} columns"
+        assert stacked == (width < 104), f"{width} columns should {'stack' if width < 104 else 'not stack'}"
