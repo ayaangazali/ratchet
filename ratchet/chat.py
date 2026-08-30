@@ -212,6 +212,7 @@ class ChatSession:
         from .verifier import cheat as cheat_mod
 
         emit("step", f"claude code session · {self.backend.model}")
+        started_at = time.time()
         before = self._tracked_state()
         try:
             self.backend.run_agentic(prompt, self.repo, emit)
@@ -226,7 +227,7 @@ class ChatSession:
             emit("error", turn.error)
             return self._finish(turn, t0)
 
-        turn.files = sorted(set(self._tracked_state()) - set(before)) or self._dirty_paths()
+        turn.files = sorted(set(self._tracked_state()) - set(before)) or self._dirty_paths(started_at)
         if not turn.files:
             turn.error = "the session finished without changing any file"
             emit("error", turn.error)
@@ -234,6 +235,14 @@ class ChatSession:
 
         diff = subprocess.run(["git", "diff", "HEAD", "--", *turn.files], cwd=self.repo,
                               capture_output=True, text=True, timeout=60).stdout
+        if not diff:
+            # no repo to diff against: synthesise one from what is on disk so the
+            # cheat gate still sees the same text it would have seen in a repo
+            diff = self._as_diff(
+                [(f, (self.repo / f).read_text(errors="replace"))
+                 for f in turn.files if (self.repo / f).is_file()],
+                "", from_disk=False,
+            )
         findings = cheat_mod.inspect(diff or "", protected_paths=list(cheat_mod.DEFAULT_PROTECTED))
         crit = [f for f in findings if f.severity.value == "critical"]
         if crit:
@@ -250,20 +259,45 @@ class ChatSession:
         return self._commit_and_finish(turn, t0)
 
     def _tracked_state(self) -> list[str]:
-        """Every file git can see, tracked or not -- the before/after of a session."""
+        """Every file in the working directory -- the before/after of a session.
+
+        Git first, because it already knows what to ignore. Without a repo it walks
+        the tree instead: a session that built a real site in a plain directory was
+        reported as "changed nothing", because change detection assumed a repo the
+        user had not made. The work is what matters; the commit is a bonus.
+        """
         import subprocess
 
-        r = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"],
-                           cwd=self.repo, capture_output=True, text=True, timeout=60)
-        return [p for p in r.stdout.splitlines() if p and not p.startswith(".ratchet")]
+        try:
+            r = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+                               cwd=self.repo, capture_output=True, text=True, timeout=60)
+            if r.returncode == 0:
+                return [p for p in r.stdout.splitlines() if p and not p.startswith(".ratchet")]
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return [p for p in walk_files(self.repo, limit=5000) if not p.startswith(".ratchet")]
 
-    def _dirty_paths(self) -> list[str]:
-        """Modified-in-place files, for a session that edited rather than created."""
+    def _dirty_paths(self, since: float = 0.0) -> list[str]:
+        """Modified-in-place files, for a session that edited rather than created.
+
+        Falls back to modification time outside a repo, for the same reason
+        `_tracked_state` does.
+        """
         import subprocess
 
-        r = subprocess.run(["git", "diff", "--name-only", "HEAD"], cwd=self.repo,
-                           capture_output=True, text=True, timeout=60)
-        return [p for p in r.stdout.splitlines() if p and not p.startswith(".ratchet")]
+        try:
+            r = subprocess.run(["git", "diff", "--name-only", "HEAD"], cwd=self.repo,
+                               capture_output=True, text=True, timeout=60)
+            if r.returncode == 0:
+                return [p for p in r.stdout.splitlines() if p and not p.startswith(".ratchet")]
+        except (OSError, subprocess.SubprocessError):
+            pass
+        if not since:
+            return []
+        return [
+            rel for rel in walk_files(self.repo, limit=5000)
+            if not rel.startswith(".ratchet") and (self.repo / rel).stat().st_mtime >= since
+        ]
 
     # -------------------------------------------------------------- plumbing --
 
@@ -306,7 +340,7 @@ class ChatSession:
             return ""
         return "Current file contents (edit these, do not reinvent them):\n" + "\n".join(parts) + "\n\n"
 
-    def _as_diff(self, files: list[tuple[str, str]], diff_text: str) -> str:
+    def _as_diff(self, files: list[tuple[str, str]], diff_text: str, *, from_disk: bool = True) -> str:
         """What the model wants to write, as one unified diff the cheat detector
         can inspect -- new files synthesised, an explicit diff passed through."""
         import difflib
@@ -316,7 +350,10 @@ class ChatSession:
             rel = raw_path.strip()
             existing = ""
             target = self.repo / rel
-            if target.is_file():
+            # `from_disk=False` when the content is ALREADY on disk (an agentic
+            # session wrote it): reading the file back would diff it against itself
+            # and hand the cheat gate an empty patch to approve.
+            if from_disk and target.is_file():
                 existing = target.read_text(errors="replace")
             body = "".join(difflib.unified_diff(
                 existing.splitlines(keepends=True), content.splitlines(keepends=True),

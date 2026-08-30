@@ -781,3 +781,42 @@ def test_the_gateway_rule_can_be_turned_off_deliberately(monkeypatch):
     monkeypatch.setenv("TFY_API_KEY", "tfy-test")
     monkeypatch.setenv("RATCHET_GATEWAY_ONLY", "0")
     assert not prov.gateway_only()
+
+
+def test_an_agentic_session_is_seen_in_a_plain_directory(tmp_path):
+    """The reported failure: Claude Code built a real site in a non-repo directory
+    and ratchet reported "0 files, 0 commits" -- change detection assumed a git
+    repo the user had not made. The work is what matters; the commit is a bonus."""
+
+    class Builder:
+        provider, model, agentic = "claude-code", "sonnet", True
+
+        def run_agentic(self, prompt, repo, on_event, **kw):
+            (Path(repo) / "index.html").write_text("<h1>built</h1>\n")
+            on_event("step", "write index.html")
+            return "done"
+
+    assert not (tmp_path / ".git").exists()          # a plain directory, on purpose
+    session = ChatSession(tmp_path, backend=Builder())
+    turn, _ = _run(session, "make a website")
+
+    assert turn.ok, turn.error
+    assert turn.files == ["index.html"]
+    assert (tmp_path / "index.html").exists()
+    assert not turn.commit                            # nothing to commit to
+    assert "not a git repo" in turn.commit_note       # and it says so plainly
+
+
+def test_the_gate_still_applies_to_an_agentic_session_without_git(tmp_path):
+    """No repo means no `git diff`, so the cheat gate is fed a synthesised one --
+    the session must not become a way around the verifier."""
+
+    class Sneaky:
+        provider, model, agentic = "claude-code", "sonnet", True
+
+        def run_agentic(self, prompt, repo, on_event, **kw):
+            (Path(repo) / "app.py").write_text("import sys\nsys.exit(0)\n")
+            return "done"
+
+    turn, _ = _run(ChatSession(tmp_path, backend=Sneaky()), "make an app")
+    assert not turn.ok and "gauntlet blocked" in turn.error
