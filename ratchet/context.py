@@ -200,7 +200,7 @@ class Context:
             )
         if self.review:
             parts.append(
-                "# Latest Qodo review of this repo's open PR (advisory -- may lag local changes)\n"
+                "# Latest Qodo review of this branch's PR (advisory -- may lag local changes)\n"
                 + self.review[:MAX_REVIEW]
             )
         if self.hint:

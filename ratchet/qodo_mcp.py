@@ -45,17 +45,17 @@ def _unavailable(o: QodoOracle) -> str | None:
 
 @mcp.tool()
 def qodo_status() -> str:
-    """QODO at a glance: repo, open PR, and the latest hosted review's counts."""
+    """QODO at a glance: repo, this branch's PR, and its latest review's counts."""
     o = _oracle()
     if (msg := _unavailable(o)) is not None:
         return msg
-    pr = o.open_pr()
+    pr = o.current_pr()
     if pr is None:
-        return f"QODO: gh ok · repo {o.slug} · no open PR to review"
+        return f"QODO: gh ok · repo {o.slug} · no open PR for the checked-out branch"
     review = o.latest_review(pr)
     tail = (f"last review {review.reviewed_at} · {len(review.open_findings)} open finding(s) · "
             f"{json.dumps(review.counts)}" if review else "no review yet — try qodo_request_review")
-    return f"QODO: gh ok · repo {o.slug} · open PR #{pr} · {tail}"
+    return f"QODO: gh ok · repo {o.slug} · PR #{pr} · {tail}"
 
 
 @mcp.tool()

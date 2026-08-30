@@ -181,14 +181,32 @@ class QodoOracle:
         if self.bus is not None:
             self.bus.emit(kind, **payload)
 
-    def open_pr(self) -> int | None:
+    def current_pr(self) -> int | None:
+        """The open PR whose head is the checked-out branch, or None.
+
+        Branch-scoped on purpose: a repo-wide "first open PR" answer attaches
+        some other branch's review to this branch's prompt, so the agent reads
+        findings about code it is not editing as if the reviewer had said them
+        about this code. No branch (detached HEAD) and more than one match
+        (same branch name across forks) are both "no unambiguous PR" -> no
+        context, which is the only safe answer for advisory text.
+        """
+        try:
+            branch = subprocess.run(
+                ["git", "-C", str(self.repo), "branch", "--show-current"],
+                capture_output=True, text=True, timeout=_GH_TIMEOUT,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if not branch:
+            return None
         out = self._gh("pr", "list", "--repo", str(self.slug), "--state", "open",
-                       "--limit", "1", "--json", "number")
+                       "--head", branch, "--limit", "2", "--json", "number")
         if not out:
             return None
         try:
             rows = json.loads(out)
-            return int(rows[0]["number"]) if rows else None
+            return int(rows[0]["number"]) if len(rows) == 1 else None
         except (ValueError, KeyError, IndexError, TypeError):
             return None
 
@@ -294,7 +312,7 @@ class QodoOracle:
         """The latest review as compact prompt text, or "" when anything is missing."""
         if not self.available():
             return ""
-        pr = pr or self.open_pr()
+        pr = pr or self.current_pr()
         if not pr:
             return ""
         review = self.latest_review(pr)

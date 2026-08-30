@@ -362,7 +362,7 @@ class ChatSession:
         if self.qodo is not None:
             text = self.qodo.findings_for_prompt(cap=1500)
             if text:
-                review = ("Latest Qodo review of this repo's open PR "
+                review = ("Latest Qodo review of this branch's PR "
                           "(advisory -- may lag local changes):\n" + text + "\n\n")
         return _PROMPT.format(
             listing=tree_listing(self.repo, [])[:4000],

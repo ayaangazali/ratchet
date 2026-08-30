@@ -247,3 +247,39 @@ def test_qodo_mcp_exposes_four_tools():
 
     tools = {t.name for t in qodo_mcp.mcp._tool_manager.list_tools()}
     assert tools == {"qodo_status", "qodo_findings", "qodo_request_review", "qodo_wait_review"}
+
+
+def test_current_pr_is_scoped_to_the_checked_out_branch(monkeypatch, tmp_path):
+    """Another branch's PR is not this branch's review context."""
+    monkeypatch.setattr(qodo.shutil, "which", lambda _: "/usr/bin/gh")
+    oracle = QodoOracle(tmp_path, slug="owner/repo")
+    seen: list[list[str]] = []
+    open_prs = [{"number": 4, "head": "feat/other"}, {"number": 9, "head": "feat/mine"}]
+
+    def fake_run(argv, **kw):
+        seen.append(argv)
+        if argv[0] == "git":
+            return SimpleNamespace(stdout=fake_run.branch + "\n", returncode=0)
+        head = argv[argv.index("--head") + 1] if "--head" in argv else None
+        rows = [r for r in open_prs if head is None or r["head"] == head]
+        return SimpleNamespace(stdout=json.dumps(rows), returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    fake_run.branch = "feat/mine"
+    assert oracle.current_pr() == 9  # not 4, the repo's first open PR
+
+    # a branch with no PR gets no context rather than someone else's
+    fake_run.branch = "feat/unpushed"
+    assert oracle.current_pr() is None
+
+    # detached HEAD: no branch to match, so no PR and no gh call
+    seen.clear()
+    fake_run.branch = ""
+    assert oracle.current_pr() is None
+    assert [a for a in seen if a[0] == "gh"] == []
+
+    # ambiguous -- the same branch name across forks -- is also no context
+    open_prs.append({"number": 11, "head": "feat/mine"})
+    fake_run.branch = "feat/mine"
+    assert oracle.current_pr() is None
