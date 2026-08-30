@@ -232,15 +232,24 @@ class QodoOracle:
         Paginated on purpose: GitHub serves 30 comments a page, and a PR that has
         been through a few review rounds pushes the bot's comment off page one —
         at which point an unpaginated read reports "no review" on a reviewed PR.
-        ``--slurp`` makes the pages one JSON array of arrays (gh >= 2.42).
+
+        Without ``--slurp`` gh concatenates the pages as ``[...][...]``, which is
+        not one JSON document, so we decode them one after another. ``--slurp``
+        would say it in a word, but it only exists in gh >= 2.48 and `available`
+        cannot see a gh's version — an older one would fail the call and be read
+        as "this PR has no review", the exact failure the pagination fixed.
         """
-        out = self._gh("api", "--paginate", "--slurp",
+        out = self._gh("api", "--paginate",
                        f"repos/{self.slug}/issues/{pr}/comments?per_page=100")
         if not out:
             return None
+        comments: list[dict] = []
+        decoder, rest = json.JSONDecoder(), out
         try:
-            pages = json.loads(out)
-            comments = [c for page in pages for c in page]
+            while rest := rest.lstrip():
+                page, end = decoder.raw_decode(rest)
+                comments.extend(page)
+                rest = rest[end:]
         except (ValueError, TypeError):
             return None
         reviews = [c for c in comments

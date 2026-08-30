@@ -110,8 +110,8 @@ def _bot_comment(body: str, updated_at: str) -> dict:
 
 
 def _comments_json(body: str, updated_at: str) -> str:
-    """`gh api --paginate --slurp` output: one array per page."""
-    return json.dumps([[_bot_comment(body, updated_at)]])
+    """`gh api --paginate` output: one JSON array per page, concatenated."""
+    return json.dumps([_bot_comment(body, updated_at)])
 
 
 def _approver(repo: Path, *, allow: bool) -> threading.Thread:
@@ -225,21 +225,32 @@ def test_wait_for_review_timeout_is_none_not_the_previous_pass(monkeypatch, tmp_
 def test_review_comment_is_found_past_the_first_page(monkeypatch, tmp_path):
     """GitHub serves comments 30 to a page. On a PR with a few review rounds the
     bot's comment is not on page one, and an unpaginated read calls a reviewed PR
-    unreviewed — which qodo-fix then reports as 'nothing to fix'."""
+    unreviewed — which qodo-fix then reports as 'nothing to fix'.
+
+    The pages arrive the way `gh api --paginate` prints them on every gh version:
+    one JSON array each, concatenated, which is not itself one JSON document."""
     monkeypatch.setattr(qodo.shutil, "which", lambda _: "/usr/bin/gh")
     oracle = QodoOracle(tmp_path, slug="owner/repo")
     chatter = [{"user": {"login": "someone"}, "body": "nice", "updated_at": "2026-01-01T00:00:00Z"}]
-    slurped = json.dumps([
-        chatter * 30,                                              # page 1: no bot
-        [_bot_comment(FIXTURE, "2026-01-02T00:00:00Z")],           # page 2: the review
+    paginated = "\n".join([
+        json.dumps(chatter * 30),                                  # page 1: no bot
+        json.dumps([_bot_comment(FIXTURE, "2026-01-02T00:00:00Z")]),  # page 2: the review
     ])
-    monkeypatch.setattr(subprocess, "run",
-                        lambda argv, **kw: SimpleNamespace(stdout=slurped, returncode=0))
+    seen: list[list[str]] = []
+
+    def fake_run(argv, **kw):
+        seen.append(argv)
+        return SimpleNamespace(stdout=paginated, returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     review = oracle.latest_review(5, fresh=True)
     assert review is not None
     assert review.reviewed_at == "2026-01-02T00:00:00Z"
     assert review.counts.get("bugs") == 8
+    # --slurp is gh >= 2.48 only, and an older gh rejecting the flag reads as
+    # "no review" — the very failure this pagination exists to prevent.
+    assert not any("--slurp" in argv for argv in seen)
 
 
 def test_qodo_mcp_exposes_four_tools():
