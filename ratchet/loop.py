@@ -280,6 +280,11 @@ class SearchRun:
     # ----------------------------------------------------------------- finish --
 
     def _finish(self, winner: Node, why: str) -> RunResult:
+        # seal the chain so a truncated tail is detectable; idempotence guarded
+        try:
+            self.receipts.seal(f"winner={winner.id} green={winner.green} reason={why}")
+        except RuntimeError:
+            pass  # already sealed (finish can be reached twice on rewind flows)
         self.bus.emit(
             "run.done",
             winner=winner.id,

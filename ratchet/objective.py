@@ -64,6 +64,29 @@ PENDING, RUNNING, FULFILLED, FAILED, BLOCKED = "pending", "running", "fulfilled"
 
 
 @dataclass
+class GraphSummary:
+    """The graph's bookkeeping, not a verdict. `all_fulfilled` is deliberately not
+    called `green`: green belongs to the gauntlet (invariant 1), and this field is
+    derived purely from per-node statuses that themselves only flip on green
+    GauntletResults. A second authority is not created here, and the name says so."""
+
+    graph: str
+    fulfilled: list[str] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
+    blocked: list[str] = field(default_factory=list)
+    escalated: list[str] = field(default_factory=list)
+
+    @property
+    def all_fulfilled(self) -> bool:
+        return not self.failed and not self.blocked
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {k: getattr(self, k) for k in self.__dataclass_fields__}
+        d["all_fulfilled"] = self.all_fulfilled
+        return d
+
+
+@dataclass
 class ObjectiveNode:
     """One sub-objective and the tests that decide it. There is deliberately no
     `mark_done()` here: `fulfilled` flips only when a GauntletResult says green."""
@@ -125,14 +148,14 @@ class ObjectiveGraph:
             if self.nodes[i].status == PENDING and all(d in done for d in self.nodes[i].deps)
         ]
 
-    def summary(self) -> dict[str, Any]:
-        return {
-            "graph": self.graph_id,
-            "fulfilled": [i for i in self.order if self.nodes[i].status == FULFILLED],
-            "failed": [i for i in self.order if self.nodes[i].status == FAILED],
-            "blocked": [i for i in self.order if self.nodes[i].status == BLOCKED],
-            "escalated": [i for i in self.order if self.nodes[i].escalated],
-        }
+    def summary(self) -> GraphSummary:
+        return GraphSummary(
+            graph=self.graph_id,
+            fulfilled=[i for i in self.order if self.nodes[i].status == FULFILLED],
+            failed=[i for i in self.order if self.nodes[i].status == FAILED],
+            blocked=[i for i in self.order if self.nodes[i].status == BLOCKED],
+            escalated=[i for i in self.order if self.nodes[i].escalated],
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -316,7 +339,7 @@ class GraphRun:
 
     # ------------------------------------------------------------------ run --
 
-    def run(self) -> dict[str, Any]:
+    def run(self) -> GraphSummary:
         self.bus.emit(GRAPH_STARTED, run_id=self.run_id, graph=self.graph.graph_id,
                       nodes=self.graph.order, provider=self.provider.name)
         # one cheap map for the whole graph; held-out test files for EVERY node are
@@ -338,9 +361,12 @@ class GraphRun:
             if node.status == PENDING:
                 node.status = BLOCKED
         self._save()
+        try:
+            self.receipts.seal(f"graph={self.graph.graph_id} state={self.state_commit}")
+        except RuntimeError:
+            pass
         summary = self.graph.summary()
-        summary["green"] = not summary["failed"] and not summary["blocked"]
-        self.bus.emit(GRAPH_DONE, run_id=self.run_id, **{k: v for k, v in summary.items()})
+        self.bus.emit(GRAPH_DONE, run_id=self.run_id, **summary.to_dict())
         return summary
 
     # ----------------------------------------------------------------- node --
@@ -357,6 +383,7 @@ class GraphRun:
         for i in range(node.max_attempts):
             node.attempts = i + 1
             model = self.agents.roles.generator_for(i)  # a retry is a different prior
+            label = f"{node.id}-a{i}"
             ctx = Context(
                 task=task.statement,
                 repo_map=self.repo_map,
@@ -364,6 +391,9 @@ class GraphRun:
                 diff_so_far=self.git.diff(self.base_commit, self.state_commit)
                 if self.state_commit != self.base_commit else "",
                 dead_ends=dead_ends,
+                # sub-agents share no history with this process; the branch label is
+                # restated in full so the child's work is attributable to this node
+                hint=f"You are working branch {label} of objective node {node.id!r}.",
             )
             cands = self.agents.generate(ctx.render(), n=1)
             cand = cands[0]
@@ -375,7 +405,7 @@ class GraphRun:
                 dead_ends.append(f"{cand.intent or 'no patch produced'} -> produced no diff")
                 continue
 
-            sb = self.provider.fork(self.state_commit, label=f"{node.id}-a{i}")
+            sb = self.provider.fork(self.state_commit, label=label)
             try:
                 res = gauntlet.run(sb, cand.patch, base_commit=self.state_commit)
                 self.receipts.record_result(f"{node.id}-a{i}", res)

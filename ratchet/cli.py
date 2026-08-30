@@ -159,8 +159,8 @@ def cmd_graph(args) -> int:
         mark = {"fulfilled": "✓", "failed": "✗", "blocked": "∅"}.get(n.status, "·")
         extra = " (escalated to tree search)" if n.escalated else ""
         print(f"  {mark} {node_id:<14} {n.status:<10} attempts {n.attempts}{extra}")
-    print("green" if summary["green"] else "not green", "·", json.dumps(summary))
-    return 0 if summary["green"] else 2
+    print("all fulfilled" if summary.all_fulfilled else "NOT fulfilled", "·", json.dumps(summary.to_dict()))
+    return 0 if summary.all_fulfilled else 2
 
 
 def cmd_tree(args) -> int:

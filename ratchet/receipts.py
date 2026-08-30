@@ -119,20 +119,51 @@ class ReceiptBook:
             fh.write(json.dumps(asdict(r), separators=(",", ":")) + "\n")
         return r
 
+    def seal(self, run_summary: str) -> Receipt:
+        """A terminal receipt marking the chain complete.
+
+        Without it, deleting receipts from the TAIL produced a shorter chain that
+        still audited clean (found by review) -- link integrity only proves order,
+        not completeness. A sealed chain that later grows, or a chain with no seal,
+        is reported by verify(). Sealing twice is refused.
+        """
+        with self._lock:
+            chain = self.all()
+            if any(r.outcome == "sealed" for r in chain):
+                raise RuntimeError("receipt chain is already sealed")
+            r = Receipt(
+                seq=len(chain),
+                prev=chain[-1].digest() if chain else GENESIS,
+                node_id="__seal__",
+                outcome="sealed",
+                score=0.0,
+                green=False,
+                result_digest=hashlib.sha256(run_summary.encode()).hexdigest(),
+            )
+            r.sig = self._sign(r)
+            with self.path.open("a") as fh:
+                fh.write(json.dumps(asdict(r), separators=(",", ":")) + "\n")
+            return r
+
     # ------------------------------------------------------------------ read --
 
     def verify(self) -> tuple[bool, list[str]]:
-        """Return (ok, problems). Checks link integrity first, then signatures."""
+        """Return (ok, problems). Checks link integrity, signatures, and the seal."""
         problems: list[str] = []
         prev = GENESIS
-        for i, r in enumerate(self.all()):
+        rs = self.all()
+        for i, r in enumerate(rs):
             if r.seq != i:
                 problems.append(f"receipt {i}: sequence number is {r.seq}, expected {i}")
             if r.prev != prev:
                 problems.append(f"receipt {i} ({r.node_id}): chain broken -- prev {r.prev[:12]} != {prev[:12]}")
             if not hmac.compare_digest(r.sig, self._sign(r)):
                 problems.append(f"receipt {i} ({r.node_id}): signature does not verify")
+            if r.outcome == "sealed" and i != len(rs) - 1:
+                problems.append(f"receipt {i}: chain continues past its seal")
             prev = r.digest()
+        if rs and rs[-1].outcome != "sealed":
+            problems.append("chain is unsealed: receipts may have been truncated from the tail")
         return (not problems), problems
 
     def summary(self) -> dict[str, int | str]:

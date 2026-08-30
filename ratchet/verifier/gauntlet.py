@@ -51,6 +51,10 @@ def _skipped(name: str, why: str) -> StageResult:
 
 class Gauntlet:
     def __init__(self, task: TaskSpec, *, repo_dir: str = ".", test_sources: dict[str, str] | None = None) -> None:
+        # an empty protected list would silently emit no revert at all; a task that
+        # really wants nothing protected must not exist (found by review)
+        if not task.protected_paths:
+            raise ValueError(f"task {task.task_id!r} has no protected_paths; refusing to grade without a revert")
         self.task = task
         self.repo_dir = repo_dir
         #: the graded tests' contents, used only by the special-casing rule. Never
@@ -91,7 +95,7 @@ class Gauntlet:
                                      "patch applied" if res.ok else "patch did not apply", t0)
             if not res.ok:
                 return self._result(Outcome.BROKEN, 0.0, stages, findings,
-                                    reason="patch did not apply", last_failure=res.tail(20),
+                                    reason="patch did not apply", last_failure=self._safe_tail(res),
                                     t_start=t_start, patch=patch)
 
         # -- stage 1: build / install ------------------------------------------
@@ -102,7 +106,7 @@ class Gauntlet:
                                  "ok" if res.ok else "build failed", t0)
         if not res.ok:
             return self._result(Outcome.BROKEN, 0.0, stages, findings, reason="build failed",
-                                last_failure=res.tail(20), t_start=t_start, patch=patch)
+                                last_failure=self._safe_tail(res), t_start=t_start, patch=patch)
 
         # -- stages 3 and 4: the suite ------------------------------------------
         t0 = time.time()
@@ -123,7 +127,7 @@ class Gauntlet:
             stages["f2p"] = _stage("f2p", False, 0.0, "protected-path reset failed", t0)
             return self._result(Outcome.INFRA, 0.0, stages, findings,
                                 reason="the pre-run revert of protected paths failed; refusing to grade agent-editable tests",
-                                last_failure=res.tail(20), t_start=t_start, patch=patch)
+                                last_failure=self._safe_tail(res), t_start=t_start, patch=patch)
         status_map = parsers.parse(log, task.framework)
         ran = parsers.suite_ran(log)
         consistent = parsers.exit_code_consistent(log, status_map)
@@ -132,11 +136,23 @@ class Gauntlet:
         # invariant 5); last_failure flows into the next prompt via context.assemble
         failure = parsers.failure_excerpt(log, status_map, redact=task.f2p_hidden)
 
-        if not ran and not status_map:
+        # `not ran` alone gates. The earlier `not ran and not status_map` let a patch
+        # that printed fake PASSED lines during a collection error populate the map
+        # and skip this check entirely (found by review). Real runner evidence is
+        # non-negotiable; statuses parsed from a log with no evidence are not data.
+        if not ran:
             stages["f2p"] = _stage("f2p", False, 0.0, "no evidence the suite ran", t0)
             return self._result(Outcome.INFRA, 0.0, stages, findings,
                                 reason="no evidence the test suite executed; treating as infrastructure failure, not a pass",
-                                last_failure=res.tail(20), t_start=t_start, patch=patch)
+                                last_failure=self._safe_tail(res), t_start=t_start, patch=patch)
+        # the exit-code echo is the one channel a patch cannot write into (it sits
+        # after the END marker). If it is missing while the suite ran, the log was
+        # truncated or tampered with -- refuse to grade it.
+        if parsers.parse_exit_code(log) is None:
+            stages["f2p"] = _stage("f2p", False, 0.0, "exit-code echo missing", t0)
+            return self._result(Outcome.INFRA, 0.0, stages, findings,
+                                reason="the runner's exit-code echo is missing from the log; refusing to grade a truncated log",
+                                last_failure=self._safe_tail(res), t_start=t_start, patch=patch)
         if not consistent:
             stages["f2p"] = _stage("f2p", False, 0.0, "log contradicts the runner's exit code", t0)
             findings.append(
@@ -146,6 +162,29 @@ class Gauntlet:
             )
             return self._result(Outcome.CHEATED, 0.0, stages, findings,
                                 reason="test log is not trustworthy", t_start=t_start, patch=patch)
+
+        # A graded test cannot report PASSED while its own file failed to collect.
+        # Fake PASSED lines printed at import time produce exactly that impossible
+        # pair -- the file collapses with ERROR after the lies are printed (found
+        # by review). Checked per graded id against its containing file's status,
+        # so a suite where UNGRADED tests legitimately fail (an objective-graph
+        # node grading only its slice) is untouched: those runs exit nonzero with
+        # honest FAILED lines, not with a passing test inside a dead file.
+        impossible = [
+            t for t in (*task.f2p_all, *task.p2p)
+            if status_map.get(t) is TestStatus.PASSED
+            and status_map.get(t.partition("::")[0]) in (TestStatus.FAILED, TestStatus.ERROR)
+        ]
+        if impossible:
+            stages["f2p"] = _stage("f2p", False, 0.0, "a passing test inside a file that failed collection", t0)
+            findings.append(
+                CheatFinding("log_spoofed", cheat_mod.Severity.CRITICAL, "<test output>", 0,
+                             f"{len(impossible)} graded test(s) report PASSED inside files that failed to collect",
+                             "a test cannot pass while its own file failed collection; the PASSED lines were printed, not earned")
+            )
+            return self._result(Outcome.CHEATED, 0.0, stages, findings,
+                                reason="test log is not trustworthy: passing tests inside uncollectable files",
+                                t_start=t_start, patch=patch)
 
         n_f2p = len(task.f2p_all)
         stages["f2p"] = _stage(
@@ -218,6 +257,14 @@ class Gauntlet:
         reason = "all gates green" if green else "no regression; kept as a node"
         return self._result(outcome, score, stages, findings, reason=reason,
                             last_failure="" if green else failure, t_start=t_start, patch=patch, grade_=g)
+
+    def _safe_tail(self, res, n: int = 20) -> str:
+        """A log tail that is safe to show the agent: held-out redaction applies to
+        every branch, including apply/build/INFRA failures whose output can name
+        held-out files during collection (found by review)."""
+        from .parsers import failure_excerpt
+
+        return failure_excerpt(res.out, {}, limit=n, redact=self.task.f2p_hidden)
 
     # -------------------------------------------------------------- hygiene --
 
