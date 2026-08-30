@@ -46,6 +46,12 @@ def _blank_slate(monkeypatch, tmp_path):
     # them too, so a developer who has ever connected has a key these tests must not
     # see. Point it at a path that does not exist.
     monkeypatch.setattr(providers, "KEYS_PATH", tmp_path / "no-such-keys.env")
+    # Two more ambient facts that decide the provider on a developer's machine and
+    # must not decide it in a test: whether the Claude Code CLI is installed (it
+    # outranks every keyed provider) and whether a gateway key is configured (which
+    # forces every wire call through TrueFoundry).
+    monkeypatch.setattr(providers.shutil, "which", lambda name: None)
+    monkeypatch.setenv("RATCHET_GATEWAY_ONLY", "0")
 
 
 def test_nothing_configured_at_all_means_the_offline_demo_provider(monkeypatch, tmp_path):
@@ -84,6 +90,9 @@ def test_model_switch_and_unknown_provider():
 
 
 def test_openai_compat_and_anthropic_request_shapes(monkeypatch):
+    # these assert the DIRECT wire shapes; with a gateway key configured every call
+    # is routed instead, which is a different (and separately tested) contract
+    monkeypatch.setenv("RATCHET_GATEWAY_ONLY", "0")
     sent = []
 
     class FakeResp:
@@ -110,6 +119,7 @@ def test_openai_compat_and_anthropic_request_shapes(monkeypatch):
 
 
 def test_a_missing_key_is_a_clear_error(monkeypatch):
+    monkeypatch.setenv("RATCHET_GATEWAY_ONLY", "0")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(ChatProviderError, match="OPENAI_API_KEY"):
         ChatBackend("openai", "gpt-5.2").complete("hi")
@@ -726,3 +736,48 @@ def test_claude_code_provider_is_available_without_a_key(monkeypatch):
     assert prov.validate_key("claude-code", "") .startswith("connected")
     assert "claude-code" in prov.MODEL_CATALOG
     assert prov.PROVIDERS["claude-code"][1] == ""   # no key env at all
+
+
+# ------------------------------------------------------------------ gateway --
+
+
+def test_every_wire_call_leaves_through_the_gateway(monkeypatch):
+    """The hard rule: with a TrueFoundry key configured, a provider call must not
+    reach the provider directly. A gateway that can be bypassed is decoration --
+    its budgets, logs and rate limits only mean anything if nothing goes around it."""
+    import ratchet.providers as prov
+
+    seen = []
+
+    class Resp:
+        status_code = 200
+        text = "{}"
+        request = type("R", (), {"url": type("U", (), {"host": "gw"})()})()
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(prov.httpx, "post", lambda url, **kw: (seen.append((url, kw["json"]["model"])), Resp())[1])
+    monkeypatch.setenv("TFY_API_KEY", "tfy-test")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-be-used")
+    monkeypatch.delenv("RATCHET_GATEWAY_ONLY", raising=False)
+    prov._TOKEN_PARAM.clear()
+
+    assert prov.gateway_only()
+    assert prov.ChatBackend("openai", "gpt-5.2").complete("hi") == "ok"
+    url, model = seen[-1]
+    assert "truefoundry" in url and "api.openai.com" not in url
+    assert model == "openai/gpt-5.2"          # addressed as the gateway expects
+
+    # anthropic too: the native endpoint must not be used while the rule is on
+    seen.clear()
+    prov.ChatBackend("anthropic", "claude-sonnet-4-6").complete("hi")
+    assert "api.anthropic.com" not in seen[-1][0]
+
+
+def test_the_gateway_rule_can_be_turned_off_deliberately(monkeypatch):
+    import ratchet.providers as prov
+
+    monkeypatch.setenv("TFY_API_KEY", "tfy-test")
+    monkeypatch.setenv("RATCHET_GATEWAY_ONLY", "0")
+    assert not prov.gateway_only()

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -119,8 +120,6 @@ def validate_key(provider: str, key: str, *, timeout: float = 20.0) -> str:
     if provider == "demo":
         return "demo needs no key"
     if provider == "claude-code":
-        import shutil
-
         if shutil.which("claude"):
             return "connected — using your signed-in Claude Code"
         raise ChatProviderError("the `claude` CLI is not on PATH; install Claude Code first")
@@ -202,8 +201,6 @@ def connected_providers() -> dict[str, bool]:
     out = {}
     for name, (_b, key_env, _m) in PROVIDERS.items():
         if name == "claude-code":
-            import shutil
-
             out[name] = bool(shutil.which("claude"))
         elif name == "trueforge":
             out[name] = trueforge_alive()
@@ -235,11 +232,16 @@ class ChatBackend:
         provider = os.environ.get("RATCHET_CHAT_PROVIDER", "").strip().lower()
         if not provider:
             # Preference order, and `demo` is the last resort rather than the second.
-            # TrueForge comes first when it is up: it already holds the provider
-            # credentials, it is the harness the rest of the tool routes through, and
-            # picking it keeps a direct provider SDK off the default path.
-            if trueforge_alive():
+            # Claude Code first when it is installed: no key to configure, it edits
+            # the tree itself and narrates every step, and ratchet still gates and
+            # commits what it produced. Then TrueForge, which already holds the
+            # provider credentials, then the gateway, then any single keyed provider.
+            if shutil.which("claude"):
+                provider = "claude-code"
+            elif trueforge_alive():
                 provider = "trueforge"
+            elif os.environ.get("TFY_API_KEY"):
+                provider = "truefoundry"
             else:
                 provider = next(
                     (name for name, (_b, key_env, _m) in PROVIDERS.items() if key_env and os.environ.get(key_env)),
@@ -276,14 +278,19 @@ class ChatBackend:
         if self.provider == "trueforge":
             return self._trueforge_complete(prompt, max_tokens=max_tokens)
         base, key_env, _default = PROVIDERS[self.provider]
-        key = os.environ.get(key_env, "")
-        if not key:
+        key = os.environ.get(key_env, "") if key_env else ""
+        routed_model = self.model
+        via_gateway = False
+        if gateway_only() and self.provider != "truefoundry":
+            base, key, routed_model = _gateway_route(self.provider, self.model)
+            via_gateway = True
+        elif not key:
             raise ChatProviderError(
                 f"{key_env} is not set; export it, or `/model demo` for the offline provider"
             )
         from . import debuglog
 
-        if self.provider == "anthropic":
+        if self.provider == "anthropic" and not via_gateway:
             debuglog.log("info", f"POST {ANTHROPIC_URL} model={self.model} timeout={timeout}s")
             r = httpx.post(
                 ANTHROPIC_URL,
@@ -295,8 +302,10 @@ class ChatBackend:
             debuglog.log("info", f"← {r.status_code} in {_elapsed(r):.1f}s")
             _raise_for(r)
             return "".join(part.get("text", "") for part in r.json().get("content", []))
-        base = _base_for(self.provider, base)
-        model = self.model
+        base = base if via_gateway else _base_for(self.provider, base)
+        model = routed_model
+        if via_gateway:
+            debuglog.log("info", f"gateway route: {self.provider}/{self.model} -> {base} as {model}")
         if model == "auto":
             # gateways (TrueFoundry) route many models; with none named, take the
             # first the gateway lists rather than guessing a name it may not have
@@ -338,6 +347,79 @@ class ChatBackend:
             raise ChatProviderError(f"{self.provider} returned an unexpected payload: {e}") from e
 
 
+    @property
+    def agentic(self) -> bool:
+        """True when the provider does the editing itself and ratchet's job is to
+        watch, verify and commit -- rather than parse fences out of a reply."""
+        return self.provider == "claude-code"
+
+    def run_agentic(self, prompt: str, repo, on_event, *, timeout: float = 900.0) -> str:
+        """Drive a Claude Code session in `repo`, narrating it as it goes.
+
+        This is the communication channel the console was missing. `claude
+        --output-format stream-json` emits one JSON object per step -- each tool
+        call, each result, each thing it says -- so the activity pane can show the
+        work as it happens instead of a spinner and a wall of silence. Claude Code
+        edits the working tree directly; ratchet's contribution is that the result
+        still goes through the cheat gate and lands as one reviewable commit.
+
+        `on_event(kind, text)` is called from this thread for every step.
+        """
+        import json as _json
+        import subprocess
+
+        from . import debuglog
+
+        exe = shutil.which("claude")
+        if not exe:
+            raise ChatProviderError("the `claude` CLI is not on PATH — install Claude Code")
+        argv = [
+            exe, "-p", prompt,
+            "--output-format", "stream-json", "--verbose",
+            "--permission-mode", "acceptEdits",   # it may edit; ratchet still gates the diff
+            "--add-dir", str(repo),
+        ]
+        if self.model and self.model != "default":
+            argv += ["--model", self.model]
+        debuglog.log("info", f"claude session starting in {repo} (model={self.model})")
+
+        said: list[str] = []
+        last = ""
+        proc = subprocess.Popen(argv, cwd=str(repo), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, bufsize=1)
+        try:
+            for line in proc.stdout or ():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = _json.loads(line)
+                except ValueError:
+                    continue
+                text = _describe(ev)
+                if not text:
+                    continue
+                # the closing summary arrives twice -- once as the assistant's last
+                # message, once as the result envelope. Say it once.
+                if text == last:
+                    continue
+                last = text
+                if ev.get("type") == "result":
+                    said.append(text)
+                on_event("step", text)
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raise ChatProviderError(f"the Claude Code session ran past {timeout}s") from None
+        finally:
+            if proc.stdout:
+                proc.stdout.close()
+        if proc.returncode not in (0, None):
+            err = (proc.stderr.read() if proc.stderr else "")[:200]
+            raise ChatProviderError(f"claude exited {proc.returncode}: {err.strip()}")
+        debuglog.log("info", "claude session finished")
+        return said[-1] if said else ""
+
     def _claude_code_complete(self, prompt: str, *, timeout: float) -> str:
         """Ask the local Claude Code CLI, headless.
 
@@ -348,7 +430,6 @@ class ChatBackend:
         cheat gate and lands as one reviewable commit rather than editing the
         working tree behind ratchet's back.
         """
-        import shutil
         import subprocess
 
         from . import debuglog
@@ -431,12 +512,71 @@ def _swap_token_param(r: httpx.Response, body: dict[str, object], model: str) ->
     return False
 
 
+#: tool names worth a line of their own; everything else is noise in a console
+_LOUD_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "Read", "Glob", "Grep", "WebFetch"}
+
+
+def _describe(ev: dict) -> str:
+    """One activity line for one stream event, or "" for the ones nobody needs."""
+    kind = ev.get("type")
+    if kind == "system":
+        return "session started" if ev.get("subtype") == "init" else ""
+    if kind == "assistant":
+        out = []
+        for block in ev.get("message", {}).get("content", []):
+            if block.get("type") == "tool_use":
+                name = block.get("name", "tool")
+                if name not in _LOUD_TOOLS:
+                    continue
+                args = block.get("input") or {}
+                target = args.get("file_path") or args.get("path") or args.get("pattern") or args.get("command", "")
+                target = str(target).split("/")[-1] if "/" in str(target) else str(target)
+                out.append(f"{name.lower()} {target}"[:100])
+            elif block.get("type") == "text":
+                said = " ".join(str(block.get("text", "")).split())
+                if said:
+                    out.append(said[:110])
+        return " · ".join(out)
+    if kind == "user":
+        for block in ev.get("message", {}).get("content", []):
+            if block.get("type") == "tool_result" and block.get("is_error"):
+                return f"tool failed: {str(block.get('content', ''))[:80]}"
+        return ""
+    if kind == "result":
+        return " ".join(str(ev.get("result", "")).split())[:140]
+    return ""
+
+
 def _elapsed(r) -> float:
     """Response timing, defensively: the debug channel never breaks the call."""
     try:
         return r.elapsed.total_seconds()
     except Exception:
         return 0.0
+
+
+#: When a TrueFoundry key is configured, every wire call leaves through the
+#: gateway -- that is the whole point of putting a gateway in front of the
+#: providers, and a direct call that bypasses it is invisible to its budgets,
+#: logs and rate limits. Set RATCHET_GATEWAY_ONLY=0 to allow direct calls again.
+def gateway_only() -> bool:
+    load_saved_keys()
+    if os.environ.get("RATCHET_GATEWAY_ONLY", "") in ("0", "false", "no"):
+        return False
+    return bool(os.environ.get("TFY_API_KEY"))
+
+
+def _gateway_route(provider: str, model: str) -> tuple[str, str, str]:
+    """Rewrite a direct provider call into a gateway call.
+
+    Returns (base, key, model). TrueFoundry addresses a routed model as
+    `provider/model`, which is exactly how ratchet already names them, so the
+    model string usually passes through untouched.
+    """
+    base = os.environ.get("TFY_BASE_URL") or PROVIDERS["truefoundry"][0] or ""
+    key = os.environ.get("TFY_API_KEY", "")
+    routed = model if "/" in model else f"{provider}/{model}"
+    return base, key, routed
 
 
 def _base_for(provider: str, table_base: str | None) -> str | None:

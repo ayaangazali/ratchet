@@ -98,6 +98,9 @@ class ChatSession:
             return self._finish(turn, t0)
         self._bus("chat.turn", prompt=redact(prompt[:200]), provider=self.backend.provider, model=self.backend.model)
 
+        if getattr(self.backend, "agentic", False):
+            return self._run_agentic(prompt, emit, turn, t0)
+
         emit("step", f"asking {self.backend.provider}/{self.backend.model}")
         rendered = self._render(prompt)
         debuglog.log("info", f"turn start · {self.backend.provider}/{self.backend.model} · "
@@ -194,6 +197,73 @@ class ChatSession:
             return self._finish(turn, t0)
 
         return self._commit_and_finish(turn, t0)
+
+    def _run_agentic(self, prompt: str, emit, turn: Turn, t0: float) -> Turn:
+        """A turn where the provider edits the tree itself.
+
+        Claude Code does the work and narrates every step through `emit`; ratchet's
+        contribution is unchanged -- the resulting diff goes through the same cheat
+        gate as any other patch, and lands as one commit that /undo can revert. The
+        gate matters more here, not less: nothing parsed the output, so the working
+        tree is the only record of what happened.
+        """
+        import subprocess
+
+        from .verifier import cheat as cheat_mod
+
+        emit("step", f"claude code session · {self.backend.model}")
+        before = self._tracked_state()
+        try:
+            self.backend.run_agentic(prompt, self.repo, emit)
+        except ChatProviderError as e:
+            turn.error = str(e)
+            debuglog.log("error", f"agentic session failed: {e}")
+            emit("error", turn.error)
+            return self._finish(turn, t0)
+        except BaseException as e:
+            turn.error = f"{type(e).__name__}: {e}"
+            debuglog.exception("agentic session crashed", e)
+            emit("error", turn.error)
+            return self._finish(turn, t0)
+
+        turn.files = sorted(set(self._tracked_state()) - set(before)) or self._dirty_paths()
+        if not turn.files:
+            turn.error = "the session finished without changing any file"
+            emit("error", turn.error)
+            return self._finish(turn, t0)
+
+        diff = subprocess.run(["git", "diff", "HEAD", "--", *turn.files], cwd=self.repo,
+                              capture_output=True, text=True, timeout=60).stdout
+        findings = cheat_mod.inspect(diff or "", protected_paths=list(cheat_mod.DEFAULT_PROTECTED))
+        crit = [f for f in findings if f.severity.value == "critical"]
+        if crit:
+            # the session already wrote; reverting is the only honest response
+            subprocess.run(["git", "checkout", "--", *turn.files], cwd=self.repo,
+                           capture_output=True, timeout=60)
+            turn.error = f"gauntlet blocked the session and reverted it: {crit[0].one_line()}"
+            emit("error", turn.error)
+            return self._finish(turn, t0)
+        emit("step", "gauntlet cheat check: clean" if not findings
+             else f"gauntlet cheat check: {len(findings)} warning(s), none blocking")
+
+        turn.intent = turn.intent or f"claude code: {prompt[:80]}"
+        return self._commit_and_finish(turn, t0)
+
+    def _tracked_state(self) -> list[str]:
+        """Every file git can see, tracked or not -- the before/after of a session."""
+        import subprocess
+
+        r = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+                           cwd=self.repo, capture_output=True, text=True, timeout=60)
+        return [p for p in r.stdout.splitlines() if p and not p.startswith(".ratchet")]
+
+    def _dirty_paths(self) -> list[str]:
+        """Modified-in-place files, for a session that edited rather than created."""
+        import subprocess
+
+        r = subprocess.run(["git", "diff", "--name-only", "HEAD"], cwd=self.repo,
+                           capture_output=True, text=True, timeout=60)
+        return [p for p in r.stdout.splitlines() if p and not p.startswith(".ratchet")]
 
     # -------------------------------------------------------------- plumbing --
 
