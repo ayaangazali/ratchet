@@ -970,3 +970,33 @@ def test_a_failed_tool_call_is_loud():
         {"type": "tool_result", "is_error": True, "content": "This command requires approval"},
     ]}})
     assert "tool failed" in line and "approval" in line
+
+
+def test_a_long_session_is_not_cut_off_at_fifteen_minutes(monkeypatch):
+    """A real project is not a fifteen-minute job. The old ceiling killed a build
+    mid-flight with nothing to show for it."""
+    import inspect
+
+    from ratchet.providers import ChatBackend
+
+    src = inspect.getsource(ChatBackend.run_agentic)
+    assert "RATCHET_SESSION_TIMEOUT" in src
+    assert "3600" in src, "the default ceiling should be an hour, not fifteen minutes"
+
+
+def test_a_cut_short_session_still_gets_credit_for_what_it_wrote(tmp_path):
+    """Work already on disk must not be thrown away with the error."""
+    from ratchet.providers import ChatProviderError
+
+    class Interrupted:
+        provider, model, agentic = "claude-code", "sonnet", True
+
+        def run_agentic(self, prompt, repo, on_event, **kw):
+            (Path(repo) / "partial.html").write_text("<h1>half</h1>")
+            on_event("file", str(Path(repo) / "partial.html"))
+            raise ChatProviderError("the session was still running after 3600s and was stopped.")
+
+    turn, lines = _run(ChatSession(tmp_path, backend=Interrupted()), "build something big")
+    assert not turn.ok
+    assert turn.files == ["partial.html"], "the file it had written was thrown away"
+    assert any("kept 1 file" in t for _k, t in lines)

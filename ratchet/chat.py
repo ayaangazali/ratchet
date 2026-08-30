@@ -254,9 +254,14 @@ class ChatSession:
         try:
             self.backend.run_agentic(prompt, self.repo, relay)
         except ChatProviderError as e:
+            # a session that was cut short still wrote real files; credit them
+            # rather than throwing the work away with the error
             turn.error = str(e)
+            turn.files = self._relative(reported)
             debuglog.log("error", f"agentic session failed: {e}")
             emit("error", turn.error)
+            if turn.files:
+                emit("note", f"kept {len(turn.files)} file(s) the session had already written")
             return self._finish(turn, t0)
         except BaseException as e:
             turn.error = f"{type(e).__name__}: {e}"

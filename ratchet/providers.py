@@ -353,7 +353,7 @@ class ChatBackend:
         watch, verify and commit -- rather than parse fences out of a reply."""
         return self.provider == "claude-code"
 
-    def run_agentic(self, prompt: str, repo, on_event, *, timeout: float = 900.0) -> str:
+    def run_agentic(self, prompt: str, repo, on_event, *, timeout: float | None = None) -> str:
         """Drive a Claude Code session in `repo`, narrating it as it goes.
 
         This is the communication channel the console was missing. `claude
@@ -369,6 +369,11 @@ class ChatBackend:
         import subprocess
 
         from . import debuglog
+
+        # A real project is not a fifteen-minute job. The old cap killed a session
+        # mid-build with nothing to show for it; an hour is a ceiling rather than a
+        # target, and RATCHET_SESSION_TIMEOUT moves it for anyone who needs longer.
+        timeout = timeout or float(os.environ.get("RATCHET_SESSION_TIMEOUT", "3600"))
 
         exe = shutil.which("claude")
         if not exe:
@@ -432,7 +437,11 @@ class ChatBackend:
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
-            raise ChatProviderError(f"the Claude Code session ran past {timeout}s") from None
+            raise ChatProviderError(
+                f"the session was still running after {int(timeout)}s and was stopped. "
+                "Anything it had already written is on disk; raise RATCHET_SESSION_TIMEOUT "
+                "or ask for a smaller piece."
+            ) from None
         finally:
             if proc.stdout:
                 proc.stdout.close()
