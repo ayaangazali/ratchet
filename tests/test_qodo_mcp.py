@@ -147,6 +147,26 @@ def test_a_review_past_the_first_page_is_still_found() -> None:
     assert len(q.review_pr("1", wait=0.5, poll=0.05).findings) == 1
 
 
+def test_a_lookalike_bot_cannot_end_the_wait() -> None:
+    """`qodo-code-review-lookalike[bot]` is a login anyone can register. A reviewer
+    identity worth spoofing is worth matching exactly."""
+    issues: list[dict] = []
+    q = _mcp(issues=issues, pulls=[], on_post=lambda: issues.append(
+        {**_done(9), "user": {"login": "qodo-code-review-lookalike[bot]"}}))
+    with pytest.raises(QodoUnavailable):
+        q.review_pr("1", wait=0.3, poll=0.05)
+
+
+def test_the_pull_request_summary_is_not_a_review() -> None:
+    """Qodo writes a "PR Summary" when the branch opens. It is not a verdict, and
+    ending the wait on it would report clean before any review ran."""
+    issues: list[dict] = []
+    q = _mcp(issues=issues, pulls=[], on_post=lambda: issues.append(
+        {"id": 9, "user": BOT, "body": "<h3>PR Summary by Qodo</h3> what this branch does"}))
+    with pytest.raises(QodoUnavailable):
+        q.review_pr("1", wait=0.3, poll=0.05)
+
+
 def test_reading_without_waiting_still_shows_everything() -> None:
     """`fetch_findings` is the read path, not the gate, so it hides nothing."""
     assert len(_mcp(issues=[], pulls=[_finding(10)]).fetch_findings("1").findings) == 1

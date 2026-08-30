@@ -28,7 +28,9 @@ from dataclasses import asdict, dataclass, field
 from . import debuglog
 
 SEVERITIES = ("critical", "high", "medium", "low")
-QODO_BOT = "qodo-code-review"
+#: Matched exactly, not as a substring: `qodo-code-review-lookalike[bot]` is a login
+#: anyone can register, and a reviewer identity worth spoofing is worth checking.
+QODO_BOTS = frozenset({"qodo-code-review[bot]", "qodo-code-review"})
 
 #: What Qodo leaves behind when a review *finishes*, whether or not it found anything.
 #: The first review posts a "Code Review by Qodo" summary; every re-review posts a fresh
@@ -42,6 +44,11 @@ QODO_BOT = "qodo-code-review"
 #: not happened yet. A false clean is the worst answer a gate can give, worse than the
 #: stale one this branch started out fixing.
 BUSY = "Qodo is busy working"
+
+#: The two shapes a finished review takes. Not every comment Qodo leaves is one of
+#: them -- it also posts a "PR Summary by Qodo" when the pull request opens, and
+#: counting that would end the wait before any review ran.
+REVIEW_DONE = ("Code Review by Qodo", "[Code review](")
 
 #: How long a run waits for Qodo. Measured twice on this repository at ~104s; the
 #: margin is for a queue, not for hope. Past it the gate raises rather than merging
@@ -162,19 +169,21 @@ class QodoMCP:
 
     def _bot_comments(self, number: str, *, endpoint: str) -> list[dict]:
         raw = self._gh_list(f"repos/{self.repo_slug}/{endpoint}/{number}/comments")
-        return [c for c in raw if QODO_BOT in str(c.get("user", {}).get("login", ""))]
+        return [c for c in raw if str(c.get("user", {}).get("login", "")) in QODO_BOTS]
 
     def _completions(self, number: str) -> set[int]:
         """Ids of the comments that mean a review finished.
 
-        The in-progress marker is not one of them: Qodo posts it when it starts and
-        deletes it when it is done, so counting it would end the wait at the moment
-        the review begins.
+        Two things are deliberately not completions. The in-progress marker, which Qodo
+        posts when a review *starts* and deletes when it ends -- counting it would end
+        the wait at the moment the work begins. And the pull request summary it writes
+        when the branch opens, which is not a review at all.
         """
         return {
             int(c.get("id") or 0)
             for c in self._bot_comments(number, endpoint="issues")
-            if BUSY not in str(c.get("body", ""))
+            if BUSY not in (body := str(c.get("body", "")))
+            and any(mark in body for mark in REVIEW_DONE)
         }
 
     def review_pr(self, pr: str, *, wait: float = 0.0, poll: float = 10.0) -> Review:
@@ -250,7 +259,7 @@ class QodoMCP:
 
 
 def _parse_comment(comment: dict) -> Finding | None:
-    if QODO_BOT not in str(comment.get("user", {}).get("login", "")):
+    if str(comment.get("user", {}).get("login", "")) not in QODO_BOTS:
         return None
     body = str(comment.get("body", ""))
     sev = m.group(1).lower() if (m := _SEV_BADGE.search(body)) else "medium"
