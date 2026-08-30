@@ -1,20 +1,9 @@
-"""The dolphin, the palette, and the two ways we draw her.
+"""Ratchet's design tokens: the palette, the dolphin, and the helpers that render
+them.
 
-A terminal cell is about twice as tall as it is wide, so a sprite drawn one pixel
-per cell comes out squashed. Drawing it with `▀` -- upper half block, foreground on
-top, background underneath -- puts two stacked pixels in every cell and the pixels
-come out square. That is the whole trick, and it is why every sprite grid in
-`sprites.py` has an even height.
-
-Transparency matters as much as colour. A transparent pixel has to leave the
-widget's own background showing through rather than painting black over it, or the
-mascot turns up inside a black rectangle. So a cell with only one solid pixel is
-drawn with whichever half block covers exactly that pixel, and no background colour
-at all.
-
-This module is also the single source of truth for the console's colours. The
-Textual stylesheet repeats a handful of them because TCSS cannot import Python, and
-the web dashboard imports them from here, so there are two copies rather than three.
+Not a terminal concern any more. The stream console, the web dashboard and the
+generated SVG all read their colours from this one module, which is the only
+reason the browser and the terminal cannot drift apart.
 """
 
 from __future__ import annotations

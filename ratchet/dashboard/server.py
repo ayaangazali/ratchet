@@ -8,7 +8,7 @@ run is rebuilt from the file.
 Two decisions worth defending:
 
 **No framework and no CDN.** The page is one HTML file with inline CSS and vanilla
-JS, and the palette and the mascot are injected from `tui.mascot` at request time so
+JS, and the palette and the mascot are injected from `design` at request time so
 the browser and the terminal cannot drift apart. A demo happens on conference wifi;
 a dashboard that needs to reach a CDN is a dashboard that goes blank at the judging
 table.
@@ -32,8 +32,8 @@ from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from .. import design as m
 from ..bus import Bus
-from ..tui import mascot as m
 
 HERE = Path(__file__).resolve().parent
 

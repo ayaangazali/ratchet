@@ -1,4 +1,4 @@
-.PHONY: dev test lint fmt demo redteam evals bench run run-offline run-graph proof docs console dashboard mascot replay audit tree clean image fixture
+.PHONY: dev test lint fmt demo pipeline redteam evals bench run run-offline run-graph proof docs console dashboard mascot replay audit tree clean image fixture
 
 dev:
 	pip install -e ".[dev]"
@@ -30,6 +30,12 @@ bench:
 # A complete search with no model, no key and no network.
 run-offline:
 	python -m ratchet.cli run --repo demo-repo --scripted demo-repo/patches/scripted.json
+
+# The whole shape of the product in a minute: harness routes it, the verifier
+# rejects one attempt and accepts another, a human clears the gate, Qodo reviews
+# the pull request, every finding becomes work, it merges.
+pipeline:
+	python -m ratchet.cli pipeline
 
 # Exercise every claim offline and leave the evidence in .ratchet-proof/<ts>/.
 proof:

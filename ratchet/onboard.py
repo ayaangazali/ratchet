@@ -561,10 +561,22 @@ def go(
     if not console:
         return proc.wait()
 
-    from .tui.app import RatchetApp
+    from .bus import Bus
+    from .console import StreamConsole
 
+    view = StreamConsole()
     try:
-        RatchetApp(bus, repo).run()
+        # follow the run as a stream: no full-screen app to fight the terminal,
+        # and the transcript stays scrolled back when it is over
+        reader = Bus(bus)
+        while proc.poll() is None:
+            for ev in reader.tail():
+                view.handle(ev)
+            time.sleep(0.2)
+        for ev in reader.tail():
+            view.handle(ev)
+    except KeyboardInterrupt:
+        pass
     finally:
         if proc.poll() is None:
             echo("\n  the search is still running in the background.")

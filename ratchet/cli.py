@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -594,28 +595,31 @@ def cmd_evals(args) -> int:
 
 
 def cmd_console(args) -> int:
-    from .tui.app import RatchetApp
+    """Follow a run as a stream. Any width, scrollable, pipeable to a file."""
+    import time as _t
+
+    from .bus import Bus
+    from .console import StreamConsole
 
     repo = Path(args.repo or ".").resolve()
     bus_path = Path(args.bus) if args.bus else _latest(repo, "bus.jsonl", args.run)
-    if not bus_path and args.repo is None and (Path("demo-repo") / ".ratchet").exists():
-        # bare `ratchet` inside a checkout: the runs live in demo-repo/
-        repo = Path("demo-repo").resolve()
-        bus_path = _latest(repo, "bus.jsonl", args.run)
     if not bus_path:
-        # no run yet is not an error -- open the console anyway, on an empty bus,
-        # and let the idle splash say what to do next. Inside a git repo the bus
-        # lives with the project; anywhere else (say, $HOME) it goes to the cache
-        # dir rather than littering the directory you happened to be in.
-        from .gitstate import is_repo
-
-        base = repo if is_repo(repo) else Path.home() / ".cache" / "ratchet"
-        bus_path = base / ".ratchet" / "session.bus.jsonl" if is_repo(repo) else base / "session.bus.jsonl"
-        bus_path.parent.mkdir(parents=True, exist_ok=True)
-        bus_path.touch(exist_ok=True)
-    RatchetApp(bus_path, repo).run()
-    return 0
-
+        print("no run yet. `ratchet pipeline` shows the whole shape of one, "
+              "or `ratchet run` starts a real search.", file=sys.stderr)
+        return 1
+    view = StreamConsole()
+    bus = Bus(bus_path)
+    for ev in bus.read_all():
+        view.handle(ev)
+    if not args.follow:
+        return 0
+    try:
+        while True:                       # tail it, the way you would a log
+            for ev in bus.tail():
+                view.handle(ev)
+            _t.sleep(0.2)
+    except KeyboardInterrupt:
+        return 0
 
 def cmd_docs(args) -> int:
     """Exercise the Bright Data docs oracle: fetch, extract by heading, validate,
@@ -663,6 +667,49 @@ def cmd_export(args) -> int:
     print(path)
     return 0
 
+
+
+def cmd_pipeline(args) -> int:
+    """The whole shape of the product: harness, verifier, gate, review, merge."""
+    import uuid as _uuid
+
+    from .bus import Bus
+    from .console import StreamConsole
+    from .pipeline import Pace, PipelineRun
+
+    repo = Path(args.repo or ".").resolve()
+    run_id = args.run_id or f"pipeline-{_uuid.uuid4().hex[:6]}"
+    bus_path = repo / ".ratchet" / f"{run_id}.bus.jsonl"
+    bus_path.parent.mkdir(parents=True, exist_ok=True)
+    bus = Bus(bus_path)
+    view = StreamConsole()
+
+    if args.demo:
+        view.out.print()
+        view.note("demo mode — scripted stages, real event stream, no live services", "#e0a44a")
+
+    # render as it happens: the pipeline emits, the console follows the same file
+    import threading
+
+    done = threading.Event()
+
+    def follow() -> None:
+        while not done.is_set():
+            for ev in bus.tail():
+                view.handle(ev)
+            time.sleep(0.05)
+        for ev in bus.tail():
+            view.handle(ev)
+
+    watcher = threading.Thread(target=follow, daemon=True)
+    watcher.start()
+    result = PipelineRun(repo, Bus(bus_path), run_id=run_id,
+                         pace=Pace(beat=args.pace), demo=args.demo).run()
+    done.set()
+    watcher.join(timeout=3)
+    print()
+    print(f"  bus: {bus_path}")
+    return 0 if result.get("green") else 2
 
 
 def cmd_demo(args) -> int:
@@ -828,10 +875,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--trials", type=int, default=5)
     p.set_defaults(fn=cmd_evals)
 
-    p = sub.add_parser("console", help="the TUI")
+    p = sub.add_parser("console", help="follow a run as a stream")
     p.add_argument("--bus")
     p.add_argument("--repo")
     p.add_argument("--run")
+    p.add_argument("--follow", "-f", action="store_true", help="keep following as the run continues")
     p.set_defaults(fn=cmd_console)
 
     p = sub.add_parser("docs", help="fetch upstream docs for a library through Bright Data")
@@ -855,15 +903,31 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_export)
 
+    p = sub.add_parser("pipeline", help="the whole shape of a run: harness, verifier, gate, review, merge")
+    p.add_argument("--repo")
+    p.add_argument("--run-id")
+    p.add_argument("--pace", type=float, default=0.45, help="seconds per beat; 0 runs it instantly")
+    p.add_argument("--demo", action="store_true", default=True)
+    p.add_argument("--live", dest="demo", action="store_false", help="drive real services instead")
+    p.set_defaults(fn=cmd_pipeline)
+
     p = sub.add_parser("demo", help="seed the demo repository")
     p.add_argument("--dir")
     p.set_defaults(fn=cmd_demo)
 
     args = ap.parse_args(argv)
     if args.cmd is None:
-        # bare `ratchet`: straight into the console on the latest run (or an empty
-        # bus with the quick-start splash), the way `claude` starts a session
-        return cmd_console(argparse.Namespace(repo=None, bus=None, run=None))
+        # bare `ratchet`: follow the newest run. With none, show what one looks like
+        # rather than an empty screen -- the first thing a new user sees should be
+        # the product working, not a blank box.
+        import argparse as _ap
+
+        repo = Path(".").resolve()
+        if _latest(repo, "bus.jsonl", None) is None:
+            return cmd_pipeline(_ap.Namespace(repo=None, run_id=None, pace=0.45, demo=True))
+        return cmd_console(_ap.Namespace(repo=None, bus=None, run=None, follow=True))
+    if False:
+        pass
     return args.fn(args)
 
 

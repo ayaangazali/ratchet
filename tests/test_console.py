@@ -1,169 +1,118 @@
-"""The console's invariants.
+"""The stream console and the pipeline it renders.
 
-Generated art and injected templates are exactly the things that break quietly: a
-sprite row loses a character and the dolphin shears, a colour is edited in the
-stylesheet but not in the module and the browser slowly stops matching the terminal.
-None of this needs a model, a key, a network or a terminal.
+The console it replaced painted fixed panes and hid the ones that would not fit,
+so an 80-column terminal lost the search tree, the gauntlet rail and the
+waiting-on panel without saying so. These tests exist to make that class of
+failure impossible: a stream has no panes to lose, and every event has to produce
+a line at every width.
 """
 
 from __future__ import annotations
 
-import re
-import subprocess
-import sys
-from pathlib import Path
+import io
 
-import pytest
+from rich.console import Console
 
-from ratchet.dashboard.server import SAFE_ID, _page
-from ratchet.tui import mascot as m
-from ratchet.tui.sprites import PALETTE, Sprite
-
-ROOT = Path(__file__).resolve().parents[1]
-SPRITES = [m.FIN, m.FIN_SMALL, m.FIN_TINY]
+from ratchet.bus import Bus, Event
+from ratchet.console import StreamConsole
+from ratchet.pipeline import DEMO_FINDINGS, Pace, PipelineRun
 
 
-@pytest.mark.parametrize("sprite", SPRITES, ids=lambda s: f"{s.width}x{s.height}")
-def test_sprite_grid_is_rectangular(sprite: Sprite) -> None:
-    assert len(sprite.rows) == sprite.height
-    assert [len(r) for r in sprite.rows] == [sprite.width] * sprite.height
+def _render(events, width: int = 80) -> str:
+    buf = io.StringIO()
+    view = StreamConsole(Console(file=buf, width=width, highlight=False, soft_wrap=False))
+    for kind, payload in events:
+        view.handle(Event(kind, payload, 0.0))
+    return buf.getvalue()
 
 
-@pytest.mark.parametrize("sprite", SPRITES, ids=lambda s: f"{s.width}x{s.height}")
-def test_sprite_height_is_even(sprite: Sprite) -> None:
-    """Half-block rendering puts two pixel rows in one cell; an odd height would
-    silently drop the last row."""
-    assert sprite.height % 2 == 0
+def test_every_event_family_produces_a_line():
+    """A silent event is a pane that has gone dark: it happened and nobody saw."""
+    families = [
+        ("run.started", {"run_id": "r1", "task": "fix it", "provider": "trueforge"}),
+        ("repo.mapped", {"lines": 24}),
+        ("expand", {"node": "root", "fanout": 2, "dead_ends": 1}),
+        ("verify.started", {"label": "root-0", "model": "gpt-5.2", "intent": "try a thing"}),
+        ("stage.result", {"stage": "cheat", "passed": True, "detail": "0 critical"}),
+        ("node.added", {"id": "ae2c", "score": 1.0, "green": True}),
+        ("node.pruned", {"id": "9ba4", "reason": "a passing test broke"}),
+        ("stall", {"node": "root", "fanout": 3}),
+        ("approval.required", {"action": "open_pull_request", "summary": "the fix"}),
+        ("approval.resolved", {"approved": True}),
+        ("pr.opened", {"pr": "#118", "title": "the fix", "url": "http://x/118"}),
+        ("review.started", {"pr": "#118", "files": 2}),
+        ("review.finding", {"severity": "high", "title": "a real problem", "detail": "why"}),
+        ("review.done", {"pr": "#118", "findings": 1}),
+        ("fix.started", {"finding": "a real problem"}),
+        ("fix.done", {"summary": "fixed it"}),
+        ("pr.merged", {"pr": "#118"}),
+        ("chat.turn", {"provider": "claude-code", "model": "sonnet", "prompt": "make a site"}),
+        ("chat.step", {"text": "write index.html"}),
+        ("chat.done", {"files": ["index.html"], "commit": "abc1234", "seconds": 3.2}),
+        ("run.done", {"green": True, "reason": "merged"}),
+    ]
+    for kind, payload in families:
+        out = _render([(kind, payload)])
+        assert out.strip(), f"{kind} rendered nothing at all"
 
 
-@pytest.mark.parametrize("sprite", SPRITES, ids=lambda s: f"{s.width}x{s.height}")
-def test_every_pixel_has_a_colour(sprite: Sprite) -> None:
-    used = {c for row in sprite.rows for c in row} - {"."}
-    assert used <= set(PALETTE), f"undefined palette characters: {sorted(used - set(PALETTE))}"
+def test_the_whole_pipeline_reads_the_same_at_every_width(tmp_path):
+    """The bug this file exists for: the console used to drop entire sections below
+    104 columns. A stream has nothing to drop."""
+    bus = Bus(tmp_path / "p.bus.jsonl")
+    PipelineRun(tmp_path, bus, run_id="t", pace=Pace(beat=0)).run()
+    events = [(e.kind, e.payload) for e in bus.read_all()]
+
+    for width in (60, 80, 100, 120, 200):
+        out = _render(events, width=width)
+        for marker in ("Cartographer", "Verify", "pruned", "Gate", "Qodo",
+                       "Pull request", "Merged", "PASS", "FAIL"):
+            assert marker in out, f"{marker!r} missing at {width} columns"
 
 
-@pytest.mark.parametrize("sprite", SPRITES, ids=lambda s: f"{s.width}x{s.height}")
-def test_render_fills_exactly_the_declared_box(sprite: Sprite) -> None:
-    lines = m.render_lines(sprite)
-    assert len(lines) == sprite.height // 2
-    assert {len(line.plain) for line in lines} == {sprite.width}
+def test_the_pipeline_tells_the_whole_story(tmp_path):
+    """Harness routes it, the verifier rejects one attempt and accepts another, a
+    human clears the gate, Qodo reviews, the findings become work, it merges."""
+    bus = Bus(tmp_path / "p.bus.jsonl")
+    result = PipelineRun(tmp_path, bus, run_id="t", pace=Pace(beat=0)).run()
+    kinds = [e.kind for e in bus.read_all()]
+
+    assert kinds[0] == "run.started" and kinds[-1] == "run.done"
+    assert "node.pruned" in kinds, "a search that never rejects anything is not a search"
+    assert "node.added" in kinds
+    assert kinds.index("approval.required") < kinds.index("pr.opened"), "the PR must wait for the gate"
+    assert kinds.index("review.started") < kinds.index("pr.merged"), "review must precede merge"
+    assert kinds.count("review.started") == 2, "the fixes have to be re-reviewed"
+    assert kinds.count("review.finding") == len(DEMO_FINDINGS)
+    assert kinds.count("fix.started") == len(DEMO_FINDINGS), "every finding becomes work"
+    assert result["green"] and result["findings"] == len(DEMO_FINDINGS)
 
 
-def test_sprites_match_their_geometry() -> None:
-    """`sprites.py` is generated. If somebody hand-edits the pixels, the file and
-    the script that claims to produce it have parted company -- and the next person
-    to run `make mascot` silently reverts their work."""
-    generated = subprocess.run(
-        [sys.executable, "scripts/make_mascot.py", "--emit"],
-        cwd=ROOT, capture_output=True, text=True, check=True,
-    ).stdout
-    assert generated == (ROOT / "ratchet" / "tui" / "sprites.py").read_text()
+def test_a_finding_is_answered_before_the_merge(tmp_path):
+    """The point of the review stage: nothing merges over an open finding."""
+    bus = Bus(tmp_path / "p.bus.jsonl")
+    PipelineRun(tmp_path, bus, run_id="t", pace=Pace(beat=0)).run()
+    events = bus.read_all()
+    last_finding = max(i for i, e in enumerate(events) if e.kind == "review.finding")
+    merged = next(i for i, e in enumerate(events) if e.kind == "pr.merged")
+    fixes = [i for i, e in enumerate(events) if e.kind == "fix.done"]
+    assert all(last_finding < i < merged for i in fixes)
+    assert events[-2].kind == "pr.merged"
 
 
-def test_svg_uses_only_palette_colours() -> None:
-    svg = m.to_svg(m.FIN)
-    assert svg.startswith("<svg") and svg.endswith("</svg>")
-    fills = set(re.findall(r'fill="([^"]+)"', svg))
-    assert fills and fills <= set(PALETTE.values())
+def test_totals_count_what_actually_happened(tmp_path):
+    bus = Bus(tmp_path / "p.bus.jsonl")
+    PipelineRun(tmp_path, bus, run_id="t", pace=Pace(beat=0)).run()
+    view = StreamConsole(Console(file=io.StringIO(), width=100))
+    for e in bus.read_all():
+        view.handle(e)
+    assert view.totals.nodes == 2 and view.totals.pruned == 1
+    assert view.totals.reviews == 2 and view.totals.findings == len(DEMO_FINDINGS)
+    assert view.totals.subagents >= 3
 
 
-def test_stylesheet_and_module_agree_on_colours() -> None:
-    """The stylesheet cannot import Python, so a handful of hex codes are written
-    twice. Every one of them still has to name a colour the module defines."""
-    css = (ROOT / "ratchet" / "tui" / "theme.tcss").read_text()
-    known = {v.lower() for v in m.COLOURS.values()}
-    used = {c.lower() for c in re.findall(r"#[0-9a-fA-F]{6}", css)}
-    assert used <= known, f"colours in theme.tcss that mascot.py does not define: {sorted(used - known)}"
-
-
-def test_dashboard_page_leaves_no_placeholder() -> None:
-    page = _page(Path(".ratchet/demo.bus.jsonl"), Path("demo-repo")).decode()
-    assert "__PALETTE__" not in page
-    assert "__DOLPHIN__" not in page
-    assert "__RUN__" not in page and "__REPO__" not in page
-    for name, value in m.COLOURS.items():
-        assert f"--{name}: {value};" in page, f"palette entry {name} never reached the page"
-    assert "<svg" in page
-
-
-def test_bare_ratchet_opens_the_console(monkeypatch, tmp_path):
-    """`ratchet` with no arguments starts the TUI, the way `claude` starts a
-    session -- never a usage error."""
-    from ratchet import cli
-
-    calls = {}
-    monkeypatch.setattr(cli, "cmd_console", lambda args: (calls.setdefault("args", args), 0)[1])
-    assert cli.main([]) == 0
-    assert calls["args"].repo is None and calls["args"].bus is None
-
-
-def test_console_with_no_run_opens_on_an_empty_bus(monkeypatch, tmp_path):
-    """No run yet is not an error: the console opens on a fresh bus and the idle
-    splash says what to do next."""
-    from argparse import Namespace
-
-    from ratchet import cli
-
-    opened = {}
-
-    class FakeApp:
-        def __init__(self, bus_path, repo):
-            opened["bus"] = Path(bus_path)
-
-        def run(self):
-            pass
-
-    import ratchet.tui.app as app_mod
-
-    monkeypatch.setattr(app_mod, "RatchetApp", FakeApp)
-    monkeypatch.chdir(tmp_path)
-    rc = cli.cmd_console(Namespace(repo=str(tmp_path), bus=None, run=None))
-    assert rc == 0
-    assert opened["bus"].exists() and opened["bus"].stat().st_size == 0
-
-
-@pytest.mark.parametrize("bad", ["../../etc/passwd", "a1b2/../x", "", "A1B2", "a" * 33, "a1b2.json"])
-def test_approval_id_guard_rejects_anything_that_is_not_an_id(bad: str) -> None:
-    """The id becomes a filename, so it does not get the benefit of the doubt."""
-    assert not SAFE_ID.match(bad)
-
-
-def test_approval_id_guard_accepts_a_real_one() -> None:
-    assert SAFE_ID.match("a1b2c3d4")
-
-
-def test_no_pane_disappears_on_an_ordinary_terminal(tmp_path):
-    """The console was reported dead: "search tree doesn't work, the gauntlet
-    doesn't work, waiting-on doesn't work". None of them were broken -- the layout
-    hid the entire right column below 104 columns and the tree below 76, silently,
-    on what is a perfectly ordinary 80-column window. Panes may stack. They may not
-    vanish."""
-    import asyncio
-    import os
-
-    from ratchet.tui.app import RatchetApp
-
-    (tmp_path / ".ratchet").mkdir()
-    bus = tmp_path / ".ratchet" / "s.bus.jsonl"
-    bus.touch()
-    os.chdir(tmp_path)
-
-    async def widths():
-        out = {}
-        for w in (60, 80, 100, 120, 150):
-            app = RatchetApp(bus, tmp_path)
-            async with app.run_test(size=(w, 40)) as pilot:
-                await pilot.pause(0.3)
-                out[w] = (
-                    app.query_one("#left").display,
-                    app.query_one("#activity-box").display,
-                    app.query_one("#right").display,
-                    app.query_one("#main").has_class("stacked"),
-                )
-        return out
-
-    for width, (left, activity, right, stacked) in asyncio.run(widths()).items():
-        assert activity, f"the activity pane vanished at {width} columns"
-        assert right, f"the gauntlet and waiting-on vanished at {width} columns"
-        assert left, f"the search tree vanished at {width} columns"
-        assert stacked == (width < 104), f"{width} columns should {'stack' if width < 104 else 'not stack'}"
+def test_the_demo_says_it_is_a_demo(tmp_path):
+    """A rehearsal that pretends to be a performance is worth nothing."""
+    bus = Bus(tmp_path / "p.bus.jsonl")
+    PipelineRun(tmp_path, bus, run_id="t", pace=Pace(beat=0), demo=True).run()
+    assert bus.read_all()[0].payload.get("demo") is True

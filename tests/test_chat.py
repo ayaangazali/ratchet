@@ -198,70 +198,7 @@ def test_history_reaches_the_next_prompt(repo):
 # ------------------------------------------------------------------ console --
 
 
-def test_typing_in_the_console_codes_in_the_background(repo, monkeypatch):
-    """The whole feature, end to end and headless: type a prompt into the chat box,
-    the turn runs on a worker, the activity pane gets the ultra-summary (never raw
-    code), the file lands on disk as one commit, and /model switches providers."""
-    import asyncio
-
-    from textual.widgets import Input, RichLog
-
-    from ratchet.tui.app import RatchetApp
-
-    monkeypatch.setenv("RATCHET_CHAT_PROVIDER", "demo")
-    (repo / ".ratchet").mkdir()
-    bus = repo / ".ratchet" / "session.bus.jsonl"
-    bus.touch()
-
-    async def drive():
-        app = RatchetApp(bus, repo)
-        async with app.run_test(size=(150, 46)) as pilot:
-            await pilot.pause(0.4)
-            box = app.query_one("#chat", Input)
-            box.focus()
-            box.value = "make a website for my coffee shop"
-            await pilot.press("enter")
-            text = ""
-            for _ in range(60):
-                await pilot.pause(0.25)
-                text = "\n".join(str(line.text) for line in app.query_one("#activity", RichLog).lines)
-                if "done in" in text:
-                    break
-            box.focus()
-            box.value = "/model kimi"
-            await pilot.press("enter")
-            await pilot.pause(0.3)
-            text2 = "\n".join(str(line.text) for line in app.query_one("#activity", RichLog).lines)
-            return text, text2
-
-    text, text2 = asyncio.run(drive())
-    assert "wrote index.html" in text          # the summary
-    assert "<!doctype" not in text             # never the raw code
-    assert "done in" in text and "commit" in text
-    assert (repo / "index.html").exists()
-    # the palette applied its highlighted row: /model kimi filtered the catalog and
-    # Enter picked the top match -- a live provider/model switch from the dropdown
-    assert "chat model ->" in text2 and "kimi" in text2
-
-
 # ------------------------------------------------------------------ palette --
-
-
-def test_palette_autocompletes_commands_and_models():
-    from ratchet.tui.palette import COMMANDS, help_lines, rows_for
-
-    assert [r.label for r in rows_for("/mo")] == ["/model"]
-    assert len(rows_for("/")) == len(COMMANDS)
-    models = rows_for("/model ")
-    assert len(models) == 19 and all(r.kind == "model" for r in models)  # incl. claude-code, trueforge, truefoundry
-    kimi = [r.label for r in rows_for("/model kimi")]
-    assert kimi and all("kimi" in label for label in kimi)
-    providers = [r.label for r in rows_for("/connect")]
-    assert "groq" in providers and "demo" not in providers
-    assert rows_for("just some prose") == []
-    # /help IS the command dict: every command self-documents
-    joined = "\n".join(help_lines())
-    assert all(cmd in joined for cmd in COMMANDS)
 
 
 def test_connect_saves_a_validated_key_and_a_bad_key_is_refused(repo, monkeypatch, tmp_path):
@@ -325,31 +262,6 @@ def test_edits_see_the_existing_file(repo):
     prompt = session._render("change the title")
     assert "OLD TITLE MARKER" in prompt
     assert "Current file contents" in prompt
-
-
-def test_first_run_lands_in_the_connect_picker(repo, monkeypatch):
-    import asyncio
-
-    from textual.widgets import Input as _Input
-
-    import ratchet.providers as prov
-    from ratchet.tui.app import RatchetApp
-
-    # a machine with nothing connected at all
-    monkeypatch.setattr(prov, "connected_providers",
-                        lambda: {k: (k == "demo") for k in prov.PROVIDERS})
-    monkeypatch.setenv("RATCHET_CHAT_PROVIDER", "demo")
-    (repo / ".ratchet").mkdir(exist_ok=True)
-    bus = repo / ".ratchet" / "session.bus.jsonl"
-    bus.touch()
-
-    async def drive():
-        app = RatchetApp(bus, repo)
-        async with app.run_test(size=(150, 46)) as pilot:
-            await pilot.pause(0.6)
-            return app.query_one("#chat", _Input).value
-
-    assert asyncio.run(drive()) == "/connect "
 
 
 # ----------------------------------------------------------------- security --
@@ -450,89 +362,6 @@ def test_debug_channel_records_and_redacts(repo):
     assert any("POST" in line for _ts, _lvl, line in debuglog.lines())
 
 
-def test_restart_unsticks_a_hung_turn_and_resets_the_session(repo, monkeypatch):
-    """/restart is the escape hatch for exactly the state where a turn is wedged
-    and you cannot tell why: the worker is cancelled and the session rebuilt."""
-    import asyncio
-    import threading
-
-    from textual.widgets import Input as _Input
-    from textual.widgets import RichLog as _RichLog
-
-    monkeypatch.setenv("RATCHET_CHAT_PROVIDER", "demo")
-    (repo / ".ratchet").mkdir(exist_ok=True)
-    bus = repo / ".ratchet" / "session.bus.jsonl"
-    bus.touch()
-    release = threading.Event()
-
-    class Hanging:
-        provider, model = "hang", "hang"
-
-        def complete(self, prompt, **kw):
-            release.wait(timeout=30)  # a model that never answers
-            return "intent: never\n```file:x.txt\nx\n```"
-
-    from ratchet.tui.app import RatchetApp
-
-    async def drive():
-        app = RatchetApp(bus, repo)
-        async with app.run_test(size=(150, 46)) as pilot:
-            await pilot.pause(0.4)
-            app._chat_session().backend = Hanging()
-            box = app.query_one("#chat", _Input)
-            box.focus()
-            box.value = "build something"
-            await pilot.press("enter")
-            await pilot.pause(0.8)
-            assert app._chat_worker is not None and app._chat_worker.is_running
-            box.focus()
-            box.value = "/restart"
-            await pilot.pause(0.2)
-            app.query_one("#palette").display = False
-            await pilot.press("enter")
-            await pilot.pause(0.8)
-            text = "\n".join(str(line.text) for line in app.query_one("#activity", _RichLog).lines)
-            return app._chat_worker, app._chat, text
-
-    worker, session, text = asyncio.run(drive())
-    release.set()
-    assert worker is None and session is not None   # cancelled, then rebuilt
-    assert "restarted" in text
-
-
-def test_debug_command_toggles_the_panel(repo, monkeypatch):
-    import asyncio
-
-    from textual.widgets import Input as _Input
-    from textual.widgets import RichLog as _RichLog
-
-    monkeypatch.setenv("RATCHET_CHAT_PROVIDER", "demo")
-    (repo / ".ratchet").mkdir(exist_ok=True)
-    bus = repo / ".ratchet" / "session.bus.jsonl"
-    bus.touch()
-
-    from ratchet.tui.app import RatchetApp
-
-    async def drive():
-        app = RatchetApp(bus, repo)
-        async with app.run_test(size=(150, 46)) as pilot:
-            await pilot.pause(0.4)
-            panel = app.query_one("#debug", _RichLog)
-            before = panel.display
-            box = app.query_one("#chat", _Input)
-            box.focus()
-            box.value = "/debug"
-            await pilot.pause(0.2)
-            app.query_one("#palette").display = False
-            await pilot.press("enter")
-            await pilot.pause(0.4)
-            return before, panel.display, len(panel.lines)
-
-    before, after, n_lines = asyncio.run(drive())
-    assert after is not before
-    assert n_lines > 0  # the panel replays what already happened
-
-
 def test_the_walk_prunes_heavy_dirs_and_stays_fast(tmp_path):
     """The real hang: `rglob("*")` descended into .venv/node_modules and filtered
     afterwards -- 28 seconds on one ordinary home directory, which looked exactly
@@ -610,28 +439,6 @@ def test_export_redacts_secrets_and_survives_a_failed_turn(repo):
     assert "gsk_abcdef" not in text
     assert "failed" in text or "API key" in text
     assert "gsk_abcdef" not in report.to_json(repo, turns=session.turns)
-
-
-def test_the_clock_counts_work_not_session_age():
-    """The reported bug: a console open for an hour claimed an hour of work on a
-    one-second turn. The clock must only run while something is running."""
-    import time as _t
-
-    from ratchet.tui.app import StatusLine
-
-    s = StatusLine()
-    s.started = _t.time() - 3600          # console has been open an hour
-    assert s.work_seconds == 0.0          # ...but nothing has been done
-    assert s._clock() == "0s"
-
-    s.begin_work()
-    _t.sleep(0.05)
-    s.end_work()
-    banked = s.work_seconds
-    assert 0.0 < banked < 5.0             # a fraction of a second, not an hour
-
-    _t.sleep(0.05)
-    assert s.work_seconds == banked       # idle time does not accrue
 
 
 def test_a_model_that_rejects_max_tokens_is_retried_with_the_new_name(monkeypatch):
@@ -820,58 +627,6 @@ def test_the_gate_still_applies_to_an_agentic_session_without_git(tmp_path):
 
     turn, _ = _run(ChatSession(tmp_path, backend=Sneaky()), "make an app")
     assert not turn.ok and "gauntlet blocked" in turn.error
-
-
-def test_a_chat_turn_drives_every_pane(repo, monkeypatch):
-    """The complaint, as a test: the tree, the gauntlet rail, the counters and the
-    waiting-on panel all sat dead through a whole session, because they are fed by
-    run events and a chat turn only ever emitted chat.*, which the renderer skips.
-    A turn is a node -- it has an intent, it is graded, it produces files -- so it
-    has to say so in the language the console reads."""
-    import asyncio
-
-    from textual.widgets import Input as _Input
-    from textual.widgets import RichLog as _RichLog
-
-    from ratchet.tui.app import Counters, GauntletRail, RatchetApp, TreePane
-
-    monkeypatch.setenv("RATCHET_CHAT_PROVIDER", "demo")
-    (repo / ".ratchet").mkdir(exist_ok=True)
-    bus = repo / ".ratchet" / "session.bus.jsonl"
-    bus.touch()
-
-    async def drive():
-        app = RatchetApp(bus, repo)
-        async with app.run_test(size=(150, 46)) as pilot:
-            await pilot.pause(0.4)
-            box = app.query_one("#chat", _Input)
-            box.focus()
-            box.value = "make a page"
-            await pilot.press("enter")
-            for _ in range(80):
-                await pilot.pause(0.25)
-                text = "\n".join(str(line.text) for line in app.query_one("#activity", _RichLog).lines)
-                if "done in" in text or "error" in text.lower():
-                    break
-            await pilot.pause(0.8)
-            return (
-                dict(app.query_one(TreePane).nodes),
-                {k: v[0] for k, v in app.query_one(GauntletRail).state.items()},
-                app.query_one(Counters).subagents,
-                text,
-            )
-
-    nodes, rail, subagents, text = asyncio.run(drive())
-
-    assert nodes, "the tree stayed empty through a whole turn"
-    node = next(iter(nodes.values()))
-    assert node.get("green") and node.get("intent")
-    assert rail["cheat"] == "pass", "the gauntlet rail never showed the stage that ran"
-    # honest about the stages a chat turn does not run, rather than blank
-    assert rail["f2p"] == "skip" and rail["build"] == "skip"
-    assert subagents >= 1, "the counters never noticed the session"
-    # and the session's own narration survives the bus events that follow it
-    assert "wrote index.html" in text
 
 
 def test_a_deep_file_is_credited_even_when_a_tree_walk_would_miss_it(tmp_path):
