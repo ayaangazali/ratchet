@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .bus import Bus
-from .qodo_mcp import Finding, QodoMCP, QodoUnavailable
+from .qodo_mcp import REVIEW_WAIT, Finding, QodoMCP, QodoUnavailable
 
 ISSUE_URL = re.compile(r"github\.com/([\w.-]+)/([\w.-]+)/issues/(\d+)")
 PAPER_URL = re.compile(r"(arxiv\.org|doi\.org|openreview\.net|aclanthology\.org|\.pdf$)", re.I)
@@ -269,7 +269,8 @@ class BuildRun:
                   note="before the commit exists", scripted=self.demo)
         if not self.demo:
             try:
-                result = self.qodo.call_tool("fetch_findings", {"pr": self.live_pr})
+                result = self.qodo.call_tool(
+                    "review_pr", {"pr": self.live_pr, "wait": REVIEW_WAIT, "poll": 15})
             except QodoUnavailable as e:
                 self.emit("review.failed", reason=str(e)[:160])
                 raise
