@@ -67,3 +67,24 @@ def test_an_approved_push_runs_git_push_in_the_repo(tmp_path, monkeypatch):
 
     assert dec.allow
     assert calls == [["git", "-C", str(repo), "push"]]
+    assert not dec.error
+
+
+def test_a_failed_push_comes_back_as_an_error_not_a_traceback(tmp_path, monkeypatch):
+    """A rejected push is a result the caller has to report, not an exception it
+    has to catch: `qodo-fix` must be able to say why and exit nonzero rather than
+    die mid-loop or go on as if the commits had landed."""
+
+    def boom(argv, **kw):
+        raise gate_mod.subprocess.CalledProcessError(1, argv, stderr="rejected")
+
+    monkeypatch.setattr(gate_mod.subprocess, "run", boom)
+
+    g = gate_mod.Gate(tmp_path / "rejected")
+    t = _approver(g, allow=True)
+    t.start()
+    dec = g.push(summary="s", diff="d", timeout_s=10)
+    t.join()
+
+    assert dec.allow  # the human did say yes; that is not what failed
+    assert "returned non-zero exit status 1" in dec.error

@@ -745,6 +745,12 @@ def cmd_qodo_fix(args) -> int:
         if not decision.allow:
             print(f"push denied at the gate: {decision.reason or 'no reason given'}")
             return 2
+        if decision.error:
+            # approved and attempted, but git said no (rejected, no remote, no
+            # network): the commits are local only, so a fresh review would grade
+            # the old head
+            print(f"push failed: {decision.error}", file=sys.stderr)
+            return 2
         print("pushed -- commanding a fresh Qodo review")
 
         since = review.reviewed_at

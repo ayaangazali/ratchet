@@ -290,10 +290,10 @@ class QodoOracle:
             dec = gate.pr_comment(slug=str(self.slug), pr=pr, body="/review",
                                   summary=f"post `/review` on {self.slug} PR #{pr}",
                                   timeout_s=timeout_s)
-        except (OSError, subprocess.SubprocessError):
+        except OSError:
+            return False  # the gate's own bookkeeping files; nothing was posted
+        if not dec.allow or dec.error:
             return False  # same contract as _gh: a broken gh is a no-op, not a traceback
-        if not dec.allow:
-            return False
         self._emit(QODO_REQUESTED, pr=pr, slug=self.slug)
         self.cache_path.unlink(missing_ok=True)
         return True

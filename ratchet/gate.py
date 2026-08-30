@@ -50,6 +50,21 @@ class Decision:
     allow: bool
     reason: str = ""
     decided_at: float = field(default_factory=time.time)
+    error: str = ""  # non-empty only when an approved action was attempted and failed
+
+
+def _run(argv: list[str]) -> str:
+    """Run an approved action; return "" on success, else why it failed.
+
+    An approved push that git rejects is a result, not a control-flow event: the
+    caller has to tell it apart from "the human said no" and from success, and it
+    can only do that if the gate hands it back rather than raising through it.
+    """
+    try:
+        subprocess.run(argv, check=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return str(exc) or exc.__class__.__name__
+    return ""
 
 
 class Gate:
@@ -101,7 +116,7 @@ class Gate:
         req = self.request(action="push", summary=summary, diff=diff, stats=stats)
         dec = self.wait(req, timeout_s=timeout_s)
         if dec.allow:
-            subprocess.run(["git", "-C", str(self.repo), "push"], check=True, timeout=120)
+            dec.error = _run(["git", "-C", str(self.repo), "push"])
         return dec
 
     def pr_comment(self, *, slug: str, pr: int, body: str, summary: str,
@@ -117,8 +132,7 @@ class Gate:
                            stats={"slug": slug, "pr": pr})
         dec = self.wait(req, timeout_s=timeout_s)
         if dec.allow:
-            subprocess.run(["gh", "pr", "comment", str(pr), "--repo", slug, "--body", body],
-                           check=True, timeout=120)
+            dec.error = _run(["gh", "pr", "comment", str(pr), "--repo", slug, "--body", body])
         return dec
 
     def pending(self) -> list[str]:
