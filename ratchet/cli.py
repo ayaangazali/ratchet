@@ -663,22 +663,6 @@ def cmd_export(args) -> int:
     print(path)
     return 0
 
-def cmd_doctor(args) -> int:
-    """Everything that has to be true before a run can work, checked in one place.
-
-    Written after three separate configuration faults each spent a full budget
-    looking like an agent that could not fix anything.
-    """
-    from . import doctor
-
-    s = Settings.from_env()
-    if args.repo:
-        s.repo = args.repo
-    if args.task:
-        s.task_path = args.task
-    checks, ok = doctor.run(s, live=not args.offline)
-    print(doctor.render(checks, ok))
-    return 0 if ok else 1
 
 
 def cmd_demo(args) -> int:
@@ -870,12 +854,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_export)
-
-    p = sub.add_parser("doctor", help="check everything a run needs, before the run")
-    p.add_argument("--repo")
-    p.add_argument("--task")
-    p.add_argument("--offline", action="store_true", help="skip the live model call")
-    p.set_defaults(fn=cmd_doctor)
 
     p = sub.add_parser("demo", help="seed the demo repository")
     p.add_argument("--dir")

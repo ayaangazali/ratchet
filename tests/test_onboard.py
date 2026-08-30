@@ -132,9 +132,13 @@ _COLOURED = (
 )
 
 
-def test_coloured_output_is_unparseable_before_stripping() -> None:
-    """The bug, stated as a test: escape sequences make a real suite look empty."""
-    assert parsers.parse(_COLOURED, "pytest") == {}
+def test_coloured_output_parses_without_external_stripping() -> None:
+    """The bug this file was written for is now fixed inside the parser itself:
+    it strips ANSI within the trusted region, so coloured output parses whole
+    rather than looking like an empty suite."""
+    statuses = parsers.parse(_COLOURED, "pytest")
+    assert statuses["tests/test_a.py::test_ok"] is TestStatus.PASSED
+    assert statuses["tests/test_a.py::test_bad"] is TestStatus.FAILED
 
 
 def test_stripping_ansi_recovers_the_statuses() -> None:
