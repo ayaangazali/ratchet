@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .bus import Bus
-from .qodo_mcp import QodoMCP
+from .qodo_mcp import Finding, QodoMCP, QodoUnavailable
 
 ISSUE_URL = re.compile(r"github\.com/([\w.-]+)/([\w.-]+)/issues/(\d+)")
 PAPER_URL = re.compile(r"(arxiv\.org|doi\.org|openreview\.net|aclanthology\.org|\.pdf$)", re.I)
@@ -84,6 +84,25 @@ DEMO_NODES = [
          deps=["parse", "store"], model="truefoundry/openai/gpt-5.2"),
 ]
 
+#: Findings the demo replays. Every one is real: Qodo raised each of these
+#: against this repository, and they are quoted as they arrived. `--live` fetches
+#: current findings instead of replaying these.
+REPLAYED_FINDINGS = [
+    Finding("high", "Ignored protected files survive the reset",
+            "git clean -fdq preserves ignored files, so a file created under a protected "
+            "directory survives the pre-run reset and can still affect grading.",
+            "ratchet/verifier/eval_script.py", 49),
+    Finding("high", "End marker remains forgeable",
+            "parse_exit_code splits on the first end marker, so suite code can print a forged "
+            "END followed by exit code 0 and be graded on the forgery.",
+            "ratchet/verifier/parsers.py", 59),
+    Finding("medium", "Empty truncation audits clean",
+            "verify() only requires a seal when at least one receipt remains, so truncating the "
+            "receipt file to zero bytes returns success.",
+            "ratchet/receipts.py", 166),
+]
+
+
 #: A paper is not a feature request. The graph it produces has an extra
 #: obligation at the end: the implementation has to reproduce the number the
 #: paper claims, or it is a plausible-looking thing that agrees with nobody.
@@ -126,7 +145,8 @@ class BuildRun:
         self.bus = bus
         self.run_id = run_id
         self.pace = pace or Pace()
-        self.qodo = qodo or QodoMCP()
+        self.qodo = qodo or QodoMCP("ayaangazali/ratchet")
+        self.live_pr = "10"        # which pull request `--live` reports on
         self.demo = demo
         source = PAPER_NODES if target.kind == "paper" else DEMO_NODES
         self.nodes = [Node(n.id, n.goal, list(n.tests), list(n.deps), n.model) for n in source]
@@ -243,16 +263,24 @@ class BuildRun:
         self.emit("node.fulfilled", id=node.id, tests=len(node.tests))
 
     def _review(self) -> dict:
+        """The review stage. `--live` reaches the real reviewer; the demo replays
+        findings it actually produced, and the event stream records which."""
         self.emit("review.started", scope="diff", reviewer="qodo", pass_no=1,
-                  note="before the commit exists", scripted=self.qodo.scripted)
-        result = self.qodo.call_tool("review_diff", {
-            "diff": "diff --git a/app/limits.py b/app/limits.py",
-            "context": self.target.goal,
-        })
+                  note="before the commit exists", scripted=self.demo)
+        if not self.demo:
+            try:
+                result = self.qodo.call_tool("fetch_findings", {"pr": self.live_pr})
+            except QodoUnavailable as e:
+                self.emit("review.failed", reason=str(e)[:160])
+                raise
+        else:
+            result = {"findings": [f.to_dict() for f in REPLAYED_FINDINGS],
+                      "blocking": sum(1 for f in REPLAYED_FINDINGS if f.blocking),
+                      "scripted": True}
         for f in result["findings"]:
             self.emit("review.finding", **f)
         self.emit("review.done", findings=len(result["findings"]),
-                  blocking=result["blocking"], pass_no=1, scripted=result["scripted"])
+                  blocking=result["blocking"], pass_no=1, scripted=self.demo)
         return result
 
     def _fix(self, finding: dict) -> None:

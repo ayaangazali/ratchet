@@ -1,26 +1,43 @@
-"""Qodo as an MCP tool, so a review can happen before the commit exists.
+"""Qodo as MCP tools, against the reviewer that actually exists.
 
-Qodo reviews pull requests. Useful, and too late: by the time there is a PR the
-work is already in the branch and the fix is a second commit. Wrapping the CLI as
-an MCP server moves the same reviewer to where it does more good -- it reviews the
-*diff*, in the sandbox, before anything is committed, and its findings become work
-in the same loop that produced the patch.
+The Qodo *CLI* is discontinued -- run it and it prints a notice and exits -- so an
+adapter that shells out to it would be theatre. The Qodo **GitHub App** is alive,
+it has reviewed every pull request in this repository, and its findings are
+retrievable over the GitHub API. That is what this talks to.
 
-One tool, `review_diff(diff, context) -> findings[]`. When the `qodo` CLI is on
-PATH it is invoked; when it is not, `scripted=True` returns the findings a review
-of this kind actually produced, so the pipeline can be demonstrated end to end
-without four accounts and a network. The stream says which of the two happened,
-because a demo that hides that it is one is worth nothing.
+    review_pr(pr, wait)   ask for a review and wait for it to land
+    fetch_findings(pr)    the findings it has already left, parsed
+
+There is no scripted mode. When something is unreachable these raise, and the
+caller reports it -- inventing an answer is the one thing a review gate must
+never do.
+
+Every call is recorded with its duration so a run can print its own evidence.
+`gh` carries the credentials, so no token passes through this process.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
+import re
 import subprocess
+import time
 from dataclasses import asdict, dataclass, field
 
+from . import debuglog
+
 SEVERITIES = ("critical", "high", "medium", "low")
+QODO_BOT = "qodo-code-review"
+
+#: Qodo posts findings as HTML: a shields.io severity badge, a numbered title,
+#: and the explanation inside a <pre>. This is how they actually arrive.
+_SEV_BADGE = re.compile(r"badge/(Critical|High|Medium|Low)-", re.I)
+_TITLE = re.compile(r"^\s*\d+\\?\.\s*(.+?)$", re.M)
+_BODY = re.compile(r"<pre>\s*(.+?)\s*</pre>", re.S)
+
+
+class QodoUnavailable(RuntimeError):
+    pass
 
 
 @dataclass
@@ -30,15 +47,15 @@ class Finding:
     detail: str
     path: str = ""
     line: int = 0
-    fix: str = ""
+    url: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @property
     def blocking(self) -> bool:
-        """What must be answered before the diff may be committed. Qodo's own
-        severities decide; ratchet does not get to reinterpret them downward."""
+        """Qodo's severity decides. Ratchet does not get to reinterpret it
+        downward -- that is the only way a review gate means anything."""
         return self.severity in ("critical", "high")
 
 
@@ -46,7 +63,8 @@ class Finding:
 class Review:
     findings: list[Finding] = field(default_factory=list)
     reviewer: str = "qodo"
-    scripted: bool = False
+    pr: str = ""
+    calls: list[dict] = field(default_factory=list)
 
     @property
     def blocking(self) -> list[Finding]:
@@ -57,96 +75,113 @@ class Review:
         return not self.blocking
 
 
-#: What a review of a verifier change turns up. Every one of these is real: Qodo
-#: raised each against this repository, and they are quoted as they arrived.
-SCRIPTED_FINDINGS = [
-    Finding("high", "Ignored protected files survive the reset",
-            "git clean -fdq preserves ignored files, so a file created under a protected "
-            "directory survives the pre-run reset and can still affect grading.",
-            "ratchet/verifier/eval_script.py", 49, "clean with -x inside protected paths"),
-    Finding("high", "End marker is forgeable",
-            "parse_exit_code splits on the first end marker, so suite code can print a forged "
-            "END followed by exit code 0 and be graded on the forgery.",
-            "ratchet/verifier/parsers.py", 59, "bound the trusted region at the last end marker"),
-    Finding("medium", "Empty truncation audits clean",
-            "verify() only requires a seal when at least one receipt remains, so truncating the "
-            "receipt file to zero bytes returns success.",
-            "ratchet/receipts.py", 166, "an empty chain is a problem, not a pass"),
-]
-
-
 class QodoMCP:
-    """The adapter. `available()` says whether this is the real reviewer."""
-
-    tool_name = "review_diff"
-
-    def __init__(self, *, scripted: bool | None = None, timeout: float = 240.0) -> None:
-        self.exe = shutil.which("qodo") or shutil.which("qodo-cli")
-        self.scripted = (self.exe is None) if scripted is None else scripted
+    def __init__(self, repo_slug: str = "", *, timeout: float = 60.0) -> None:
+        self.repo_slug = repo_slug
         self.timeout = timeout
+        self.calls: list[dict] = []
+
+    # ------------------------------------------------------------- plumbing --
+
+    def _gh(self, *args: str):
+        argv = ["gh", "api", *args]
+        started = time.time()
+        try:
+            proc = subprocess.run(argv, capture_output=True, text=True, timeout=self.timeout)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise QodoUnavailable(f"gh api failed to run: {e}") from e
+        took = time.time() - started
+        call = {"api": "github", "path": args[0] if args else "",
+                "ok": proc.returncode == 0, "seconds": round(took, 2)}
+        self.calls.append(call)
+        debuglog.log("info", f"GET github {call['path']} → "
+                             f"{'ok' if call['ok'] else 'error'} in {took:.2f}s")
+        if proc.returncode != 0:
+            raise QodoUnavailable((proc.stderr or proc.stdout).strip()[:200])
+        raw = (proc.stdout or "").strip()
+        try:
+            return json.loads(raw or "null")
+        except ValueError:
+            return raw      # --jq can return a bare string; that is still an answer
 
     def available(self) -> bool:
-        return self.exe is not None and not self.scripted
+        try:
+            self._gh("user", "--jq", ".login")
+            return True
+        except QodoUnavailable:
+            return False
 
-    # ------------------------------------------------------------- the tool --
+    # ----------------------------------------------------------------- tools --
+
+    def fetch_findings(self, pr: str) -> Review:
+        number = str(pr).lstrip("#")
+        raw = self._gh(f"repos/{self.repo_slug}/pulls/{number}/comments")
+        findings = [f for c in (raw or []) if (f := _parse_comment(c))]
+        return Review(findings=findings, pr=f"#{number}", calls=list(self.calls))
+
+    def review_pr(self, pr: str, *, wait: float = 0.0, poll: float = 10.0) -> Review:
+        """`/review` is the command the app answers to. Without a wait this reads
+        whatever it has already said."""
+        number = str(pr).lstrip("#")
+        if wait:
+            self._gh("--method", "POST", f"repos/{self.repo_slug}/issues/{number}/comments",
+                     "-f", "body=/review")
+            deadline = time.time() + wait
+            while time.time() < deadline:
+                review = self.fetch_findings(number)
+                if review.findings:
+                    return review
+                time.sleep(poll)
+        return self.fetch_findings(number)
 
     def review_diff(self, diff: str, *, context: str = "") -> Review:
-        if self.scripted or not self.exe:
-            return Review(findings=list(SCRIPTED_FINDINGS), scripted=True)
-        try:
-            proc = subprocess.run(
-                [self.exe, "review", "--diff", "-", "--format", "json"],
-                input=diff, capture_output=True, text=True, timeout=self.timeout,
-            )
-        except (OSError, subprocess.SubprocessError) as e:
-            raise RuntimeError(f"qodo review failed to run: {e}") from e
-        if proc.returncode != 0:
-            raise RuntimeError(f"qodo exited {proc.returncode}: {(proc.stderr or '')[:200]}")
-        return Review(findings=_parse(proc.stdout), scripted=False)
+        raise QodoUnavailable(
+            "the Qodo app reviews pull requests, not loose diffs; open one and call review_pr"
+        )
 
-    #: the MCP surface, for a host that wants to call this over the protocol
+    # ------------------------------------------------------------------ mcp --
+
     def tools(self) -> list[dict]:
-        return [{
-            "name": self.tool_name,
-            "description": "Review a unified diff before it is committed. Returns findings "
-                           "with severity, location and a suggested fix.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "diff": {"type": "string", "description": "unified diff to review"},
-                    "context": {"type": "string", "description": "what the change is trying to do"},
-                },
-                "required": ["diff"],
-            },
-        }]
+        return [
+            {"name": "review_pr",
+             "description": "Ask Qodo to review a pull request and return its findings.",
+             "inputSchema": {"type": "object", "required": ["pr"],
+                             "properties": {"pr": {"type": "string"},
+                                            "wait": {"type": "number"}}}},
+            {"name": "fetch_findings",
+             "description": "The findings Qodo has already left on a pull request.",
+             "inputSchema": {"type": "object", "required": ["pr"],
+                             "properties": {"pr": {"type": "string"}}}},
+        ]
 
     def call_tool(self, name: str, arguments: dict) -> dict:
-        if name != self.tool_name:
+        if name == "fetch_findings":
+            review = self.fetch_findings(arguments["pr"])
+        elif name == "review_pr":
+            review = self.review_pr(arguments["pr"], wait=float(arguments.get("wait") or 0))
+        else:
             raise KeyError(f"no tool named {name!r}")
-        review = self.review_diff(arguments.get("diff", ""), context=arguments.get("context", ""))
         return {"findings": [f.to_dict() for f in review.findings],
-                "blocking": len(review.blocking), "scripted": review.scripted}
+                "blocking": len(review.blocking), "pr": review.pr, "calls": review.calls}
 
 
-def _parse(stdout: str) -> list[Finding]:
-    """Qodo's JSON, defensively: a reviewer whose output shape drifts must not
-    take the run down with it."""
-    try:
-        data = json.loads(stdout or "{}")
-    except ValueError:
-        return []
-    raw = data.get("findings") or data.get("suggestions") or []
-    out: list[Finding] = []
-    for item in raw if isinstance(raw, list) else []:
-        if not isinstance(item, dict):
-            continue
-        sev = str(item.get("severity") or item.get("priority") or "medium").lower()
-        out.append(Finding(
-            severity=sev if sev in SEVERITIES else "medium",
-            title=str(item.get("title") or item.get("summary") or "finding")[:120],
-            detail=str(item.get("detail") or item.get("description") or "")[:400],
-            path=str(item.get("path") or item.get("file") or ""),
-            line=int(item.get("line") or 0),
-            fix=str(item.get("fix") or item.get("suggestion") or "")[:200],
-        ))
-    return out
+def _parse_comment(comment: dict) -> Finding | None:
+    if QODO_BOT not in str(comment.get("user", {}).get("login", "")):
+        return None
+    body = str(comment.get("body", ""))
+    sev = m.group(1).lower() if (m := _SEV_BADGE.search(body)) else "medium"
+    plain = _strip_html(body)
+    title = t.group(1).strip() if (t := _TITLE.search(plain)) else "finding"
+    detail = " ".join(_strip_html(b.group(1)).split())[:400] if (b := _BODY.search(body)) else ""
+    return Finding(
+        severity=sev if sev in SEVERITIES else "medium",
+        title=title[:120],
+        detail=detail,
+        path=str(comment.get("path", "")),
+        line=int(comment.get("line") or comment.get("original_line") or 0),
+        url=str(comment.get("html_url", "")),
+    )
+
+
+def _strip_html(text: str) -> str:
+    return re.sub(r"<[^>]+>", "", text)

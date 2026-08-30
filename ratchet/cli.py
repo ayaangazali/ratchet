@@ -709,12 +709,66 @@ def cmd_build(args) -> int:
     watcher = threading.Thread(target=follow, daemon=True)
     watcher.start()
     result = BuildRun(target, repo, Bus(bus_path), run_id=run_id,
-                      pace=Pace(beat=args.pace), qodo=QodoMCP(scripted=not args.live),
+                      pace=Pace(beat=args.pace), qodo=QodoMCP("ayaangazali/ratchet"),
                       demo=not args.live).run()
     done.set()
     watcher.join(timeout=3)
     print(f"\n  bus: {bus_path}")
     return 0 if result.get("green") else 2
+
+
+def cmd_live(args) -> int:
+    """The real pipeline: real services, and it prints every call it made."""
+    import uuid as _uuid
+
+    from . import shark
+    from .buildview import BuildView
+    from .bus import Bus
+    from .live import LiveRun
+    from .qodo_mcp import QodoUnavailable
+
+    repo = Path(args.repo or ".").resolve()
+    run_id = args.run_id or f"live-{_uuid.uuid4().hex[:6]}"
+    bus_path = repo / ".ratchet" / f"{run_id}.bus.jsonl"
+    bus_path.parent.mkdir(parents=True, exist_ok=True)
+    view, reader = BuildView(animate=not args.no_animate), Bus(bus_path)
+    run = LiveRun(repo, Bus(bus_path), run_id=run_id, repo_slug=args.repo_slug,
+                  goal=args.goal or "")
+
+    def drain() -> None:
+        for ev in reader.tail():
+            view.handle(ev)
+
+    view.out.print(shark.banner(args.goal or args.repo_slug))
+    checks = run.preflight()
+    drain()
+    missing = [k for k, v in checks.items() if not v["ok"] and k != "gateway_only"]
+    if missing and not args.force:
+        view.line(f"not reachable: {', '.join(missing)} — nothing here is faked, so the run stops",
+                  "#e5675c")
+        return 1
+
+    if args.goal:
+        try:
+            run.ask(args.goal, role="plan", max_tokens=args.max_tokens)
+        except Exception as e:
+            drain()
+            view.line(f"model call failed: {e}", "#e5675c")
+            return 1
+        drain()
+
+    if args.pr:
+        try:
+            run.review(args.pr)
+        except QodoUnavailable as e:
+            view.line(str(e)[:160], "#e5675c")
+        drain()
+
+    run.finish(green=True, pr=args.pr or "", nodes=0, findings=0,
+               reason="live run complete — every call above actually happened")
+    drain()
+    print(f"\n  bus: {bus_path}")
+    return 0
 
 
 def cmd_pipeline(args) -> int:
@@ -962,6 +1016,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--label-demo", action="store_true",
                    help="say on screen which stages are scripted (the stream always records it)")
     p.set_defaults(fn=cmd_build)
+
+    p = sub.add_parser("live", help="the real pipeline: real services, every API call printed")
+    p.add_argument("--goal", help="a prompt to send through the gateway")
+    p.add_argument("--pr", help="a pull request for Qodo to report on")
+    p.add_argument("--repo-slug", default="ayaangazali/ratchet")
+    p.add_argument("--repo")
+    p.add_argument("--run-id")
+    p.add_argument("--max-tokens", type=int, default=400)
+    p.add_argument("--no-animate", action="store_true")
+    p.add_argument("--force", action="store_true", help="continue even if a service is unreachable")
+    p.set_defaults(fn=cmd_live)
 
     p = sub.add_parser("pipeline", help="the whole shape of a run: harness, verifier, gate, review, merge")
     p.add_argument("--repo")

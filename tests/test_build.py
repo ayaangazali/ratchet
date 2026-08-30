@@ -11,10 +11,10 @@ import io
 
 from rich.console import Console
 
-from ratchet.build import BuildRun, Pace, Target
+from ratchet.build import REPLAYED_FINDINGS, BuildRun, Pace, Target
 from ratchet.buildview import BuildView
 from ratchet.bus import Bus
-from ratchet.qodo_mcp import SCRIPTED_FINDINGS, Finding, QodoMCP, Review
+from ratchet.qodo_mcp import Finding, QodoMCP, QodoUnavailable, Review
 
 
 def _run(tmp_path):
@@ -81,7 +81,7 @@ def test_the_review_happens_before_the_commit_exists(tmp_path):
 def test_every_blocking_finding_is_answered_and_re_reviewed(tmp_path):
     events, result = _run(tmp_path)
     kinds = [e.kind for e in events]
-    blocking = [f for f in SCRIPTED_FINDINGS if f.blocking]
+    blocking = [f for f in REPLAYED_FINDINGS if f.blocking]
     assert kinds.count("fix.started") == len(blocking)
     assert kinds.count("review.started") == 2, "the fixes have to be reviewed too"
     last_review = max(i for i, k in enumerate(kinds) if k == "review.done")
@@ -100,13 +100,41 @@ def test_nothing_reaches_a_pull_request_without_the_gate(tmp_path):
 # --------------------------------------------------------------- qodo as mcp --
 
 
-def test_qodo_is_exposed_as_an_mcp_tool():
-    q = QodoMCP(scripted=True)
-    tools = q.tools()
-    assert [t["name"] for t in tools] == ["review_diff"]
-    assert "diff" in tools[0]["inputSchema"]["required"]
-    out = q.call_tool("review_diff", {"diff": "diff --git a/x b/x"})
-    assert out["findings"] and out["blocking"] == 2 and out["scripted"] is True
+def test_qodo_is_exposed_as_mcp_tools_over_the_app_that_exists():
+    """The Qodo CLI is discontinued -- it prints a notice and exits -- so the
+    adapter talks to the GitHub App, which is what actually reviews."""
+    q = QodoMCP("ayaangazali/ratchet")
+    assert sorted(t["name"] for t in q.tools()) == ["fetch_findings", "review_pr"]
+    assert all("pr" in t["inputSchema"]["required"] for t in q.tools())
+
+
+def test_there_is_no_scripted_mode_in_the_adapter():
+    """Inventing an answer is the one thing a review gate must never do."""
+    q = QodoMCP("ayaangazali/ratchet")
+    try:
+        q.review_diff("diff --git a/x b/x")
+        raise AssertionError("a loose diff has no reviewer; it must say so")
+    except QodoUnavailable as e:
+        assert "pull request" in str(e)
+
+
+def test_a_real_qodo_comment_parses_into_a_finding():
+    from ratchet.qodo_mcp import _parse_comment
+
+    comment = {
+        "user": {"login": "qodo-code-review[bot]"},
+        "path": "ratchet/verifier/parsers.py",
+        "line": 59,
+        "html_url": "https://github.com/x/y/pull/10#discussion_1",
+        "body": '<img src="https://img.shields.io/badge/High-634FD1"> \n\n'
+                "2\\. End marker remains forgeable <code>Bug</code>\n\n"
+                "<pre>parse_exit_code splits on the first end marker.</pre>",
+    }
+    f = _parse_comment(comment)
+    assert f and f.severity == "high" and f.blocking
+    assert "End marker" in f.title and "first end marker" in f.detail
+    assert f.path.endswith("parsers.py") and f.line == 59
+    assert _parse_comment({"user": {"login": "someone-else"}, "body": "hi"}) is None
 
 
 def test_severity_decides_what_blocks_not_ratchet():
@@ -116,11 +144,13 @@ def test_severity_decides_what_blocks_not_ratchet():
     assert Review(findings=[Finding("medium", "t", "d")]).clean
 
 
-def test_a_reviewer_whose_output_drifts_does_not_take_the_run_down():
-    from ratchet.qodo_mcp import _parse
+def test_a_comment_whose_shape_drifts_does_not_take_the_run_down():
+    """A reviewer that changes its markup must not crash the pipeline that reads it."""
+    from ratchet.qodo_mcp import _parse_comment
 
-    assert _parse("not json at all") == []
-    assert _parse('{"findings": [{"nonsense": 1}]}')[0].severity == "medium"
+    bare = _parse_comment({"user": {"login": "qodo-code-review[bot]"}, "body": "no markup at all"})
+    assert bare and bare.severity == "medium", "an unknown severity is not blocking by default"
+    assert not bare.blocking
 
 
 # --------------------------------------------------------------------- view --
