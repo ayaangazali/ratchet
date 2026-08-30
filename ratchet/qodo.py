@@ -224,6 +224,10 @@ class QodoOracle:
         Accept only a comment newer than ``since`` whose body actually parses —
         the ~7s ACK edit ("busy working") has no findings and no category
         counts, so it is skipped.
+
+        Returns None on timeout, never the previous pass: a caller that cannot
+        tell "no review landed" from "the review is clean" reports a failed
+        review as a green one.
         # ponytail: marker+parse heuristic; if Qodo's ACK wording ever gains a
         # parseable shape, tighten this to an explicit completion marker.
         """
@@ -242,7 +246,7 @@ class QodoOracle:
                                findings=[f.title for f in review.findings])
                     return review
             time.sleep(poll_s)
-        return self.latest_review(pr, fresh=False)
+        return None
 
     # ---------------------------------------------------------------- prompt --
 

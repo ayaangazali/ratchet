@@ -147,6 +147,17 @@ def test_context_render_includes_capped_qodo_section():
     assert "x" * (ctx_mod.MAX_REVIEW + 1) not in out
 
 
+def test_wait_for_review_timeout_is_none_not_the_previous_pass(monkeypatch, tmp_path):
+    """A timeout must not surface the last review: qodo-fix reads that as
+    'clean, nothing to fix' and exits 0 on a review that never happened."""
+    monkeypatch.setattr(qodo.shutil, "which", lambda _: "/usr/bin/gh")
+    oracle = QodoOracle(tmp_path, slug="owner/repo")
+    oracle._cache_put(QodoReview(pr=9, reviewed_at="2026-01-01T00:00:00Z",
+                                 findings=[], counts={"bugs": 0}))
+
+    assert oracle.wait_for_review(9, since="2026-01-01T00:00:00Z", timeout_s=0) is None
+
+
 def test_qodo_mcp_exposes_four_tools():
     from ratchet import qodo_mcp
 

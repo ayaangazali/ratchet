@@ -694,10 +694,19 @@ def cmd_qodo_fix(args) -> int:
     review = oracle.latest_review(pr, fresh=True)
     if review is None or not review.findings:
         print(f"no Qodo review on PR #{pr} yet -- commanding one (/review, ~2 min)")
-        oracle.trigger_review(pr)
-        review = oracle.wait_for_review(pr, since=review.reviewed_at if review else "",
-                                        timeout_s=args.timeout)
-    if review is None or not review.findings:
+        since = review.reviewed_at if review else ""
+        if not oracle.trigger_review(pr):
+            print(f"could not command a Qodo review on PR #{pr} (gh failed)", file=sys.stderr)
+            return 2
+        # None here is a timeout, not a clean review -- reporting "nothing to
+        # fix" because the reviewer never answered is the one failure mode a
+        # review->revise loop must not have
+        review = oracle.wait_for_review(pr, since=since, timeout_s=args.timeout)
+        if review is None:
+            print(f"no Qodo review landed on PR #{pr} within {args.timeout}s -- stopping",
+                  file=sys.stderr)
+            return 2
+    if not review.findings:
         print("Qodo reports no findings -- nothing to fix")
         return 0
 
@@ -728,10 +737,13 @@ def cmd_qodo_fix(args) -> int:
         print("pushed -- commanding a fresh Qodo review")
 
         since = review.reviewed_at
-        oracle.trigger_review(pr)
+        if not oracle.trigger_review(pr):
+            print(f"could not command a fresh Qodo review on PR #{pr} (gh failed)",
+                  file=sys.stderr)
+            return 2
         review = oracle.wait_for_review(pr, since=since, timeout_s=args.timeout)
         if review is None:
-            print("no fresh review landed in time -- stopping")
+            print("no fresh review landed in time -- stopping", file=sys.stderr)
             return 2
         if not review.findings:
             print(f"Qodo review is clean after round {rnd}")
