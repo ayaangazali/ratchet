@@ -22,12 +22,42 @@ import json
 import re
 import subprocess
 import time
+from collections.abc import Collection
 from dataclasses import asdict, dataclass, field
 
 from . import debuglog
 
 SEVERITIES = ("critical", "high", "medium", "low")
-QODO_BOT = "qodo-code-review"
+#: Matched exactly, not as a substring: `qodo-code-review-lookalike[bot]` is a login
+#: anyone can register, and a reviewer identity worth spoofing is worth checking.
+QODO_BOTS = frozenset({"qodo-code-review[bot]", "qodo-code-review"})
+
+#: What Qodo leaves behind when a review *finishes*, whether or not it found anything.
+#: The first review posts a "Code Review by Qodo" summary; every re-review posts a fresh
+#: "[Code review](...)" link and edits that first summary in place. Both are new
+#: comments, so a new comment id is the signal.
+#:
+#: `updated_at` is deliberately not the signal, though it looks like the obvious one for
+#: an edit-in-place reviewer. Qodo edits the summary *while the review is still running*
+#: — measured on #17: summary touched at 05:19:49, review actually finished at 05:20:44
+#: — so treating an edit as completion returns "clean, no findings" on a review that has
+#: not happened yet. A false clean is the worst answer a gate can give, worse than the
+#: stale one this branch started out fixing.
+BUSY = "Qodo is busy working"
+
+#: The two shapes a finished review takes. Not every comment Qodo leaves is one of
+#: them -- it also posts a "PR Summary by Qodo" when the pull request opens, and
+#: counting that would end the wait before any review ran.
+REVIEW_DONE = ("Code Review by Qodo", "[Code review](")
+
+#: How long a run waits for Qodo. Measured twice on this repository at ~104s; the
+#: margin is for a queue, not for hope. Past it the gate raises rather than merging
+#: unreviewed.
+REVIEW_WAIT = 360.0
+
+#: The summary lands a beat before the inline comments (observed ~1s apart). Reading
+#: findings the instant the summary appears would report a clean review that is not.
+SETTLE = 6.0
 
 #: Qodo posts findings as HTML: a shields.io severity badge, a numbered title,
 #: and the explanation inside a <pre>. This is how they actually arrive.
@@ -104,6 +134,19 @@ class QodoMCP:
         except ValueError:
             return raw      # --jq can return a bare string; that is still an answer
 
+    def _gh_list(self, path: str) -> list[dict]:
+        """Every page of a list endpoint, not the first thirty.
+
+        GitHub pages comments oldest-first, so on a busy pull request the newest ones
+        -- the review we are waiting for -- are the ones that fall off the end. Reading
+        page one would make the gate time out on a review that had already landed.
+        `--slurp` gives one array per page; they flatten into one list.
+        """
+        pages = self._gh("--paginate", "--slurp", path)
+        if not isinstance(pages, list):
+            return []
+        return [c for page in pages for c in (page if isinstance(page, list) else [page])]
+
     def available(self) -> bool:
         try:
             self._gh("user", "--jq", ".login")
@@ -113,26 +156,75 @@ class QodoMCP:
 
     # ----------------------------------------------------------------- tools --
 
-    def fetch_findings(self, pr: str) -> Review:
+    def fetch_findings(self, pr: str, *, exclude: Collection[int] = ()) -> Review:
+        """Qodo's findings on a pull request. `exclude` drops comment ids that were
+        already there, which is how this run's review is told from an older one."""
         number = str(pr).lstrip("#")
-        raw = self._gh(f"repos/{self.repo_slug}/pulls/{number}/comments")
-        findings = [f for c in (raw or []) if (f := _parse_comment(c))]
+        raw = self._gh_list(f"repos/{self.repo_slug}/pulls/{number}/comments")
+        findings = [
+            f for c in (raw or [])
+            if int(c.get("id") or 0) not in exclude and (f := _parse_comment(c))
+        ]
         return Review(findings=findings, pr=f"#{number}", calls=list(self.calls))
 
+    def _bot_comments(self, number: str, *, endpoint: str) -> list[dict]:
+        raw = self._gh_list(f"repos/{self.repo_slug}/{endpoint}/{number}/comments")
+        return [c for c in raw if str(c.get("user", {}).get("login", "")) in QODO_BOTS]
+
+    def _completions(self, number: str) -> set[int]:
+        """Ids of the comments that mean a review finished.
+
+        Two things are deliberately not completions. The in-progress marker, which Qodo
+        posts when a review *starts* and deletes when it ends -- counting it would end
+        the wait at the moment the work begins. And the pull request summary it writes
+        when the branch opens, which is not a review at all.
+        """
+        return {
+            int(c.get("id") or 0)
+            for c in self._bot_comments(number, endpoint="issues")
+            if BUSY not in (body := str(c.get("body", "")))
+            and any(mark in body for mark in REVIEW_DONE)
+        }
+
     def review_pr(self, pr: str, *, wait: float = 0.0, poll: float = 10.0) -> Review:
-        """`/review` is the command the app answers to. Without a wait this reads
-        whatever it has already said."""
+        """Ask for a review and wait for THAT review.
+
+        Two things this must not do. It must not accept an older review: a pull
+        request Qodo saw yesterday answers in a second, and the run books yesterday's
+        verdict against today's diff. And it must not read an empty result as a
+        reviewer that never replied -- a genuinely clean review has no findings, and
+        blocking on that would jam the gate shut on exactly the good pull requests.
+
+        So the wait watches for a new comment from Qodo that is not its in-progress
+        marker -- that is what "the review finished" looks like -- rather than for
+        findings, and it identifies it by comment id. Not by timestamp: two clocks at
+        one-second resolution can skew or tie. Not by `updated_at` either, because Qodo
+        edits its summary while the review is still running, and an in-flight edit read
+        as completion produces a clean verdict on a review nobody has done.
+
+        A wait that expires raises -- silence is not approval.
+        """
         number = str(pr).lstrip("#")
-        if wait:
-            self._gh("--method", "POST", f"repos/{self.repo_slug}/issues/{number}/comments",
-                     "-f", "body=/review")
-            deadline = time.time() + wait
-            while time.time() < deadline:
-                review = self.fetch_findings(number)
-                if review.findings:
-                    return review
-                time.sleep(poll)
-        return self.fetch_findings(number)
+        if not wait:
+            return self.fetch_findings(number)
+
+        seen_reviews = self._completions(number)
+        seen_findings = {int(c.get("id") or 0) for c in self._bot_comments(number, endpoint="pulls")}
+        self._gh("--method", "POST", f"repos/{self.repo_slug}/issues/{number}/comments",
+                 "-f", "body=/review")
+        debuglog.log("info", f"asked qodo to review #{number}; {len(seen_reviews)} prior review(s)")
+
+        deadline = time.time() + wait
+        while (remaining := deadline - time.time()) > 0:
+            time.sleep(min(poll, remaining))
+            if self._completions(number) - seen_reviews:
+                time.sleep(SETTLE)  # let the inline findings catch up with the summary
+                review = self.fetch_findings(number, exclude=seen_findings)
+                debuglog.log("info", f"qodo reviewed #{number}: {len(review.findings)} finding(s)")
+                return review
+        raise QodoUnavailable(
+            f"qodo did not answer for #{number} within {int(wait)}s — silence is not approval"
+        )
 
     def review_diff(self, diff: str, *, context: str = "") -> Review:
         raise QodoUnavailable(
@@ -158,7 +250,8 @@ class QodoMCP:
         if name == "fetch_findings":
             review = self.fetch_findings(arguments["pr"])
         elif name == "review_pr":
-            review = self.review_pr(arguments["pr"], wait=float(arguments.get("wait") or 0))
+            review = self.review_pr(arguments["pr"], wait=float(arguments.get("wait") or 0),
+                                    poll=float(arguments.get("poll") or 10))
         else:
             raise KeyError(f"no tool named {name!r}")
         return {"findings": [f.to_dict() for f in review.findings],
@@ -166,7 +259,7 @@ class QodoMCP:
 
 
 def _parse_comment(comment: dict) -> Finding | None:
-    if QODO_BOT not in str(comment.get("user", {}).get("login", "")):
+    if str(comment.get("user", {}).get("login", "")) not in QODO_BOTS:
         return None
     body = str(comment.get("body", ""))
     sev = m.group(1).lower() if (m := _SEV_BADGE.search(body)) else "medium"

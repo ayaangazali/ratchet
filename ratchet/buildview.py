@@ -233,7 +233,10 @@ class BuildView:
         secs = int(time.time() - self.t0)
         self.out.print()
         body = Text("  ")
-        body.append("✔ ", style=f"bold {sk.GREEN}")
+        # A run that ended on blocking findings does not get a tick. The mark follows
+        # the reviewer, not the fact that the code reached the end of the function.
+        blocked = int(p.get("blocking", 0) or 0)
+        body.append("✖ " if blocked else "✔ ", style=f"bold {'#e5675c' if blocked else sk.GREEN}")
         body.append(str(p.get("reason", "done")), style=sk.TEXT)
         self.out.print(body)
         tail = Text("    ")

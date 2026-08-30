@@ -21,7 +21,7 @@ import httpx
 from . import debuglog
 from .bus import Bus
 from .providers import ChatBackend, ChatProviderError, gateway_only, load_saved_keys
-from .qodo_mcp import QodoMCP, QodoUnavailable
+from .qodo_mcp import REVIEW_WAIT, QodoMCP, QodoUnavailable
 
 
 @dataclass
@@ -145,11 +145,15 @@ class LiveRun:
     # --------------------------------------------------------------- review --
 
     def review(self, pr: str) -> dict:
-        """Qodo's real findings on a real pull request."""
+        """Qodo's findings on this diff.
+
+        `review_pr`, not `fetch_findings`: reading findings a pull request already
+        carries is a cache read, and on a branch Qodo reviewed before it books an old
+        verdict against the current code."""
         qodo = QodoMCP(self.repo_slug)
         self.emit("review.started", scope="pull request", reviewer="qodo", pr=pr, pass_no=1)
         try:
-            out = qodo.call_tool("fetch_findings", {"pr": pr})
+            out = qodo.call_tool("review_pr", {"pr": pr, "wait": REVIEW_WAIT, "poll": 15})
         except QodoUnavailable as e:
             self.emit("review.failed", reason=str(e)[:160])
             raise
