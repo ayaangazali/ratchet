@@ -8,6 +8,7 @@ without trusting anything the agent could reach.
 from __future__ import annotations
 
 import json
+import threading
 
 from ratchet.models import GauntletResult, Outcome
 from ratchet.receipts import ReceiptBook
@@ -19,6 +20,31 @@ def _r(outcome: Outcome, score: float) -> GauntletResult:
 
 def _book(tmp_path) -> ReceiptBook:
     return ReceiptBook(tmp_path / "run.receipts.jsonl")
+
+
+def test_concurrent_writers_keep_the_chain_intact(tmp_path):
+    """loop.expand grades a fan-out on a thread pool; every candidate records a
+    receipt. Unsynchronised, two writers read the same tail and both append seq=n
+    with the same prev -- a broken chain the run inflicted on itself."""
+    book = _book(tmp_path)
+    n = 32
+    barrier = threading.Barrier(n)
+
+    def write(i: int) -> None:
+        barrier.wait()  # maximise the collision window
+        book.record_result(f"n{i}", _r(Outcome.PROGRESS, i / n))
+
+    threads = [threading.Thread(target=write, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    ok, problems = book.verify()
+    assert ok, problems
+    receipts = book.all()
+    assert len(receipts) == n
+    assert sorted(r.seq for r in receipts) == list(range(n))
 
 
 def test_chain_verifies_when_untouched(tmp_path):

@@ -30,6 +30,7 @@ import hmac
 import json
 import os
 import secrets
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -67,6 +68,11 @@ class ReceiptBook:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.key_path = key_path or path.with_suffix(".key")
         self.key = self._load_or_create_key()
+        # record_result is read-tail -> compute prev -> append. Two threads from the
+        # fan-out pool that read the same tail both write seq=n with the same prev,
+        # and verify() reports the chain broken -- a self-inflicted integrity failure.
+        # ponytail: coarse lock; the chain is per-run and short (<= max_nodes).
+        self._lock = threading.Lock()
 
     def _load_or_create_key(self) -> bytes:
         if self.key_path.exists():
@@ -90,6 +96,10 @@ class ReceiptBook:
         return [Receipt(**json.loads(line)) for line in self.path.read_text().splitlines() if line.strip()]
 
     def record_result(self, node_id: str, result: GauntletResult) -> Receipt:
+        with self._lock:
+            return self._record(node_id, result)
+
+    def _record(self, node_id: str, result: GauntletResult) -> Receipt:
         chain = self.all()
         prev = chain[-1].digest() if chain else GENESIS
         r = Receipt(
