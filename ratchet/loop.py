@@ -341,8 +341,14 @@ class SearchRun:
     def squashed(self, winner: Node) -> str:
         return self.git.squashed_diff(self.base_commit, winner.commit)
 
-    def request_ship(self, winner: Node) -> tuple:
-        """The last node in the state machine. Nothing leaves without a human."""
+    def request_ship(self, winner: Node, *, timeout_s: float | None = None, on_request=None) -> tuple:
+        """The last node in the state machine. Nothing leaves without a human.
+
+        `on_request` fires once the request exists and before the wait begins, so a
+        caller can tell the operator how to answer it. Without that the run prints
+        nothing for the length of the window and then reports a denial, which reads
+        as a hang followed by a rejection rather than as a question nobody heard.
+        """
         diff = self.squashed(winner)
         path = self.tree.path_to(winner)
         req = self.gate.request(
@@ -357,7 +363,9 @@ class SearchRun:
                 "cost_usd": round(sum(n.cost_usd for n in self.tree), 4),
             },
         )
-        return req, self.gate.wait(req)
+        if on_request is not None:
+            on_request(req)
+        return req, (self.gate.wait(req) if timeout_s is None else self.gate.wait(req, timeout_s=timeout_s))
 
 
 def _ok():

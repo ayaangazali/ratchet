@@ -318,7 +318,13 @@ def cmd_run(args) -> int:
     print(f"winner {result.winner.id} · score {result.winner.score:.3f} · {len(result.tree)} nodes explored")
     print(run.scheduler.budget.line())
     if result.green and not args.no_ship:
-        req, decision = run.request_ship(result.winner)
+        def _announce(req):
+            print(f"\napproval {req.id} pending — nothing ships until you answer:")
+            print(f"  approve: echo '{{\"allow\": true}}' > {repo}/.ratchet/approvals/{req.id}.json")
+            print(f"  deny:    echo '{{\"allow\": false}}' > {repo}/.ratchet/approvals/{req.id}.json")
+            print(f"  waiting up to {args.gate_timeout:.0f}s (--gate-timeout, or --no-ship to skip the gate)")
+
+        req, decision = run.request_ship(result.winner, timeout_s=args.gate_timeout, on_request=_announce)
         print(f"approval {req.id}: {'approved' if decision.allow else 'denied'} {decision.reason}")
     return 0 if result.green else 2
 
@@ -697,6 +703,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--budget", type=int, help="max nodes")
     p.add_argument("--scripted", help="a JSON list of canned model responses; runs with no harness")
     p.add_argument("--no-ship", action="store_true", help="stop before the approval gate")
+    p.add_argument("--gate-timeout", type=float, default=900,
+                   help="seconds to wait for a human at the approval gate (default 900)")
     p.add_argument("--no-skills", action="store_true", help="ignore skills/ for this run")
     p.set_defaults(fn=cmd_run)
 
