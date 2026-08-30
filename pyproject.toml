@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-  "mcp[cli]>=1.2.0",
+  # qodo_mcp imports mcp.server.mcpserver, which is v2-only: a 1.x install
+  # resolves fine and then fails at import, so the floor is the API's floor
+  "mcp[cli]>=2.0",
   "pytest>=8.0",  # the verifier's default framework; an installed ratchet must grade out of the box
   "httpx>=0.27",
   "textual>=0.79",
