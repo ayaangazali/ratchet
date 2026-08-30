@@ -823,29 +823,31 @@ def test_the_gate_still_applies_to_an_agentic_session_without_git(tmp_path):
 
 
 def test_an_agentic_turn_commits_only_what_it_touched(repo):
-    """A turn's commit is the turn's work and nothing else.
+    """A turn's commit is the turn's work and nothing else -- decided by content.
 
-    Every dirty path used to count as the session's, so an edit the user already had
-    in flight was staged, committed under the turn's intent and -- in `qodo-fix` --
-    pushed at the gate as a Qodo remediation nobody wrote. The session's own edit
-    must still land, including when it also creates a file.
+    Two failures meet here. Every dirty path used to count as the session's, so an
+    edit the user already had in flight was staged, committed under the turn's
+    intent and -- in `qodo-fix` -- pushed at the gate as a Qodo remediation nobody
+    wrote. Filtering those out by modification time then lost the opposite case: an
+    edit that keeps the old timestamp (an editor restoring stat, as `theirs.py` does
+    below) is a real change with an unmoved clock, and it fell out of the turn.
     """
     import os
-    import time as _time
 
     (repo / "mine.py").write_text("user was here\n")
     (repo / "theirs.py").write_text("old\n")
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "seed2"],
                    cwd=repo, check=True)
-    (repo / "mine.py").write_text("user was here, twice\n")   # tracked and dirty, a minute old
-    os.utime(repo / "mine.py", (_time.time() - 60, _time.time() - 60))
+    (repo / "mine.py").write_text("user was here, twice\n")   # tracked and dirty before the turn
+    stat_before = (repo / "theirs.py").stat()
 
     class Mixed:
         provider, model, agentic = "claude-code", "sonnet", True
 
         def run_agentic(self, prompt, r, on_event, **kw):
-            (Path(r) / "theirs.py").write_text("new\n")   # edits
+            (Path(r) / "theirs.py").write_text("new\n")   # edits, timestamp and all
+            os.utime(Path(r) / "theirs.py", (stat_before.st_atime, stat_before.st_mtime))
             (Path(r) / "added.py").write_text("added\n")  # and creates
             return "done"
 
