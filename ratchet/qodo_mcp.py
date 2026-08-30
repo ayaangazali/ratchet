@@ -113,26 +113,43 @@ class QodoMCP:
 
     # ----------------------------------------------------------------- tools --
 
-    def fetch_findings(self, pr: str) -> Review:
+    def fetch_findings(self, pr: str, *, since: str = "") -> Review:
+        """Qodo's findings on a pull request. `since` (an ISO timestamp) keeps only
+        those posted after it, which is how a fresh review is told from an old one."""
         number = str(pr).lstrip("#")
         raw = self._gh(f"repos/{self.repo_slug}/pulls/{number}/comments")
-        findings = [f for c in (raw or []) if (f := _parse_comment(c))]
+        findings = [
+            f for c in (raw or [])
+            if (not since or str(c.get("created_at", "")) > since) and (f := _parse_comment(c))
+        ]
         return Review(findings=findings, pr=f"#{number}", calls=list(self.calls))
 
     def review_pr(self, pr: str, *, wait: float = 0.0, poll: float = 10.0) -> Review:
-        """`/review` is the command the app answers to. Without a wait this reads
-        whatever it has already said."""
+        """Ask for a review and wait for THAT review.
+
+        Waiting for "any findings" is the bug that makes a gate meaningless: a pull
+        request Qodo reviewed yesterday answers instantly with yesterday's verdict,
+        and the run treats stale approval as fresh. So the clock is read before the
+        request goes out and only findings newer than it count. A timeout raises --
+        it is not a clean review.
+        """
         number = str(pr).lstrip("#")
-        if wait:
-            self._gh("--method", "POST", f"repos/{self.repo_slug}/issues/{number}/comments",
-                     "-f", "body=/review")
-            deadline = time.time() + wait
-            while time.time() < deadline:
-                review = self.fetch_findings(number)
-                if review.findings:
-                    return review
-                time.sleep(poll)
-        return self.fetch_findings(number)
+        if not wait:
+            return self.fetch_findings(number)
+
+        since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._gh("--method", "POST", f"repos/{self.repo_slug}/issues/{number}/comments",
+                 "-f", "body=/review")
+        debuglog.log("info", f"asked qodo to review #{number}; waiting for findings after {since}")
+        deadline = time.time() + wait
+        while time.time() < deadline:
+            time.sleep(poll)
+            review = self.fetch_findings(number, since=since)
+            if review.findings:
+                return review
+        raise QodoUnavailable(
+            f"qodo did not answer for #{number} within {int(wait)}s — silence is not approval"
+        )
 
     def review_diff(self, diff: str, *, context: str = "") -> Review:
         raise QodoUnavailable(
@@ -158,7 +175,8 @@ class QodoMCP:
         if name == "fetch_findings":
             review = self.fetch_findings(arguments["pr"])
         elif name == "review_pr":
-            review = self.review_pr(arguments["pr"], wait=float(arguments.get("wait") or 0))
+            review = self.review_pr(arguments["pr"], wait=float(arguments.get("wait") or 0),
+                                    poll=float(arguments.get("poll") or 10))
         else:
             raise KeyError(f"no tool named {name!r}")
         return {"findings": [f.to_dict() for f in review.findings],
