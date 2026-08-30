@@ -34,6 +34,10 @@ QODO_BOT = "qodo-code-review"
 #: it found anything. It is the completion signal; the inline findings are its output.
 #: Waiting on the findings alone cannot tell a clean review from a reviewer that never
 #: answered, and those two must never be confused.
+#:
+#: On a re-review Qodo *edits* this comment in place rather than posting a second one
+#: (measured on #17: same id, `updated_at` moved), so watching for a new id alone waits
+#: forever on the second pass. What is watched is the (id, updated_at) pair.
 REVIEW_DONE = "Code Review by Qodo"
 
 #: How long a run waits for Qodo. Measured twice on this repository at ~104s; the
@@ -120,6 +124,19 @@ class QodoMCP:
         except ValueError:
             return raw      # --jq can return a bare string; that is still an answer
 
+    def _gh_list(self, path: str) -> list[dict]:
+        """Every page of a list endpoint, not the first thirty.
+
+        GitHub pages comments oldest-first, so on a busy pull request the newest ones
+        -- the review we are waiting for -- are the ones that fall off the end. Reading
+        page one would make the gate time out on a review that had already landed.
+        `--slurp` gives one array per page; they flatten into one list.
+        """
+        pages = self._gh("--paginate", "--slurp", path)
+        if not isinstance(pages, list):
+            return []
+        return [c for page in pages for c in (page if isinstance(page, list) else [page])]
+
     def available(self) -> bool:
         try:
             self._gh("user", "--jq", ".login")
@@ -133,18 +150,20 @@ class QodoMCP:
         """Qodo's findings on a pull request. `exclude` drops comment ids that were
         already there, which is how this run's review is told from an older one."""
         number = str(pr).lstrip("#")
-        raw = self._gh(f"repos/{self.repo_slug}/pulls/{number}/comments")
+        raw = self._gh_list(f"repos/{self.repo_slug}/pulls/{number}/comments")
         findings = [
             f for c in (raw or [])
             if int(c.get("id") or 0) not in exclude and (f := _parse_comment(c))
         ]
         return Review(findings=findings, pr=f"#{number}", calls=list(self.calls))
 
-    def _comment_ids(self, number: str, *, endpoint: str, mark: str = "") -> set[int]:
-        """Ids of the bot's comments, optionally only those carrying `mark`."""
-        raw = self._gh(f"repos/{self.repo_slug}/{endpoint}/{number}/comments")
+    def _bot_comments(self, number: str, *, endpoint: str, mark: str = "") -> set[tuple[int, str]]:
+        """The bot's comments as (id, updated_at) pairs, optionally only those carrying
+        `mark`. A pair is compared for equality, never for order -- so an edit counts as
+        a change, and no clock skew or one-second tie can get the answer wrong."""
+        raw = self._gh_list(f"repos/{self.repo_slug}/{endpoint}/{number}/comments")
         return {
-            int(c.get("id") or 0)
+            (int(c.get("id") or 0), str(c.get("updated_at", "")))
             for c in (raw or [])
             if QODO_BOT in str(c.get("user", {}).get("login", ""))
             and (not mark or mark in str(c.get("body", "")))
@@ -159,11 +178,11 @@ class QodoMCP:
         reviewer that never replied -- a genuinely clean review has no findings, and
         blocking on that would jam the gate shut on exactly the good pull requests.
 
-        So the wait watches for Qodo's own "review finished" comment rather than for
-        findings, and identifies it by comment id rather than by timestamp. Ids are
-        server-assigned and unique; timestamps come from two different clocks at
-        one-second resolution, and either skew or a tie inside the same second gets
-        the answer wrong.
+        So the wait watches Qodo's own "review finished" comment rather than the
+        findings, and it watches it as an (id, updated_at) pair tested for *equality*
+        against a snapshot -- because a re-review edits that comment instead of adding
+        one. Nothing here compares two clocks: a timestamp read as an opaque string
+        cannot be skewed early or tied inside the same second.
 
         A wait that expires raises -- silence is not approval.
         """
@@ -171,8 +190,8 @@ class QodoMCP:
         if not wait:
             return self.fetch_findings(number)
 
-        seen_reviews = self._comment_ids(number, endpoint="issues", mark=REVIEW_DONE)
-        seen_findings = self._comment_ids(number, endpoint="pulls")
+        seen_reviews = self._bot_comments(number, endpoint="issues", mark=REVIEW_DONE)
+        seen_findings = {cid for cid, _ in self._bot_comments(number, endpoint="pulls")}
         self._gh("--method", "POST", f"repos/{self.repo_slug}/issues/{number}/comments",
                  "-f", "body=/review")
         debuglog.log("info", f"asked qodo to review #{number}; {len(seen_reviews)} prior review(s)")
@@ -180,7 +199,7 @@ class QodoMCP:
         deadline = time.time() + wait
         while (remaining := deadline - time.time()) > 0:
             time.sleep(min(poll, remaining))
-            if self._comment_ids(number, endpoint="issues", mark=REVIEW_DONE) - seen_reviews:
+            if self._bot_comments(number, endpoint="issues", mark=REVIEW_DONE) - seen_reviews:
                 time.sleep(SETTLE)  # let the inline findings catch up with the summary
                 review = self.fetch_findings(number, exclude=seen_findings)
                 debuglog.log("info", f"qodo reviewed #{number}: {len(review.findings)} finding(s)")

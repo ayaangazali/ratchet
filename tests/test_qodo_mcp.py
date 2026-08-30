@@ -26,8 +26,8 @@ def _finding(cid: int) -> dict:
     return {"id": cid, "user": BOT, "path": "ratchet/loop.py", "line": 12, "body": FINDING_BODY}
 
 
-def _summary(cid: int) -> dict:
-    return {"id": cid, "user": BOT, "body": f"<h3>{REVIEW_DONE}</h3>"}
+def _summary(cid: int, updated: str = "2020-01-01T00:00:00Z") -> dict:
+    return {"id": cid, "user": BOT, "updated_at": updated, "body": f"<h3>{REVIEW_DONE}</h3>"}
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +50,10 @@ def _mcp(*, issues: list[dict], pulls: list[dict], on_post=None, posted: list | 
             if on_post is not None:
                 on_post()
             return {}
-        return issues if "/issues/" in args[0] else pulls
+        path = args[-1]
+        assert "--paginate" in args, f"unpaginated read of {path}: page one is not the list"
+        page = issues if "/issues/" in path else pulls
+        return [list(page)]      # --slurp shape: one array per page
 
     q._gh = fake_gh  # type: ignore[method-assign]
     return q
@@ -89,6 +92,22 @@ def test_a_new_review_does_not_inherit_the_old_review_s_findings() -> None:
     assert review.blocking and not review.clean
 
 
+def test_a_re_review_that_edits_its_summary_still_counts_as_an_answer() -> None:
+    """Qodo does not post a second summary on the second pass -- it edits the first.
+    Watching only for a new comment id waits out the whole deadline on a review that
+    already landed (measured on #17: 96s to answer, 420s spent not noticing)."""
+    issues = [_summary(1, "2026-01-01T00:00:00Z")]
+    pulls: list[dict] = []
+
+    def re_review() -> None:
+        issues[0] = _summary(1, "2026-06-06T06:06:06Z")   # same id, edited in place
+        pulls.append(_finding(20))
+
+    q = _mcp(issues=issues, pulls=pulls, on_post=re_review)
+    review = q.review_pr("1", wait=0.5, poll=0.05)
+    assert len(review.findings) == 1
+
+
 def test_the_wait_is_a_deadline_not_a_suggestion() -> None:
     """A poll longer than the wait must not sleep past it."""
     import time
@@ -98,6 +117,17 @@ def test_the_wait_is_a_deadline_not_a_suggestion() -> None:
     with pytest.raises(QodoUnavailable):
         q.review_pr("1", wait=0.2, poll=30)
     assert time.time() - t0 < 2
+
+
+def test_a_review_past_the_first_page_is_still_found() -> None:
+    """GitHub pages comments oldest-first, thirty at a time. The review we are waiting
+    for is the newest thing on the pull request, so it is exactly what page one drops."""
+    issues = [{"id": i, "user": {"login": "someone"}, "updated_at": "x", "body": "chatter"}
+              for i in range(200)]
+    pulls: list[dict] = []
+    q = _mcp(issues=issues, pulls=pulls,
+             on_post=lambda: (issues.append(_summary(999)), pulls.append(_finding(30))))
+    assert len(q.review_pr("1", wait=0.5, poll=0.05).findings) == 1
 
 
 def test_reading_without_waiting_still_shows_everything() -> None:

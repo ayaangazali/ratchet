@@ -23,11 +23,16 @@ from pathlib import Path
 POLL_S = 0.3
 DEFAULT_TIMEOUT_S = 900
 
+#: Every action that changes state we cannot put back. `request` refuses anything not
+#: named here, so the registration is enforced rather than remembered: adding an
+#: irreversible action and adding it to this tuple are necessarily the same edit.
+IRREVERSIBLE = ("open_pull_request", "push", "merge", "force_push", "delete_branch")
+
 
 @dataclass
 class ApprovalRequest:
     id: str
-    action: str  # "open_pull_request" | "push" | ...
+    action: str  # one of gate.IRREVERSIBLE
     summary: str
     diff: str
     stats: dict = field(default_factory=dict)
@@ -58,6 +63,11 @@ class Gate:
         self.bus = bus
 
     def request(self, *, action: str, summary: str, diff: str, stats: dict | None = None) -> ApprovalRequest:
+        if action not in IRREVERSIBLE:
+            raise ValueError(
+                f"{action!r} is not a registered irreversible action — add it to "
+                f"gate.IRREVERSIBLE in the same commit that introduces it"
+            )
         req = ApprovalRequest(uuid.uuid4().hex[:8], action, summary, diff, stats or {})
         (self.dir / f"{req.id}.request.json").write_text(json.dumps(req.to_dict(), indent=2))
         if self.bus:
