@@ -18,13 +18,15 @@ Two guards apply to every framework, and both exist because agents lie:
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from ..models import TestStatus
 
 START = ">>>>> ratchet test output start"
 END = ">>>>> ratchet test output end"
 EXIT = ">>>>> ratchet exit code:"
+#: emitted by the eval script when the pre-run revert of a protected path fails
+RESET_FAILED = ">>>>> ratchet reset failed"
 
 _EXIT_RE = re.compile(re.escape(EXIT) + r"\s*(-?\d+)")
 
@@ -41,16 +43,27 @@ SUITE_RAN = [
 
 
 def slice_output(log: str) -> str:
-    """Only what sits between the markers is parsed. Everything else is untrusted."""
+    """Only what sits between the markers is parsed. Everything else is untrusted.
+
+    The LAST end marker bounds the region: suite output all lands before the real
+    END, so a forged END printed from inside a test becomes inert text instead of
+    truncating the parsed region and hiding the real results after it (found by
+    review)."""
     if START in log and END in log:
-        return log.split(START, 1)[1].split(END, 1)[0]
+        return log.split(START, 1)[1].rsplit(END, 1)[0]
     return log
 
 
 def parse_exit_code(log: str) -> int | None:
-    """Echoed *outside* the markers, so a patch that fakes lines inside them cannot
-    fake this."""
-    m = _EXIT_RE.search(log)
+    """Echoed *outside* the markers -- specifically AFTER the end marker, so only
+    that region is parsed. A patch can print an identical-looking marker line from
+    inside the suite, but everything it prints lands before END; parsing the tail
+    region means the forged copy is never read. (Found by review: first-match
+    parsing over the whole log accepted a forged `exit code: 0`.)"""
+    # last END for the same reason as slice_output: a forged END inside the suite
+    # must not promote a forged exit line into the trusted region
+    region = log.rsplit(END, 1)[1] if END in log else log
+    m = _EXIT_RE.search(region)
     return int(m.group(1)) if m else None
 
 
@@ -124,6 +137,20 @@ def parse(log: str, framework: str = "pytest") -> dict[str, TestStatus]:
 # --------------------------------------------------------------------------- #
 
 
+def reset_ok(log: str) -> bool:
+    """False when the pre-run revert of protected paths reported a failure.
+
+    A reset that silently did not happen means the run would grade the agent's own
+    edits to the graded tests. Fail closed: the gauntlet treats this as an
+    infrastructure failure, never as a pass. Only the region BEFORE the start
+    marker is checked -- the reset runs before the suite, and suite output (which
+    the agent controls) all lands after START, so printing the marker from a test
+    buys nothing at all.
+    """
+    region = log.split(START, 1)[0] if START in log else log
+    return RESET_FAILED not in region
+
+
 def suite_ran(log: str) -> bool:
     body = slice_output(log)
     return any(p.search(body) for p in SUITE_RAN)
@@ -139,12 +166,71 @@ def exit_code_consistent(log: str, status_map: dict[str, TestStatus]) -> bool:
     return any(s in (TestStatus.FAILED, TestStatus.ERROR) for s in status_map.values())
 
 
-def failure_excerpt(log: str, status_map: dict[str, TestStatus], limit: int = 40) -> str:
+def failure_excerpt(
+    log: str,
+    status_map: dict[str, TestStatus],
+    limit: int = 40,
+    *,
+    redact: Iterable[str] = (),
+) -> str:
     """The most useful `limit` lines for the model: the failing names, then the tail.
 
-    This is the agent's whole view of what went wrong, so it is worth being picky.
+    This is the agent's whole view of what went wrong, so it is worth being picky --
+    and it is the one string that flows from the grader into the next prompt, so it
+    is also where held-out test names would leak. `redact` takes the task's
+    `f2p_hidden` ids: they are dropped from the failing header, and every appearance
+    of an id, its file path or its bare function name in the log body is replaced.
+    The *count* of held-out failures is kept -- the agent may know it is failing
+    hidden tests (the f2p stage already says so); it may never learn which.
     """
-    failing = [t for t, s in status_map.items() if s in (TestStatus.FAILED, TestStatus.ERROR)]
-    body = slice_output(log).strip().splitlines()
-    head = [f"failing: {', '.join(failing[:8])}"] if failing else []
-    return "\n".join(head + body[-limit:])
+    hidden = set(redact)
+    is_red = lambda s: s in (TestStatus.FAILED, TestStatus.ERROR)  # noqa: E731
+    failing = [t for t, s in status_map.items() if is_red(s) and t not in hidden]
+    n_hidden_red = sum(1 for t, s in status_map.items() if is_red(s) and t in hidden)
+
+    tokens: set[str] = set()
+    for t in hidden:
+        # every ::-segment separately: `file.py::MyTest::test_m` must also redact
+        # pytest's unittest heading form `MyTest.test_m` and the bare method name
+        tokens.add(t)
+        tokens.update(seg for seg in t.split("::") if seg)
+        tokens.update(seg.replace("::", ".") for seg in (t.partition("::")[2],) if seg)
+
+    # Names are not enough: failure sections echo the failing test's *source and
+    # rendered values* -- the exact inputs a patch would special-case. So a whole
+    # failure block whose header names a held-out test is dropped, and any
+    # remaining line that mentions a held-out token is replaced outright rather
+    # than token-substituted (the short-summary line carries the assertion message).
+    # Header shapes per shipped framework: pytest `___ name ___`, cargo
+    # `---- name stdout ----`, jest/vitest `● name`, go `--- FAIL: name` / `=== RUN name`.
+    def _is_header(stripped: str) -> bool:
+        return (
+            (len(stripped) > 6 and stripped.startswith("_") and stripped.endswith("_"))
+            or (stripped.startswith("----") and stripped.endswith("----"))
+            or stripped.startswith("●")
+            or stripped.startswith(("--- FAIL:", "--- PASS:", "--- SKIP:", "=== RUN"))
+        )
+
+    kept: list[str] = []
+    dropping = False
+    for ln in slice_output(log).strip().splitlines():
+        stripped = ln.strip()
+        is_hdr = _is_header(stripped)
+        if is_hdr or stripped.startswith("="):
+            dropping = is_hdr and any(tok in ln for tok in tokens)
+            if dropping:
+                kept.append("<held-out test failed; details withheld>")
+                continue
+        if dropping:
+            continue
+        if any(tok in ln for tok in tokens):
+            kept.append("<held-out test>")
+            continue
+        kept.append(ln)
+
+    head = []
+    if failing or n_hidden_red:
+        shown = ", ".join(failing[:8])
+        extra = f" (+{n_hidden_red} held-out)" if n_hidden_red else ""
+        head = [f"failing: {shown}{extra}" if shown else f"failing: {n_hidden_red} held-out test(s)"]
+    return "\n".join(head + kept[-limit:])

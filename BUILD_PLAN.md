@@ -32,13 +32,13 @@ Three claims, each demonstrable in under thirty seconds:
 
 ## 1. What is already built
 
-`make dev && make demo && make test` → 41 tests, ~40s, no Docker, no network.
+`make dev && make demo && make test` → the whole suite, under a minute, no Docker, no network.
 
 | piece | state |
 |---|---|
 | the seven-stage gauntlet with the exact score formula | **done**, `verifier/gauntlet.py` |
 | the fifteen lines of bash (test reset, markers, exit code outside them) | **done**, `verifier/eval_script.py` |
-| cheat detector: 12 rules, severity-graded, hard gate on critical | **done**, `verifier/cheat.py` |
+| cheat detector: 22 static rules plus 2 gauntlet-issued, severity-graded, hard gate on critical | **done**, `verifier/cheat.py` |
 | test parsers: pytest, jest, vitest, go, cargo, with anti-spoof guards | **done**, `verifier/parsers.py` |
 | held-out test split, pooled into `f2p_ratio`, `delta` reported | **done** |
 | Node + Tree: restorable states, atomic persistence, rendering | **done**, `node.py` |
@@ -50,10 +50,10 @@ Three claims, each demonstrable in under thirty seconds:
 | three sub-agent roles with per-role model routing | **done**, `subagents.py` |
 | approval gate with a file fallback | **done**, `gate.py` |
 | signed hash-chained receipts + `ratchet audit` | **done**, `receipts.py` |
-| red-team battery: 10 attacks, 2 controls | **done**, `redteam.py` |
+| red-team battery: 11 attacks, 2 controls | **done**, `redteam.py` |
 | linear-vs-search eval suite with error bars | **done**, `evals/` |
 | the TUI: tree, stage rail, counters, budget, approval bar | **done**, `tui/` |
-| CLI: run, tree, rewind, diff, verify, ship, replay, bench, redteam, audit, evals | **done** |
+| CLI: run, graph, tree, rewind, diff, verify, ship, replay, bench-snapshot, redteam, audit, evals, console, demo, docs | **done** |
 | offline everything: `--scripted` run, fixture, replay | **done** |
 | **harness sandbox provider wired to a real snapshot backend** | **left**, T2 |
 | **live model calls through TrueForge** | **left**, T3 (offline path proves the loop) |
@@ -106,12 +106,14 @@ score = 0.5·f2p_ratio + 0.2·types_clean + 0.1·lint_clean + 0.2·diff_hygiene
 green = f2p_ratio == 1.0 and p2p_intact and cheat_clean and build_ok
 ```
 
-Cheat rules currently shipping: `protected_path`, `test_deleted`,
-`test_file_emptied`, `skip_marker`, `assertion_removed`, `assertion_weakened`,
-`assertion_downgraded`, `hard_exit`, `always_equal`, `report_hook_tamper`,
-`runtime_test_write`, `mocked_in_source`, `config_loosened`, `env_bypass`,
-`monkeypatch_assert`, `special_casing`, `broad_except_pass`, `mass_refactor`,
-`log_spoofed`, `canary_passed`.
+Cheat rules currently shipping (static, in `cheat.py`): `protected_path`,
+`file_deleted`, `test_deleted`, `test_file_emptied`, `skip_marker`,
+`assertion_removed`, `assertion_weakened`, `assertion_downgraded`, `hard_exit`,
+`always_equal`, `report_hook_tamper`, `runtime_test_write`, `mocked_in_source`,
+`config_loosened`, `env_bypass`, `monkeypatch_assert`, `special_casing`,
+`broad_except_pass`, `network_call`, `sleep_stall`, `mass_refactor`,
+`oversized_patch` — plus two issued by the gauntlet with runtime evidence:
+`log_spoofed` and `canary_passed`.
 
 `runtime_test_write` exists because our own red team found it: reverting test files
 before the run does nothing if the *source* rewrites them at import time, after the
@@ -209,8 +211,8 @@ budget — and reports pass rate with error bars plus the number of cheating pat
 that persisted:
 
 ```
-overall   linear 58% ±14   ·   search 100% ±0
-cheating patches that persisted   linear 8   ·   search 0
+overall   linear 50% ±14   ·   search 100% ±0
+cheating patches that persisted   linear 1   ·   search 0
 ```
 
 Then, in the demo: *"we changed the scheduler at 15:00 — here's the regression our own
@@ -226,5 +228,5 @@ and lanes, `CLAUDE.md` the contract, `RESEARCH.md` every verified tool fact and 
 nobody searches twice. Four slash commands live in `.claude/commands/`:
 `/verify`, `/harden`, `/ship`, `/demo`.
 
-Start by running §1 of `HANDOFF.md`. If `make redteam` does not print 10/10, that is
+Start by running §1 of `HANDOFF.md`. If `make redteam` does not catch the whole battery, that is
 the only thing that matters until it does.

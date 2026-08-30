@@ -74,6 +74,30 @@ def test_path_and_render(tmp_path):
     assert any("live" in line for line, _ in lines)
 
 
+def test_concurrent_adds_do_not_corrupt_the_tree(tmp_path):
+    """The fan-out path adds nodes from a thread pool. Unlocked, two saves race on
+    one .tmp file and the nodes dict mutates mid-iteration."""
+    import threading
+
+    t = _tree(tmp_path)
+    n = 32
+    barrier = threading.Barrier(n)
+
+    def add(i: int) -> None:
+        barrier.wait()
+        t.add(Node.child_of(t.root, commit=f"c{i}", image="i", patch=f"+line{i}", intent=f"i{i}", result=_res(0.5)))
+
+    threads = [threading.Thread(target=add, args=(i,)) for i in range(n)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+
+    assert len(t) == n + 1
+    reloaded = Tree.load(t.path)  # the file on disk is whole, parseable json
+    assert len(reloaded) == n + 1
+
+
 # ---------------------------------------------------------------- scheduler --
 
 
@@ -203,6 +227,84 @@ def test_dead_ends_reach_the_next_prompt(repo):
     run.run()
     generator_prompts = [c for c in backend.calls if c[0] == "generator"]
     assert len(generator_prompts) >= 2
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git required")
+def test_held_out_names_never_reach_a_prompt(repo):
+    """CLAUDE.md invariant 5, end to end. The first patch passes the visible tests by
+    hardcoding them, so the held-out tests are the only failures -- exactly the state
+    in which their names used to flow through last_failure into the next context."""
+    from ratchet import context as ctx_mod
+
+    task = load_task(TASK)
+    task.repo_path = str(repo)
+    hardcoded = SLUGIFY_BUGGY.replace(
+        "    lowered = text.lower()",
+        '    if text == "Caf\u00e9 Life":\n        return "cafe-life"\n'
+        '    if text == "the quick brown fox jumps" and max_length == 17:\n'
+        '        return "the-quick-brown"\n'
+        "    lowered = text.lower()",
+    )
+    backend = ScriptedBackend([
+        "map",
+        _reply(_patch(SLUGIFY_BUGGY, hardcoded), "hardcode the visible cases"),
+        _reply(_patch(SLUGIFY_BUGGY, SLUGIFY_FIXED), "the real fix"),
+    ])
+    run = SearchRun(
+        task=task, repo=repo, provider=WorktreeProvider(repo, "t-leak"),
+        subagents=Subagents(backend), run_id="t-leak",
+        scheduler=Scheduler(Budget(max_nodes=6, max_seconds=300, max_usd=1)), parallel=False,
+    )
+    result = run.run()
+
+    forbidden = set()
+    for t in task.f2p_hidden:
+        path, _, name = t.partition("::")
+        forbidden.update((t, path, name))
+
+    assert result.green  # the run itself still works
+    for node in result.tree:
+        for tok in forbidden:
+            assert tok not in node.last_failure, f"{tok!r} leaked via node {node.id}"
+        ctx = ctx_mod.assemble(
+            task=task.statement, node=node, tree=result.tree,
+            repo_map=run.repo_map, diff_so_far="",
+        )
+        rendered = ctx.render()
+        for tok in forbidden:
+            assert tok not in rendered, f"{tok!r} leaked via the rendered context"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git required")
+def test_a_dry_generator_ends_the_run_instead_of_spinning(repo):
+    """Empty candidates spend no budget, so a generator with nothing to say used to
+    spin the loop until the wall clock -- 11 million bus events in one observed run.
+    Five fruitless expansions in a row must end the run with a reason."""
+    task = load_task(TASK)
+    task.repo_path = str(repo)
+    run = SearchRun(
+        task=task, repo=repo, provider=WorktreeProvider(repo, "t-dry"),
+        subagents=Subagents(ScriptedBackend(["map"])),  # nothing for the generator
+        run_id="t-dry",
+        scheduler=Scheduler(Budget(max_nodes=40, max_seconds=300, max_usd=3)), parallel=False,
+    )
+    result = run.run()
+    assert not result.green
+    assert "no usable candidate" in result.stopped_because
+
+
+def test_sandbox_env_backs_python_with_the_running_interpreter(repo):
+    """A brew/pipx install has no dev venv on PATH and macOS has no bare `python`;
+    the sandbox must resolve `python` to the interpreter running ratchet."""
+    provider = WorktreeProvider(repo, "t-env")
+    sb = provider.fork(provider.base_image(), label="env")
+    try:
+        res = sb.exec("python -c 'import sys; print(sys.version_info[0])'", timeout=60)
+    finally:
+        sb.destroy()
+        provider.cleanup()
+    assert res.ok, res.out
+    assert res.out.strip().endswith("3")
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git required")

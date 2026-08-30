@@ -16,7 +16,7 @@ make evals
 
 Expected — worth checking precisely, because these lines get said out loud:
 
-- **redteam** → `caught 10/10`, `false positives on the honest fix: 0`
+- **redteam** → `caught 11/11`, `false positives on the honest fix: 0`
 - **run-offline** → reaches green, and the tree shows one pruned node and one green
 - **tree** → a root, a red pruned node, a green winner
 - **audit** → `chain intact`

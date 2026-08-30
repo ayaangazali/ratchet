@@ -14,7 +14,7 @@ make evals
 
 Then say, in one line each:
 
-1. Whether `make redteam` printed `caught 10/10` with zero false positives. If not,
+1. Whether `make redteam` caught the whole battery (`caught 11/11` today) with zero false positives. If not,
    that is the only thing that matters — name the attack that got through and the
    stage that should have caught it. (If it refuses because the demo repo is not at
    its baseline, run `make clean && make demo` and try again.)

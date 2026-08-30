@@ -8,11 +8,14 @@
     ratchet ship                                   approval gate -> pull request
     ratchet replay <run>                           re-render a finished run from its bus
 
+    ratchet graph --file <graph.yaml>              an objective graph: nodes fulfilled only by tests
+    ratchet docs <library>                         upstream docs via Bright Data, pinned to the lockfile
     ratchet bench-snapshot                         the 11:15 decision: tree or fallback
     ratchet redteam                                score the verifier against known cheats
     ratchet audit                                  verify a run's receipt chain
     ratchet evals                                  linear vs search, on our own bug suite
     ratchet console                                the TUI
+    ratchet dashboard                              the same run, in a browser
     ratchet demo                                   seed the demo repository
 
 `verify` matters more than it looks. It means the entire verification story can be
@@ -34,6 +37,43 @@ from .sandbox import WorktreeProvider, bench_snapshot
 
 def _run_id(args) -> str:
     return getattr(args, "run_id", None) or f"run-{uuid.uuid4().hex[:6]}"
+
+
+def _resolve_task(spec: str):
+    """A task path on disk, or one of the specs shipped inside the package.
+
+    An installed `ratchet` has no repo checkout, so `tasks/demo-001-slugify/task.yaml`
+    resolves to the packaged copy when the path does not exist. Accepts the repo
+    path, a bare name (`demo-001-slugify`), or a real file.
+    """
+    from importlib import resources
+
+    if Path(spec).exists():
+        return load_task(spec)
+    name = Path(spec).parent.name if Path(spec).name == "task.yaml" else Path(spec).stem
+    packaged = resources.files("ratchet") / "tasks" / f"{name}.yaml"
+    if packaged.is_file():
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+            fh.write(packaged.read_text())
+        return load_task(fh.name)
+    have = [f.name for f in (resources.files("ratchet") / "tasks").iterdir()]
+    raise SystemExit(f"no task at {spec!r} and no packaged task named {name!r}; packaged: {have}")
+
+
+def _docs_oracle(settings, repo: Path, bus):
+    """The Bright Data docs oracle, or None when no key is configured.
+
+    Built only when BRIGHTDATA_API_KEY is set, so an offline run is a clean no-op
+    rather than a failed fetch. When present, a red verdict that looks like API
+    drift attaches current upstream docs for the pinned version to the next prompt.
+    """
+    if not settings.brightdata_api_key:
+        return None
+    from .docs import DocsOracle
+
+    return DocsOracle(repo, bus, settings)
 
 
 def _provider(settings: Settings, repo: Path, run_id: str):
@@ -71,7 +111,7 @@ def cmd_run(args) -> int:
         s.repo = args.repo
     if args.budget:
         s.max_nodes = args.budget
-    task = load_task(s.task_path)
+    task = _resolve_task(s.task_path)
     if args.goal:
         task.statement = args.goal
     repo = Path(s.repo).resolve()
@@ -83,7 +123,15 @@ def cmd_run(args) -> int:
     else:
         from .harness.backend import HarnessBackend
         from .harness.client import TrueForgeClient
+        from .providers import trueforge_alive
 
+        # a raw ConnectError sixty seconds into a run is not an error message
+        if not trueforge_alive(ttl=0):
+            raise SystemExit(
+                f"no TrueForge answering at {s.trueforge_base_url} — start it with\n"
+                "  npx @truefoundry/trueforge@latest\n"
+                "or run offline: ratchet run --repo demo-repo --scripted demo-repo/patches/scripted.json"
+            )
         backend = HarnessBackend(TrueForgeClient(s.trueforge_base_url))
 
     agents = Subagents(backend, s.roles())
@@ -91,6 +139,7 @@ def cmd_run(args) -> int:
     if args.fanout:
         scheduler.patience = 0 if args.fanout > 1 else scheduler.patience
 
+    bus = Bus(repo / ".ratchet" / f"{run_id}.bus.jsonl")
     run = SearchRun(
         task=task,
         repo=repo,
@@ -98,7 +147,8 @@ def cmd_run(args) -> int:
         subagents=agents,
         run_id=run_id,
         scheduler=scheduler,
-        bus=Bus(repo / ".ratchet" / f"{run_id}.bus.jsonl"),
+        bus=bus,
+        docs=_docs_oracle(s, repo, bus),
         parallel=s.parallel,
     )
     print(f"run {run_id} · task {task.task_id} · provider {run.provider.name}")
@@ -110,6 +160,68 @@ def cmd_run(args) -> int:
         req, decision = run.request_ship(result.winner)
         print(f"approval {req.id}: {'approved' if decision.allow else 'denied'} {decision.reason}")
     return 0 if result.green else 2
+
+
+def cmd_graph(args) -> int:
+    """Run an objective graph: each node fulfilled only by its own tests."""
+    from .bus import Bus
+    from .objective import GraphRun, decompose, load_graph
+    from .subagents import ModelBackend, ScriptedBackend, Subagents
+
+    s = Settings.from_env()
+    if args.repo:
+        s.repo = args.repo
+    repo = Path(s.repo).resolve()
+    run_id = _run_id(args)
+
+    backend: ModelBackend
+    if args.scripted:
+        backend = ScriptedBackend(json.loads(Path(args.scripted).read_text()))
+    else:
+        from .harness.backend import HarnessBackend
+        from .harness.client import TrueForgeClient
+
+        backend = HarnessBackend(TrueForgeClient(s.trueforge_base_url))
+    agents = Subagents(backend, s.roles())
+
+    if bool(args.decompose) == bool(args.file):
+        print("exactly one of --file or --decompose is required", file=sys.stderr)
+        return 2
+    if args.decompose:
+        # review-before-run is the contract: a model-produced graph is written to
+        # --out for a human to read; it is never executed in the same breath
+        if not args.out:
+            print("--decompose requires --out: the decomposed graph must be reviewed before it runs", file=sys.stderr)
+            return 2
+        graph, block = decompose(args.decompose, repo, agents)
+        Path(args.out).write_text(block)
+        print(f"decomposed graph validated and written to {args.out}")
+        print(" · ".join(graph.order))
+        print(f"review it, then run: ratchet graph --file {args.out} --repo {repo}")
+        return 0
+    graph = load_graph(Path(args.file), repo)
+
+    gbus = Bus(repo / ".ratchet" / f"{run_id}.bus.jsonl")
+    run = GraphRun(
+        graph=graph,
+        repo=repo,
+        provider=_provider(s, repo, run_id),
+        subagents=agents,
+        run_id=run_id,
+        bus=gbus,
+        escalation_budget=s.budget(),
+        parallel=s.parallel,
+        docs=_docs_oracle(s, repo, gbus),
+    )
+    print(f"graph {graph.graph_id} · run {run_id} · {len(graph.order)} node(s) · provider {run.provider.name}")
+    summary = run.run()
+    for node_id in graph.order:
+        n = graph.nodes[node_id]
+        mark = {"fulfilled": "✓", "failed": "✗", "blocked": "∅"}.get(n.status, "·")
+        extra = " (escalated to tree search)" if n.escalated else ""
+        print(f"  {mark} {node_id:<14} {n.status:<10} attempts {n.attempts}{extra}")
+    print("all fulfilled" if summary.all_fulfilled else "NOT fulfilled", "·", json.dumps(summary.to_dict()))
+    return 0 if summary.all_fulfilled else 2
 
 
 def cmd_tree(args) -> int:
@@ -171,7 +283,7 @@ def cmd_verify(args) -> int:
     """The gauntlet, standalone. No model, no key, no network."""
     from .verifier.gauntlet import Gauntlet
 
-    task = load_task(args.task)
+    task = _resolve_task(args.task)
     repo = Path(args.repo or task.repo_path).resolve()
     patch = Path(args.diff).read_text() if args.diff else sys.stdin.read()
     run_id = f"verify-{uuid.uuid4().hex[:4]}"
@@ -265,8 +377,8 @@ def cmd_redteam(args) -> int:
     from . import redteam
 
     repo = Path(args.repo or "demo-repo").resolve()
-    demo_task = load_task(args.task or "tasks/demo-001-slugify/task.yaml")
-    canary = load_task(args.canary or "tasks/canary-impossible/task.yaml")
+    demo_task = _resolve_task(args.task or "tasks/demo-001-slugify/task.yaml")
+    canary = _resolve_task(args.canary or "tasks/canary-impossible/task.yaml")
     results = redteam.run(repo, demo_task, canary)
     print(redteam.report(results))
     return 0 if all(r.correct for r in results) else 1
@@ -304,10 +416,55 @@ def cmd_console(args) -> int:
 
     repo = Path(args.repo or ".").resolve()
     bus_path = Path(args.bus) if args.bus else _latest(repo, "bus.jsonl", args.run)
+    if not bus_path and args.repo is None and (Path("demo-repo") / ".ratchet").exists():
+        # bare `ratchet` inside a checkout: the runs live in demo-repo/
+        repo = Path("demo-repo").resolve()
+        bus_path = _latest(repo, "bus.jsonl", args.run)
+    if not bus_path:
+        # no run yet is not an error -- open the console anyway, on an empty bus,
+        # and let the idle splash say what to do next. Inside a git repo the bus
+        # lives with the project; anywhere else (say, $HOME) it goes to the cache
+        # dir rather than littering the directory you happened to be in.
+        from .gitstate import is_repo
+
+        base = repo if is_repo(repo) else Path.home() / ".cache" / "ratchet"
+        bus_path = base / ".ratchet" / "session.bus.jsonl" if is_repo(repo) else base / "session.bus.jsonl"
+        bus_path.parent.mkdir(parents=True, exist_ok=True)
+        bus_path.touch(exist_ok=True)
+    RatchetApp(bus_path, repo).run()
+    return 0
+
+
+def cmd_docs(args) -> int:
+    """Exercise the Bright Data docs oracle: fetch, extract by heading, validate,
+    and self-heal on drift -- the whole pipeline, standalone."""
+    from .bus import Bus
+    from .docs import DocsOracle
+
+    s = Settings.from_env()
+    repo = Path(args.repo or s.repo).resolve()
+    if not s.brightdata_api_key:
+        print("BRIGHTDATA_API_KEY is not set. Add it to .env; see ratchet/scrapers.yaml for sources.",
+              file=sys.stderr)
+        return 1
+    bus = Bus(repo / ".ratchet" / f"docs-{uuid.uuid4().hex[:6]}.bus.jsonl")
+    oracle = DocsOracle(repo, bus, s)
+    print(oracle.lookup(args.library, symbol=args.symbol or "", topic=args.topic or ""))
+    return 0
+
+
+def cmd_dashboard(args) -> int:
+    """The console's twin. Same bus, same palette, same approval gate -- the only
+    difference is that a browser can be handed to somebody who does not want a
+    terminal put in front of them."""
+    from .dashboard import serve
+
+    repo = Path(args.repo or ".").resolve()
+    bus_path = Path(args.bus) if args.bus else _latest(repo, "bus.jsonl", args.run)
     if not bus_path:
         print("no run found; start one with `ratchet run`, or `make fixture` for a recorded one", file=sys.stderr)
         return 1
-    RatchetApp(bus_path, repo).run()
+    serve(bus_path, repo, host=args.host, port=args.port)
     return 0
 
 
@@ -331,8 +488,14 @@ def _latest(repo: Path, suffix: str, run: str | None = None) -> Path | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser("ratchet", description="a coding agent that cannot decide it is done")
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    from . import __version__
+
+    ap = argparse.ArgumentParser(
+        "ratchet",
+        description="a coding agent that cannot decide it is done. Bare `ratchet` opens the console.",
+    )
+    ap.add_argument("--version", action="version", version=f"ratchet {__version__}")
+    sub = ap.add_subparsers(dest="cmd", required=False)
 
     p = sub.add_parser("run", help="search until green or the budget runs out")
     p.add_argument("goal", nargs="?", help="override the task statement")
@@ -344,6 +507,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--scripted", help="a JSON list of canned model responses; runs with no harness")
     p.add_argument("--no-ship", action="store_true", help="stop before the approval gate")
     p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("graph", help="run an objective graph: nodes fulfilled only by their tests")
+    p.add_argument("--file", help="a graph yaml (see objectives/demo-graph.yaml)")
+    p.add_argument("--decompose", help="a goal to decompose into a graph via the planner model")
+    p.add_argument("--out", help="where to write a decomposed graph")
+    p.add_argument("--repo")
+    p.add_argument("--run-id")
+    p.add_argument("--scripted", help="a JSON list of canned model responses; runs with no harness")
+    p.set_defaults(fn=cmd_graph)
 
     p = sub.add_parser("tree", help="the search tree")
     p.add_argument("--repo")
@@ -411,11 +583,30 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run")
     p.set_defaults(fn=cmd_console)
 
+    p = sub.add_parser("docs", help="fetch upstream docs for a library through Bright Data")
+    p.add_argument("library")
+    p.add_argument("--symbol")
+    p.add_argument("--topic")
+    p.add_argument("--repo")
+    p.set_defaults(fn=cmd_docs)
+
+    p = sub.add_parser("dashboard", help="the same run, in a browser")
+    p.add_argument("--bus")
+    p.add_argument("--repo")
+    p.add_argument("--run")
+    p.add_argument("--host", default="127.0.0.1", help="loopback by default: this endpoint can approve a pull request")
+    p.add_argument("--port", type=int, default=8788)
+    p.set_defaults(fn=cmd_dashboard)
+
     p = sub.add_parser("demo", help="seed the demo repository")
     p.add_argument("--dir")
     p.set_defaults(fn=cmd_demo)
 
     args = ap.parse_args(argv)
+    if args.cmd is None:
+        # bare `ratchet`: straight into the console on the latest run (or an empty
+        # bus with the quick-start splash), the way `claude` starts a session
+        return cmd_console(argparse.Namespace(repo=None, bus=None, run=None))
     return args.fn(args)
 
 

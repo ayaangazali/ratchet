@@ -51,6 +51,16 @@ def _grade(repo: Path, task, diff: str, label: str):
         provider.cleanup()
 
 
+def test_packaged_tasks_match_the_repo_originals():
+    """The package ships copies of the demo task specs so an installed `ratchet`
+    works with no checkout. Two sources of truth are only tolerable pinned equal."""
+    for repo_path, packaged in [
+        (ROOT / "tasks" / "demo-001-slugify" / "task.yaml", ROOT / "ratchet" / "tasks" / "demo-001-slugify.yaml"),
+        (ROOT / "tasks" / "canary-impossible" / "task.yaml", ROOT / "ratchet" / "tasks" / "canary-impossible.yaml"),
+    ]:
+        assert packaged.read_text() == repo_path.read_text(), f"{packaged.name} drifted from {repo_path}"
+
+
 @pytest.mark.skipif(shutil.which("git") is None, reason="git required")
 def test_the_honest_fix_goes_green(repo):
     task = load_task(TASK)
@@ -82,6 +92,35 @@ def test_the_canary_catches_what_no_static_rule_can(repo):
     assert res.outcome is Outcome.CHEATED, res.to_observation()
     assert "canary_passed" in {f.rule for f in res.findings}
     assert res.stages["cheat"].passed  # the static stage let it through
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git required")
+def test_runtime_tamper_of_protected_paths_is_reverted_before_grading(repo):
+    """Tampering that happens *inside the sandbox* -- after the static diff check has
+    already passed -- must be erased by the pre-run revert. Both halves matter:
+    checkout restores an edited test file, clean removes a file the tamper created.
+
+    Regression test for the combined-pathspec bug: `git checkout <base> -- tests/
+    conftest.py pyproject.toml` aborts wholesale when one pathspec (conftest.py,
+    absent from demo-repo) matches nothing, and the tampered tests reached the
+    grader untouched."""
+    task = load_task(TASK)
+    provider = WorktreeProvider(repo, "e2e-reset")
+    base = provider.base_image()
+    sb = provider.fork(base, label="reset")
+    try:
+        sb.exec(
+            "printf 'def test_basic():\\n    assert 1 == 2\\n' > tests/test_regression.py\n"
+            "printf 'raise RuntimeError(\"tampered\")\\n' > tests/conftest.py"
+        )
+        res = Gauntlet(task, repo_dir=".", test_sources=_sources(repo, task)).run(
+            sb, "", base_commit=base, apply_patch=False
+        )
+    finally:
+        sb.destroy()
+        provider.cleanup()
+    assert res.outcome is Outcome.PROGRESS, res.to_observation()
+    assert res.p2p_intact
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git required")

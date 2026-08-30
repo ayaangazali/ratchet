@@ -23,7 +23,33 @@ from __future__ import annotations
 
 import shlex
 
-from .parsers import END, EXIT, START
+from .parsers import END, EXIT, RESET_FAILED, START
+
+
+def _reset_lines(base_commit: str, protected_paths: list[str], *, quiet: bool = False) -> list[str]:
+    """The revert, one protected path at a time.
+
+    One combined `git checkout <base> -- a b c` looks equivalent and is not: git
+    refuses the *entire* checkout when any one pathspec matches nothing in the base
+    commit (a task protecting `conftest.py` in a repo that has none), and the agent's
+    edits to every other protected path survive to the grader. So each path gets its
+    own checkout, guarded by `ls-tree` so a legitimately absent path is skipped
+    rather than reported as a failure.
+
+    `git clean` is the other half of "pristine": checkout restores tracked content
+    but leaves behind any file the patch *created* under a protected path (a new
+    tests/conftest.py, say). `-x` includes ignored files -- without it, a created
+    file matching an ignore pattern survived the reset (found by review). Scoped
+    to the protected paths, so nothing outside them is touched.
+    """
+    base = shlex.quote(base_commit)
+    tail = " >/dev/null 2>&1 || true" if quiet else f" || echo '{RESET_FAILED}'"
+    lines: list[str] = []
+    for p in protected_paths:
+        q = shlex.quote(p)
+        lines.append(f'if [ -n "$(git ls-tree --name-only {base} -- {q})" ]; then git checkout {base} -- {q}{tail}; fi')
+        lines.append(f"git clean -fdxq -- {q}{tail}")
+    return lines
 
 
 def build_test_command(
@@ -35,12 +61,11 @@ def build_test_command(
     timeout_s: int = 600,
     setup_cmd: str | None = None,
 ) -> str:
-    protected = " ".join(shlex.quote(p) for p in protected_paths) or "."
     lines = [
         f"cd {shlex.quote(repo_dir)}",
         "git config --global --add safe.directory '*' >/dev/null 2>&1 || true",
         # 1. pristine tests, every time, no flag to skip it
-        f"git checkout {shlex.quote(base_commit)} -- {protected} || echo '>>>>> ratchet reset failed'",
+        *_reset_lines(base_commit, protected_paths),
     ]
     if setup_cmd:
         lines.append(setup_cmd)
@@ -52,7 +77,7 @@ def build_test_command(
         # 3. outside the markers on purpose
         f"echo '{EXIT}' $RATCHET_EXIT",
         # leave the tree clean for the next stage
-        f"git checkout {shlex.quote(base_commit)} -- {protected} >/dev/null 2>&1 || true",
+        *_reset_lines(base_commit, protected_paths, quiet=True),
         "exit 0",
     ]
     return "\n".join(lines)

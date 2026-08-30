@@ -104,16 +104,8 @@ class SearchRun:
         return out
 
     def _tree_listing(self) -> str:
-        skip = {".git", ".ratchet", "__pycache__", "node_modules", ".venv"}
-        lines = []
-        for p in sorted(self.repo.rglob("*")):
-            if any(part in skip for part in p.parts) or not p.is_file():
-                continue
-            lines.append(str(p.relative_to(self.repo)))
-            if len(lines) > 400:
-                lines.append("... truncated")
-                break
-        return "\n".join(lines)
+        # shared with the objective graph; the held-out exclusion lives in one place
+        return ctx_mod.tree_listing(self.repo, self.task.f2p_hidden)
 
     # ------------------------------------------------------------------- root --
 
@@ -153,6 +145,7 @@ class SearchRun:
         self.bus.emit("repo.mapped", lines=len(self.repo_map.splitlines()))
 
         stopped = ""
+        fruitless = 0  # consecutive expansions that added no child at all
         while True:
             if not self.scheduler.budget.ok():
                 stopped = self.scheduler.budget.exhausted_reason()
@@ -178,7 +171,16 @@ class SearchRun:
                     "idea; choose a materially different hypothesis about the cause."
                 )
 
-            self.expand(node, fanout=fanout, hint=hint)
+            children = self.expand(node, fanout=fanout, hint=hint)
+            # Empty candidates spend no node budget, so a generator that has gone
+            # dry (an exhausted script, a model returning prose with no diff) used
+            # to spin this loop flat out until the wall clock -- millions of bus
+            # events, zero progress. Nothing usable five times in a row is an
+            # answer: stop and say so.
+            fruitless = 0 if children else fruitless + 1
+            if fruitless >= 5:
+                stopped = "the generator produced no usable candidate five expansions in a row"
+                break
             self.scheduler.observe(self.tree)
 
         return self._finish(self.tree.best(), stopped or "budget exhausted")
@@ -288,6 +290,11 @@ class SearchRun:
     # ----------------------------------------------------------------- finish --
 
     def _finish(self, winner: Node, why: str) -> RunResult:
+        # seal the chain so a truncated tail is detectable; idempotence guarded
+        try:
+            self.receipts.seal(f"winner={winner.id} green={winner.green} reason={why}")
+        except RuntimeError:
+            pass  # already sealed (finish can be reached twice on rewind flows)
         self.bus.emit(
             "run.done",
             winner=winner.id,
@@ -297,6 +304,7 @@ class SearchRun:
             nodes=len(self.tree),
             budget=self.scheduler.budget.to_dict(),
         )
+        self.git.return_home()
         return RunResult(winner=winner, tree=self.tree, green=winner.green,
                          stopped_because=why, budget=self.scheduler.budget)
 

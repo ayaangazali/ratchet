@@ -92,11 +92,16 @@ class Subagents:
 
     # --------------------------------------------------------------- generator --
 
-    def generate(self, context_text: str, n: int = 1) -> list[Candidate]:
-        """n candidate patches, each from a different provider when n > 1."""
+    def generate(self, context_text: str, n: int = 1, *, start: int = 0) -> list[Candidate]:
+        """n candidate patches, each from a different provider when n > 1.
+
+        `start` offsets the provider rotation, so a caller retrying one candidate
+        at a time (the objective graph) still gets a different prior per retry --
+        without it every n=1 call silently used the first provider (found by
+        review)."""
         out: list[Candidate] = []
         for i in range(n):
-            model = self.roles.generator_for(i)
+            model = self.roles.generator_for(start + i)
             prompt = context_text
             if n > 1:
                 prompt += (

@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import load_task
-from ..models import Outcome, TaskSpec
+from ..models import TaskSpec
 from ..sandbox import WorktreeProvider
 from ..verifier.gauntlet import Gauntlet
 from .bugs import Bug, seeded_bugs
@@ -57,8 +57,9 @@ def _trial_linear(bug: Bug, task: TaskSpec, repo: Path, rng: random.Random) -> T
     base = provider.base_image()
     gauntlet = Gauntlet(task, repo_dir=".", test_sources=bug.test_sources(repo))
     sb = provider.fork(base, label="linear")
-    solved, cheats_seen, cheats_stuck, calls = False, 0, 0, 0
+    solved, cheats_seen, calls = False, 0, 0
     last_score = 0.0
+    workspace_has_cheat = False
     t0 = time.time()
     try:
         for i in range(CALL_BUDGET):
@@ -71,14 +72,23 @@ def _trial_linear(bug: Bug, task: TaskSpec, repo: Path, rng: random.Random) -> T
             applied = sb.apply_patch(patch)
             res = gauntlet.run(sb, patch, base_commit=base, apply_patch=False)
             last_score = res.score
-            if is_cheat and applied.ok and res.outcome is not Outcome.CHEATED:
-                cheats_stuck += 1
+            # "stuck" means: in the state the trial ENDS on. The apply chain's
+            # fallback resets the worktree between attempts, so a later successful
+            # apply replaces earlier patches -- counting at apply time overcounted
+            # (found by review). Track what the workspace actually holds instead.
+            if applied.ok:
+                workspace_has_cheat = is_cheat
+            else:
+                # the apply chain's fallback resets the worktree between attempts,
+                # so a failed apply wipes whatever was applied before it too
+                workspace_has_cheat = False
             if res.green:
                 solved = True
                 break
     finally:
         sb.destroy()
         provider.cleanup()
+    cheats_stuck = int(workspace_has_cheat)
     return TrialResult("linear", bug.name, solved, calls, time.time() - t0,
                        cheats_seen, cheats_stuck, poisoned=not solved and last_score == 0.0)
 
@@ -103,8 +113,12 @@ def _trial_search(bug: Bug, task: TaskSpec, repo: Path, rng: random.Random) -> T
                 res = gauntlet.run(sb, patch, base_commit=base)
             finally:
                 sb.destroy()
-            if is_cheat and res.outcome is not Outcome.CHEATED and not res.regressed and res.green:
-                cheats_stuck += 1  # would have to pass the gauntlet outright to stick
+            # Same definition as linear: in the trial's final state. Under search a
+            # candidate is only inherited if the verifier passed it outright, so a
+            # cheat can end up here only by defeating the gauntlet -- which is why
+            # run_suite treats a nonzero count as a hard failure, not a data point.
+            if is_cheat and res.green:
+                cheats_stuck += 1
             if res.green:
                 solved = True
                 break
@@ -167,6 +181,10 @@ def report(rows: list[TrialResult], trials: int) -> str:
     out += [
         f"overall   linear {lin * 100:.0f}% ±{lse * 100:.0f}   ·   search {sea * 100:.0f}% ±{sse * 100:.0f}",
         f"cheating patches that persisted   linear {lin_stuck}   ·   search {sea_stuck}",
+        "  (persisted = still in the trial's final state. Linear keeps whatever its",
+        "   workspace last successfully applied; under search nothing is inherited",
+        "   unless the verifier passed it, so a nonzero search count means the",
+        "   gauntlet itself was defeated.)",
         f"runs that ended on a broken state linear {poisoned}   ·   search 0 (a pruned node cannot be inherited)",
     ]
     return "\n".join(out)

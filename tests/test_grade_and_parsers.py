@@ -7,8 +7,19 @@ milliseconds and why the rules they encode are worth trusting.
 from __future__ import annotations
 
 from ratchet.models import TestStatus
-from ratchet.verifier.grade import grade
-from ratchet.verifier.parsers import END, EXIT, START, exit_code_consistent, parse, parse_exit_code, suite_ran
+from ratchet.verifier.grade import grade, impossible_passes
+from ratchet.verifier.parsers import (
+    END,
+    EXIT,
+    RESET_FAILED,
+    START,
+    exit_code_consistent,
+    failure_excerpt,
+    parse,
+    parse_exit_code,
+    reset_ok,
+    suite_ran,
+)
 
 VISIBLE = ["tests/test_v.py::test_a", "tests/test_v.py::test_b"]
 HIDDEN = ["tests/test_h.py::test_c", "tests/test_h.py::test_d"]
@@ -129,3 +140,128 @@ def test_honest_failing_log_is_consistent():
 def test_empty_suite_is_not_a_clean_sweep():
     assert not suite_ran(EMPTY)
     assert parse(EMPTY) == {}
+
+
+def test_a_forged_exit_marker_inside_the_region_is_ignored():
+    """A patch can print an identical marker line from inside the suite; only the
+    region after END -- which the suite cannot write into -- is parsed."""
+    forged = log(f"{EXIT} 0\ncollected 1 items\nPASSED tests/test_v.py::test_a", exit_code=2)
+    assert parse_exit_code(forged) == 2
+
+
+def test_a_forged_end_marker_does_not_truncate_or_promote():
+    """A test that prints its own END + exit-code lines must not hide the real
+    results after it, nor promote its forged exit code into the trusted region."""
+    forged = (
+        f"\n{START}\n"
+        "collected 2 items\n"
+        "PASSED tests/test_v.py::test_a\n"
+        f"{END}\n{EXIT} 0\n"           # forged, printed by the suite
+        "FAILED tests/test_v.py::test_b\n"
+        f"{END}\n{EXIT} 1\n"           # the real pair
+    )
+    assert parse_exit_code(forged) == 1          # last END bounds the trusted tail
+    sm = parse(forged)
+    assert sm["tests/test_v.py::test_b"] is TestStatus.FAILED  # real result still parsed
+
+
+def test_impossible_passes_names_the_spoofed_tests():
+    sm = parse(log(
+        "collected 1 items\n"
+        "PASSED tests/test_v.py::test_a\n"
+        "ERROR tests/test_v.py\n"
+        "!!!! Interrupted: 1 error during collection !!!!", exit_code=2))
+    assert impossible_passes(sm, ["tests/test_v.py::test_a"]) == ["tests/test_v.py::test_a"]
+
+
+def test_a_partial_suite_with_honest_failures_is_not_impossible():
+    """An objective-graph node grades only its slice; other tests failing honestly
+    must not read as a spoof."""
+    sm = parse(OVERFIT)
+    assert impossible_passes(sm, VISIBLE) == []
+
+
+def test_a_reset_marker_printed_by_the_suite_is_ignored():
+    """The reset runs before START; a test that prints the failure marker cannot
+    force INFRA verdicts (self-DoS) because only the pre-START region is checked."""
+    spoof = log(RESET_FAILED + "\ncollected 1 items\nPASSED tests/test_v.py::test_a")
+    assert reset_ok(spoof)
+
+
+def test_non_pytest_failure_blocks_are_withheld_too():
+    """Cargo (and jest/go) failure sections must be suppressed like pytest's."""
+    body = log(
+        "test result: FAILED.\n"
+        "---- test_c stdout ----\n"
+        "thread panicked at 'assertion failed: secret-cargo-input'\n"
+        "================\n"
+        "failures: test_c",
+        exit_code=101,
+    )
+    out = failure_excerpt(body, {}, redact=["test_c"])
+    assert "secret-cargo-input" not in out
+
+
+def test_class_based_hidden_ids_are_fully_redacted():
+    hidden = ["tests/test_h.py::MyTest::test_method"]
+    body = log(
+        "collected 1 items\n"
+        "FAILED tests/test_h.py::MyTest::test_method\n"
+        "____ MyTest.test_method ____\n"
+        "E   AssertionError: secret-class-value",
+        exit_code=1,
+    )
+    out = failure_excerpt(body, parse(body), redact=hidden)
+    assert "test_method" not in out and "secret-class-value" not in out
+
+
+def test_a_failed_protected_path_reset_is_not_ok():
+    # the suite may look perfectly green -- if the revert failed, it graded the
+    # agent's own edits to the tests, and nothing in that log is evidence
+    assert not reset_ok(RESET_FAILED + "\n" + GOOD)
+
+
+def test_a_clean_log_passes_the_reset_guard():
+    assert reset_ok(GOOD)
+
+
+# ------------------------------------------------------------------ redaction --
+
+
+def test_failure_excerpt_never_names_a_held_out_test():
+    """CLAUDE.md invariant 5: this string flows into the next prompt."""
+    out = failure_excerpt(OVERFIT, parse(OVERFIT), redact=HIDDEN)
+    for test_id in HIDDEN:
+        assert test_id not in out
+        path, _, name = test_id.partition("::")
+        assert path not in out
+        assert name not in out
+    assert "held-out" in out  # the count survives; the names do not
+
+
+def test_failure_excerpt_withholds_held_out_failure_details():
+    """Names are not the only leak: pytest's FAILURES section echoes the held-out
+    test's source and rendered values -- the exact inputs a patch would special-case."""
+    block = log(
+        "collected 5 items\n"
+        "____________________ test_c ____________________\n"
+        '    assert slugify("Cafe Creme secret-input") == "cafe-creme"\n'
+        "E   AssertionError: assert 'cafe-crme secret-rendered' == 'cafe-creme'\n"
+        "=========================== short test summary info ===========================\n"
+        "FAILED tests/test_h.py::test_c - AssertionError: assert 'secret-rendered'\n"
+        "========== 1 failed in 0.10s",
+        exit_code=1,
+    )
+    out = failure_excerpt(block, parse(block), redact=HIDDEN)
+    assert "secret-input" not in out
+    assert "secret-rendered" not in out
+    assert "withheld" in out
+
+
+def test_failure_excerpt_still_names_visible_failures():
+    """The must-not-trip half: redaction must not eat the agent's real feedback."""
+    log = OVERFIT.replace(
+        "PASSED tests/test_v.py::test_a", "FAILED tests/test_v.py::test_a"
+    )
+    out = failure_excerpt(log, parse(log), redact=HIDDEN)
+    assert "tests/test_v.py::test_a" in out

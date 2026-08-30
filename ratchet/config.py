@@ -67,6 +67,16 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
+        # .env.example tells people to `cp .env.example .env`; honour it. A set
+        # env var always wins over the file.
+        env_file = Path(".env")
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    name, _, value = line.partition("=")
+                    if value and not os.environ.get(name.strip()):
+                        os.environ[name.strip()] = value.strip()
         gens = _env("RATCHET_GENERATORS")
         return cls(
             repo=_env("RATCHET_REPO", "demo-repo") or "demo-repo",

@@ -1,6 +1,6 @@
 .ratchet/
 demo-repo/
-.ratchet-worktrees-*/
+.ratchet-wt-*/
 __pycache__/
 *.pyc
 .venv/
@@ -9,3 +9,6 @@ __pycache__/
 .mypy_cache/
 *.egg-info/
 .env
+.ratchet-proof/
+.claude/worktrees/
+dist/

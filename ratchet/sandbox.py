@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -89,12 +90,22 @@ class WorktreeSandbox:
         self.venv = venv
 
     def _env(self) -> dict[str, str]:
-        env = dict(os.environ)
+        from .providers import scrub_env
+
+        # model-generated code executes in this sandbox; provider keys in its
+        # environment are one `print(os.environ)` away from the log
+        env = scrub_env(dict(os.environ))
         if self.venv and self.venv.exists():
             # one pre-warmed environment shared by every attempt: this is the whole
             # reason the fallback is fast enough to search with
             env["VIRTUAL_ENV"] = str(self.venv)
             env["PATH"] = f"{self.venv / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+        else:
+            # no task venv: back the sandbox with the interpreter running ratchet,
+            # so `python` and `pytest` resolve inside it. A brew/pipx install has no
+            # dev checkout on PATH, and macOS ships python3 but no bare `python` --
+            # without this, every build stage failed with "command not found".
+            env["PATH"] = f"{Path(sys.executable).parent}{os.pathsep}{env.get('PATH', '')}"
         env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
         return env
 

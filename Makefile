@@ -1,4 +1,4 @@
-.PHONY: dev test lint fmt demo redteam evals bench serve run console replay audit clean image fixture
+.PHONY: dev test lint fmt demo redteam evals bench run run-offline run-graph proof docs console dashboard mascot replay audit tree clean image fixture
 
 dev:
 	pip install -e ".[dev]"
@@ -15,7 +15,7 @@ fmt:
 demo:
 	python -m ratchet.cli demo --dir demo-repo
 
-# The verifier's own eval. Ten known cheating patterns, two controls that must pass.
+# The verifier's own eval. Eleven known cheating patterns, two controls that must pass.
 redteam:
 	python -m ratchet.cli redteam --repo demo-repo
 
@@ -31,11 +31,28 @@ bench:
 run-offline:
 	python -m ratchet.cli run --repo demo-repo --scripted demo-repo/patches/scripted.json
 
+# Exercise every claim offline and leave the evidence in .ratchet-proof/<ts>/.
+proof:
+	bash scripts/prove.sh
+
+# An objective graph run: each node fulfilled only by its tests; a node that
+# exhausts its attempts escalates to the tree search. No model, no network.
+run-graph:
+	python -m ratchet.cli graph --file objectives/demo-graph.yaml --repo demo-repo --scripted demo-repo/patches/scripted_graph.json
+
 run:
 	python -m ratchet.cli run --repo demo-repo
 
 console:
 	python -m ratchet.cli console --repo demo-repo
+
+# The same run in a browser, for anyone who would rather be handed a URL.
+dashboard:
+	python -m ratchet.cli dashboard --repo demo-repo
+
+# Redraw the dolphin from its geometry.
+mascot:
+	python scripts/make_mascot.py
 
 fixture:
 	python scripts/make_fixture.py .ratchet/fixture.bus.jsonl
@@ -43,6 +60,10 @@ fixture:
 
 replay:
 	python -m ratchet.cli replay --bus .ratchet/fixture.bus.jsonl
+
+# Fetch upstream docs through Bright Data (needs BRIGHTDATA_API_KEY in .env).
+docs:
+	python -m ratchet.cli docs httpx --topic changelog
 
 audit:
 	python -m ratchet.cli audit --repo demo-repo
