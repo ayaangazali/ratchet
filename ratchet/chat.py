@@ -256,7 +256,10 @@ class ChatSession:
             emit("error", turn.error)
             return self._finish(turn, t0)
 
-        turn.files = sorted(set(self._tracked_state()) - set(before)) or self._dirty_paths(started_at)
+        # created and edited, not one or the other: a session that added a file and
+        # changed another used to commit only the new one, leaving the edit dirty for
+        # the next turn to sweep up under its own name.
+        turn.files = sorted(set(self._tracked_state()) - set(before) | set(self._dirty_paths(started_at)))
         if not turn.files:
             turn.error = "the session finished without changing any file"
             emit("error", turn.error)
@@ -313,6 +316,12 @@ class ChatSession:
     def _dirty_paths(self, since: float = 0.0) -> list[str]:
         """Modified-in-place files, for a session that edited rather than created.
 
+        `since` is load-bearing in both branches, not just the fallback: a file the
+        user had already edited before the turn began is dirty too, and taking every
+        dirty path put somebody else's in-flight work inside this turn's commit --
+        and, in `qodo-fix`, pushed it under a Qodo finding's name. Only a file the
+        session itself wrote has an mtime past the start.
+
         Falls back to modification time outside a repo, for the same reason
         `_tracked_state` does.
         """
@@ -322,15 +331,23 @@ class ChatSession:
             r = subprocess.run(["git", "diff", "--name-only", "HEAD"], cwd=self.repo,
                                capture_output=True, text=True, timeout=60)
             if r.returncode == 0:
-                return [p for p in r.stdout.splitlines() if p and not p.startswith(".ratchet")]
+                return [p for p in r.stdout.splitlines()
+                        if p and not p.startswith(".ratchet") and self._touched_since(p, since)]
         except (OSError, subprocess.SubprocessError):
             pass
         if not since:
             return []
         return [
             rel for rel in walk_files(self.repo, limit=5000)
-            if not rel.startswith(".ratchet") and (self.repo / rel).stat().st_mtime >= since
+            if not rel.startswith(".ratchet") and self._touched_since(rel, since)
         ]
+
+    def _touched_since(self, rel: str, since: float) -> bool:
+        p = self.repo / rel
+        try:
+            return not since or p.stat().st_mtime >= since
+        except OSError:
+            return True  # deleted by the session; still this turn's change
 
     # -------------------------------------------------------------- plumbing --
 

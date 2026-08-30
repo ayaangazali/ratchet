@@ -822,6 +822,43 @@ def test_the_gate_still_applies_to_an_agentic_session_without_git(tmp_path):
     assert not turn.ok and "gauntlet blocked" in turn.error
 
 
+def test_an_agentic_turn_commits_only_what_it_touched(repo):
+    """A turn's commit is the turn's work and nothing else.
+
+    Every dirty path used to count as the session's, so an edit the user already had
+    in flight was staged, committed under the turn's intent and -- in `qodo-fix` --
+    pushed at the gate as a Qodo remediation nobody wrote. The session's own edit
+    must still land, including when it also creates a file.
+    """
+    import os
+    import time as _time
+
+    (repo / "mine.py").write_text("user was here\n")
+    (repo / "theirs.py").write_text("old\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "seed2"],
+                   cwd=repo, check=True)
+    (repo / "mine.py").write_text("user was here, twice\n")   # tracked and dirty, a minute old
+    os.utime(repo / "mine.py", (_time.time() - 60, _time.time() - 60))
+
+    class Mixed:
+        provider, model, agentic = "claude-code", "sonnet", True
+
+        def run_agentic(self, prompt, r, on_event, **kw):
+            (Path(r) / "theirs.py").write_text("new\n")   # edits
+            (Path(r) / "added.py").write_text("added\n")  # and creates
+            return "done"
+
+    turn, _ = _run(ChatSession(repo, backend=Mixed()), "fix it")
+    assert turn.ok, turn.error
+    assert turn.files == ["added.py", "theirs.py"]
+    committed = subprocess.run(["git", "show", "--name-only", "--format=", "HEAD"],
+                               cwd=repo, capture_output=True, text=True).stdout.split()
+    assert committed == ["added.py", "theirs.py"]
+    assert "mine.py" in subprocess.run(["git", "status", "--porcelain"], cwd=repo,
+                                       capture_output=True, text=True).stdout
+
+
 def test_a_chat_turn_drives_every_pane(repo, monkeypatch):
     """The complaint, as a test: the tree, the gauntlet rail, the counters and the
     waiting-on panel all sat dead through a whole session, because they are fed by

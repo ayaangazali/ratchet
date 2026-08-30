@@ -687,6 +687,18 @@ def cmd_qodo_fix(args) -> int:
               "check out the PR branch first", file=sys.stderr)
         return 2
 
+    # A remediation commit must contain the remediation and nothing else. Whatever
+    # is already dirty when the loop starts gets staged by the first turn that
+    # touches the same file, committed under a Qodo finding's name and pushed at the
+    # gate -- an edit the reviewer never saw, attributed to the reviewer.
+    dirty = sp.run(["git", "-C", str(repo), "status", "--porcelain"],
+                   capture_output=True, text=True, timeout=30).stdout.strip()
+    if dirty:
+        print(f"working tree is not clean ({len(dirty.splitlines())} change(s)) -- commit, stash "
+              "or discard them first; qodo-fix commits and pushes what each turn leaves behind",
+              file=sys.stderr)
+        return 2
+
     gate = Gate(repo, bus=bus)
     session = ChatSession(repo, bus=bus)  # the finding IS the prompt; no self-injection
     emit = lambda kind, text: print(f"  {text}")  # noqa: E731 - console narration
