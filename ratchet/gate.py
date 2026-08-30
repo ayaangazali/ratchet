@@ -15,6 +15,7 @@ demo:
 from __future__ import annotations
 
 import json
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -53,7 +54,8 @@ class Decision:
 
 class Gate:
     def __init__(self, repo: Path, bus=None) -> None:
-        self.dir = Path(repo) / ".ratchet" / "approvals"
+        self.repo = Path(repo)
+        self.dir = self.repo / ".ratchet" / "approvals"
         self.dir.mkdir(parents=True, exist_ok=True)
         self.bus = bus
 
@@ -85,6 +87,21 @@ class Gate:
         dec = Decision(False, "no human responded within the approval window")
         if self.bus:
             self.bus.emit("approval.resolved", id=req.id, approved=False, reason=dec.reason)
+        return dec
+
+    def push(self, *, summary: str, diff: str, stats: dict | None = None,
+             timeout_s: float = DEFAULT_TIMEOUT_S) -> Decision:
+        """Ask, wait, and — only on a yes — run the push.
+
+        The irreversible half lives here rather than at the call site on purpose
+        (invariant 7). A caller that holds a `Decision` can forget to check it, or
+        check it and push anyway; a caller that only has this method cannot push
+        without the request and the wait that precede it in these three lines.
+        """
+        req = self.request(action="push", summary=summary, diff=diff, stats=stats)
+        dec = self.wait(req, timeout_s=timeout_s)
+        if dec.allow:
+            subprocess.run(["git", "-C", str(self.repo), "push"], check=True, timeout=120)
         return dec
 
     def pending(self) -> list[str]:

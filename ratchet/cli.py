@@ -727,14 +727,11 @@ def cmd_qodo_fix(args) -> int:
 
         diff = sp.run(["git", "-C", str(repo), "diff", f"{before}..{after}"],
                       capture_output=True, text=True, timeout=30).stdout
-        req = gate.request(action="push",
-                           summary=f"qodo-fix PR #{pr} round {rnd}: {len(todo)} finding(s) addressed",
-                           diff=diff, stats={"pr": pr, "round": rnd, "findings": len(todo)})
-        decision = gate.wait(req)
+        decision = gate.push(summary=f"qodo-fix PR #{pr} round {rnd}: {len(todo)} finding(s) addressed",
+                             diff=diff, stats={"pr": pr, "round": rnd, "findings": len(todo)})
         if not decision.allow:
             print(f"push denied at the gate: {decision.reason or 'no reason given'}")
             return 2
-        sp.run(["git", "-C", str(repo), "push"], check=True, timeout=120)
         print("pushed -- commanding a fresh Qodo review")
 
         since = review.reviewed_at
