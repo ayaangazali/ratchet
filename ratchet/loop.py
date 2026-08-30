@@ -67,6 +67,7 @@ class SearchRun:
         bus: Bus | None = None,
         docs=None,
         skills=None,
+        qodo=None,
         parallel: bool = True,
     ) -> None:
         self.task = task
@@ -78,6 +79,7 @@ class SearchRun:
         self.bus = bus or Bus(self.repo / ".ratchet" / f"{run_id}.bus.jsonl")
         self.docs = docs
         self.skills = skills
+        self.qodo = qodo
         self.parallel = parallel
 
         self.git = GitState.start(self.repo, run_id)
@@ -218,6 +220,11 @@ class SearchRun:
         docs_text = ""
         if self.docs is not None and node.last_failure:
             docs_text = self.docs.hint_for_failure(node.last_failure) or ""
+        review_text = ""
+        if self.qodo is not None:
+            # advisory context only: the hosted review can inform the next patch,
+            # it can never gate one (green stays the gauntlet's alone)
+            review_text = self.qodo.findings_for_prompt() or ""
 
         skill_texts = self._skills_for(node, stalled=bool(hint))
 
@@ -231,6 +238,7 @@ class SearchRun:
             skills=skill_texts,
             sources=ctx_mod.editable_sources(self.repo, self.task),
             hint=hint,
+            review=review_text,
         )
         self.bus.emit("expand", node=node.id, fanout=fanout, depth=node.depth, dead_ends=len(ctx.dead_ends))
 

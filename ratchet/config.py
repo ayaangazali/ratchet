@@ -116,6 +116,8 @@ class Settings:
     trueforge_base_url: str = "http://localhost:8790"
 
     # bright data
+    #: hosted Qodo review context in prompts; RATCHET_QODO=0 turns it off
+    qodo: bool = True
     brightdata_api_key: str | None = None
     brightdata_unlocker_zone: str = "mcp_unlocker"
     scrapers_path: str = "ratchet/scrapers.yaml"
@@ -144,6 +146,7 @@ class Settings:
             max_usd=float(_env("RATCHET_MAX_USD", "3") or 3),
             patience=int(_env("RATCHET_PATIENCE", "3") or 3),
             parallel=(_env("RATCHET_PARALLEL", "1") or "1") not in ("0", "false", "no"),
+            qodo=(_env("RATCHET_QODO", "1") or "1") not in ("0", "false", "no"),
             model_cartographer=_env("RATCHET_MODEL_CARTOGRAPHER", "openai/gpt-5-mini") or "",
             model_reviewer=_env("RATCHET_MODEL_REVIEWER", "openai/gpt-5-mini") or "",
             model_researcher=_env("RATCHET_MODEL_RESEARCHER", "openai/gpt-5-mini") or "",

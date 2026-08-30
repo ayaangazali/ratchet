@@ -25,6 +25,7 @@ from pathlib import Path
 from .node import Node, Tree
 
 MAX_FAILURE = 2400
+MAX_REVIEW = 2000
 MAX_LISTING = 400
 
 #: directories never worth walking into. Pruned during the walk, not filtered
@@ -154,6 +155,7 @@ class Context:
     sources: list[tuple[str, str]] = field(default_factory=list)
     depth: int = 0
     hint: str = ""
+    review: str = ""
 
     def render(self) -> str:
         parts = [f"# Task\n{self.task}"]
@@ -196,6 +198,11 @@ class Context:
                 + "\n\n".join(blocks)
                 + "\n\nYour diff's context lines must match this text character for character."
             )
+        if self.review:
+            parts.append(
+                "# Latest Qodo review of this repo's open PR (advisory -- may lag local changes)\n"
+                + self.review[:MAX_REVIEW]
+            )
         if self.hint:
             parts.append(f"# Note\n{self.hint}")
         parts.append(
@@ -225,6 +232,7 @@ def assemble(
     skills: list[str] | None = None,
     sources: list[tuple[str, str]] | None = None,
     hint: str = "",
+    review: str = "",
 ) -> Context:
     parent = tree.nodes.get(node.parent_id) if node.parent_id else None
     dead = tree.failed_siblings(parent) if parent else []
@@ -238,6 +246,7 @@ def assemble(
         docs=docs,
         skills=list(skills or []),
         sources=list(sources or []),
+        review=review,
         depth=node.depth,
         hint=hint,
     )
