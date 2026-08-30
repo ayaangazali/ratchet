@@ -25,7 +25,6 @@ import shlex
 
 from .parsers import END, EXIT, RESET_FAILED, START
 
-
 # --------------------------------------------------------------------------- #
 # a timeout that exists everywhere
 # --------------------------------------------------------------------------- #

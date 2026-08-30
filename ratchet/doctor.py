@@ -116,8 +116,8 @@ def _check_live_call(settings, available: list[str]) -> Check:
     if not available:
         return Check("live model call", FAIL, "skipped — no models")
     from .harness.backend import HarnessBackend
-    from .harness.client import TrueForgeClient
     from .harness.catalog import resolve_roles
+    from .harness.client import TrueForgeClient
 
     try:
         resolved, _ = resolve_roles(settings.roles(), available)
