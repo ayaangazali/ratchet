@@ -27,6 +27,8 @@ from typing import Protocol
 
 PATCH_BLOCK = re.compile(r"```(?:diff|patch)\n(.*?)```", re.S)
 INTENT_LINE = re.compile(r"^\s*intent\s*:\s*(.+)$", re.I | re.M)
+#: ```file:src/pkg/mod.py  -- the whole new contents of one file
+FILE_BLOCK = re.compile(r"```file:([^\s`]+)\n(.*?)```", re.S)
 
 
 @dataclass
@@ -48,6 +50,7 @@ class Roles:
 
     cartographer: str = "openai/gpt-5-mini"
     reviewer: str = "openai/gpt-5-mini"
+    researcher: str = "openai/gpt-5-mini"
     generators: list[str] = field(
         default_factory=lambda: [
             "anthropic/claude-sonnet-4-6",
@@ -92,7 +95,9 @@ class Subagents:
 
     # --------------------------------------------------------------- generator --
 
-    def generate(self, context_text: str, n: int = 1, *, start: int = 0) -> list[Candidate]:
+    def generate(
+        self, context_text: str, n: int = 1, *, start: int = 0, sources: list[tuple[str, str]] | None = None
+    ) -> list[Candidate]:
         """n candidate patches, each from a different provider when n > 1.
 
         `start` offsets the provider rotation, so a caller retrying one candidate
@@ -111,20 +116,67 @@ class Subagents:
                     "the verifier scores every branch and keeps the best."
                 )
             text, tokens, cost = self.backend.complete(prompt, model=model, role="generator")
-            patch = self._extract_patch(text)
+            patch = self._extract_patch(text, sources)
             intent = self._extract_intent(text)
             out.append(Candidate(patch=patch, intent=intent, model=model, tokens=tokens, cost_usd=cost))
         return out
 
     @staticmethod
-    def _extract_patch(text: str) -> str:
+    def _extract_patch(text: str, sources: list[tuple[str, str]] | None = None) -> str:
         m = PATCH_BLOCK.search(text)
         if m:
             return m.group(1)
         # tolerate a bare diff with no fence
         if text.lstrip().startswith(("diff --git", "--- ")):
             return text
+        # whole-file form: build the diff ourselves rather than trusting the model to
+        # count lines. Models get the *content* of a fix right far more often than
+        # they get hunk headers right, and a patch that does not apply scores zero no
+        # matter how correct the code inside it was.
+        blocks = FILE_BLOCK.findall(text)
+        if blocks and sources is not None:
+            return Subagents._diff_from_files(blocks, sources)
         return ""
+
+    @staticmethod
+    def _diff_from_files(blocks: list[tuple[str, str]], sources: list[tuple[str, str]]) -> str:
+        """Turn `(path, new_contents)` pairs into one unified diff against `sources`.
+
+        Produced with difflib so the hunk headers are correct by construction. A path
+        the model invented has no original text and is emitted as a new file, which
+        the verifier's hygiene and cheat stages then judge on their own terms -- this
+        function's job is to be faithful, not to filter.
+        """
+        import difflib
+
+        current = dict(sources)
+        out: list[str] = []
+        for path, new_body in blocks:
+            path = path.strip()
+            old_body = current.get(path, "")
+            if not new_body.endswith("\n"):
+                new_body += "\n"
+            if old_body and not old_body.endswith("\n"):
+                old_body += "\n"
+            if old_body == new_body:
+                continue
+            hunks = list(
+                difflib.unified_diff(
+                    old_body.splitlines(keepends=True),
+                    new_body.splitlines(keepends=True),
+                    fromfile=f"a/{path}",
+                    tofile=f"b/{path}",
+                    n=3,
+                )
+            )
+            if not hunks:
+                continue
+            out.append(f"diff --git a/{path} b/{path}\n")
+            if not old_body:
+                out.append("new file mode 100644\n")
+                hunks[0] = "--- /dev/null\n"
+            out.extend(hunks)
+        return "".join(out)
 
     @staticmethod
     def _extract_intent(text: str) -> str:

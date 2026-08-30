@@ -28,7 +28,7 @@ ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 #: provider -> (openai-compatible base url or None for native, key env var, default model)
 PROVIDERS: dict[str, tuple[str | None, str, str]] = {
     "anthropic": (None, "ANTHROPIC_API_KEY", "claude-sonnet-4-6"),
-    "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-5.2"),
+    "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-4o"),
     "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY", "llama-3.3-70b-versatile"),
     "kimi": ("https://api.moonshot.ai/v1", "MOONSHOT_API_KEY", "kimi-k2-0905-preview"),
     # the Claude Code CLI you are already signed into: no API key, no wire call --
@@ -223,14 +223,28 @@ class ChatBackend:
 
     @classmethod
     def from_env(cls) -> ChatBackend:
+        # `.env` first. This line is the whole bug report: the key lived in .env,
+        # `Settings.from_env` read it and this did not, so the selector below saw no
+        # key anywhere and quietly chose `demo` -- a provider that fabricates a reply
+        # without a network call. The user had configured everything correctly and
+        # got a canned answer, which is indistinguishable from the tool being fake.
+        from .config import load_dotenv
+
+        load_dotenv()
         load_saved_keys()  # /connect persists here; a fresh session picks them up
         provider = os.environ.get("RATCHET_CHAT_PROVIDER", "").strip().lower()
         if not provider:
-            # pick the first provider with a key; fall back to the offline demo
-            provider = next(
-                (name for name, (_b, key_env, _m) in PROVIDERS.items() if key_env and os.environ.get(key_env)),
-                "demo",
-            )
+            # Preference order, and `demo` is the last resort rather than the second.
+            # TrueForge comes first when it is up: it already holds the provider
+            # credentials, it is the harness the rest of the tool routes through, and
+            # picking it keeps a direct provider SDK off the default path.
+            if trueforge_alive():
+                provider = "trueforge"
+            else:
+                provider = next(
+                    (name for name, (_b, key_env, _m) in PROVIDERS.items() if key_env and os.environ.get(key_env)),
+                    "demo",
+                )
         if provider not in PROVIDERS:
             raise ChatProviderError(f"unknown chat provider {provider!r}; known: {sorted(PROVIDERS)}")
         model = os.environ.get("RATCHET_CHAT_MODEL") or PROVIDERS[provider][2]

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from ratchet import providers
 from ratchet.chat import FILE_FENCE, ChatSession
 from ratchet.providers import PROVIDERS, ChatBackend, ChatProviderError
 
@@ -28,20 +29,50 @@ def repo(tmp_path) -> Path:
 # -------------------------------------------------------------- providers --
 
 
-def test_no_keys_means_the_offline_demo_provider(monkeypatch, tmp_path):
-    import ratchet.providers as prov
+def _blank_slate(monkeypatch, tmp_path):
+    """No keys, no overrides, and a working directory with no `.env`.
 
-    # hermetic: never read (or be influenced by) the machine's real keys.env
-    monkeypatch.setattr(prov, "KEYS_PATH", tmp_path / "keys.env")
-    monkeypatch.setattr(prov, "trueforge_alive", lambda **kw: False)
+    The chdir is not incidental. `from_env` reads `.env` now (that was the bug), so
+    a test that only clears the environment quietly picks up the developer's real key
+    when it runs from the checkout and asserts nothing.
+    """
     for _base, key_env, _model in PROVIDERS.values():
         if key_env:
             monkeypatch.delenv(key_env, raising=False)
     monkeypatch.delenv("RATCHET_CHAT_PROVIDER", raising=False)
     monkeypatch.delenv("RATCHET_CHAT_MODEL", raising=False)
+    monkeypatch.chdir(tmp_path)
+    # `/connect` persists keys to ~/.config/ratchet/keys.env and `from_env` loads
+    # them too, so a developer who has ever connected has a key these tests must not
+    # see. Point it at a path that does not exist.
+    monkeypatch.setattr(providers, "KEYS_PATH", tmp_path / "no-such-keys.env")
+
+
+def test_nothing_configured_at_all_means_the_offline_demo_provider(monkeypatch, tmp_path):
+    _blank_slate(monkeypatch, tmp_path)
+    monkeypatch.setattr(providers, "trueforge_alive", lambda **_: False)
     b = ChatBackend.from_env()
     assert b.provider == "demo"
     assert FILE_FENCE.search(b.complete("make a website for my dog"))
+
+
+def test_a_live_harness_is_preferred_over_the_demo_provider(monkeypatch, tmp_path):
+    """`demo` is the last resort, not the second choice. A running harness already
+    holds the provider credentials, so falling back past it to a canned reply is the
+    behaviour that made a configured machine look like a mock."""
+    _blank_slate(monkeypatch, tmp_path)
+    monkeypatch.setattr(providers, "trueforge_alive", lambda **_: True)
+    assert ChatBackend.from_env().provider == "trueforge"
+
+
+def test_a_key_in_dotenv_is_found(monkeypatch, tmp_path):
+    """The regression this file exists for: the key was in `.env`, `from_env` read
+    only `os.environ`, and the selector fell through to the demo provider."""
+    _blank_slate(monkeypatch, tmp_path)
+    monkeypatch.setattr(providers, "trueforge_alive", lambda **_: False)
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=sk-test-not-a-real-key\n")
+    b = ChatBackend.from_env()
+    assert b.provider == "openai", "a key in .env must not fall through to `demo`"
 
 
 def test_model_switch_and_unknown_provider():

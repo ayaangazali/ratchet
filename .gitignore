@@ -1,6 +1,10 @@
 .ratchet/
 demo-repo/
+.ratchet-worktrees-*/
 .ratchet-wt-*/
+.ratchet-work/
+tasks/*-auto.yaml
+node_modules/
 __pycache__/
 *.pyc
 .venv/

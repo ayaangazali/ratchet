@@ -1,5 +1,6 @@
 """`ratchet` — one entry point for every part of the system.
 
+    ratchet go <repo-url>                          clone, detect, probe, and start
     ratchet run "fix the auth token refresh bug"   search until green or budget out
     ratchet tree                                   the search tree, scores, live/pruned
     ratchet rewind <node>                          restore that state and branch from it
@@ -98,6 +99,163 @@ def _provider(settings: Settings, repo: Path, run_id: str):
 # --------------------------------------------------------------------------- #
 
 
+def _library(settings, repo: Path):
+    from .research.skills import SkillLibrary
+
+    root = Path(settings.skills_dir)
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    return SkillLibrary.load(root)
+
+
+def _backend(settings, scripted: str | None):
+    from .subagents import ScriptedBackend
+
+    if scripted:
+        return ScriptedBackend(json.loads(Path(scripted).read_text()))
+    from .harness.backend import HarnessBackend
+    from .harness.client import TrueForgeClient
+
+    return HarnessBackend(TrueForgeClient(settings.trueforge_base_url))
+
+
+def _papers(scraper, query: str, limit: int):
+    """Both sources through Bright Data, merged and ranked. Problems are reported,
+    not raised: half a reading list beats a traceback."""
+    from .research.sources import rank
+
+    found, problems = [], []
+    for source in ("arxiv", "huggingface"):
+        papers, probs = scraper.search(query, limit=limit * 2, source=source)
+        found += papers
+        problems += [f"{source}: {p}" for p in probs]
+    return rank(found, query, limit=limit), problems
+
+
+def cmd_research(args) -> int:
+    """Read the literature, turn it into skills, and make each one prove itself."""
+    from .research.distill import Distiller
+    from .research.scrape import PaperScraper
+    from .research.skills import ADOPTED, REJECTED
+
+    s = Settings.from_env()
+    repo = Path(args.repo or s.repo).resolve()
+    lib = _library(s, repo)
+    scraper = PaperScraper(s)
+
+    if args.research_cmd == "list":
+        if not len(lib):
+            print(f"no skills in {lib.root}/ yet — try `ratchet research distill \"<topic>\"`")
+            return 0
+        print(f"\n  {len(lib)} skill(s) in {lib.root}/\n")
+        for sk in sorted(lib, key=lambda x: (x.status, x.name)):
+            print(sk.one_line())
+        print("\n  ✓ adopted (in every prompt)   · proposed (never sent)   ✗ rejected (kept as a record)\n")
+        return 0
+
+    if args.research_cmd == "show":
+        sk = lib.get(args.name)
+        if not sk:
+            print(f"no skill {args.name!r}; `ratchet research list` shows what there is", file=sys.stderr)
+            return 1
+        print(sk.to_markdown())
+        return 0
+
+    if args.research_cmd == "search":
+        papers, problems = _papers(scraper, args.query, args.limit)
+        for why in problems:
+            print(f"  ! {why}")
+        if not papers:
+            print("nothing found — check BRIGHTDATA_API_KEY and the zones in ratchet/scrapers.yaml")
+            return 1
+        print(f"\n  {len(papers)} paper(s) for {args.query!r}\n")
+        for pp in papers:
+            print(f"  {pp.one_line()}")
+        print(f"\n  distill them:  ratchet research distill {args.query!r}\n")
+        return 0
+
+    if args.research_cmd == "distill":
+        papers, problems = _papers(scraper, args.query, args.limit)
+        for why in problems:
+            print(f"  ! {why}")
+        if not papers:
+            print("nothing found to distill", file=sys.stderr)
+            return 1
+        papers = [scraper.enrich(p) for p in papers]
+        print(f"\n  reading {len(papers)} paper(s) for {args.query!r}\n")
+        d = Distiller(_backend(s, args.scripted), s.model_researcher)
+        kept = []
+        for pp in papers:
+            print(f"  · {pp.one_line()}")
+            sk = d.distill(pp)
+            if sk is None:
+                continue
+            path = lib.save(sk)
+            kept.append(sk)
+            print(f"      -> {sk.kind}: {sk.name}   {path}")
+        print()
+        for pp, why in d.skipped:
+            print(f"  no technique · {pp.id}  {why}")
+        print(f"\n  {len(kept)} proposed skill(s), {len(d.skipped)} paper(s) with nothing actionable.")
+        if kept:
+            print("  They are PROPOSED and reach no prompt. Prove one:")
+            print(f"    ratchet research trial {kept[0].slug()} --task <task.yaml> --repo <repo>\n")
+        return 0
+
+    if args.research_cmd == "trial":
+        from .research.trial import run_trial
+        from .subagents import Subagents
+
+        sk = lib.get(args.name)
+        if not sk:
+            print(f"no skill {args.name!r}", file=sys.stderr)
+            return 1
+        task = _resolve_task(args.task or s.task_path)
+        backend = _backend(s, args.scripted)
+        agents = Subagents(backend, s.roles())
+        out = run_trial(
+            sk, task=task, repo=repo, subagents=agents,
+            provider_factory=lambda rid: _provider(s, repo, rid),
+            n=args.trials, max_nodes=args.budget,
+        )
+        print(out.report())
+        if out.n:
+            sk.trial = out.to_trial()
+            sk.status = ADOPTED if out.verdict == ADOPTED else REJECTED
+            path = lib.save(sk)
+            print(f"\n  {path} updated: status {sk.status}")
+            print("  commit it — the verdict is evidence, and it belongs in the diff.\n")
+            return 0
+        print("\n  status unchanged (still proposed).\n")
+        return 3
+
+    print("unknown research subcommand", file=sys.stderr)
+    return 1
+def cmd_go(args) -> int:
+    """One command from a URL to a live search.
+
+    Everything it needs is observable, so it observes it: the framework from the
+    files, the environment from the manifest, and the task itself from which tests
+    are red right now. See `onboard.py` for why the held-out split is interleaved.
+    """
+    from .onboard import go
+
+    try:
+        return go(
+            args.url,
+            workdir=Path(args.dir).resolve() if args.dir else None,
+            goal=args.goal,
+            run=not args.no_run,
+            console=not args.no_console,
+            budget=args.budget,
+            scripted=args.scripted,
+            probe_timeout=args.probe_timeout,
+        )
+    except RuntimeError as e:  # a clone that did not happen is not a stack trace
+        print(f"\n  {e}", file=sys.stderr)
+        return 2
+
+
 def cmd_run(args) -> int:
     from .bus import Bus
     from .loop import SearchRun
@@ -149,15 +307,24 @@ def cmd_run(args) -> int:
         scheduler=scheduler,
         bus=bus,
         docs=_docs_oracle(s, repo, bus),
+        skills=None if args.no_skills else _library(s, repo),
         parallel=s.parallel,
     )
-    print(f"run {run_id} · task {task.task_id} · provider {run.provider.name}")
+    adopted = [x for x in (run.skills or []) if x.adopted]
+    print(f"run {run_id} · task {task.task_id} · provider {run.provider.name}"
+          + (f" · {len(adopted)} adopted skill(s)" if adopted else ""))
     result = run.run()
     print(f"\n{result.stopped_because}")
     print(f"winner {result.winner.id} · score {result.winner.score:.3f} · {len(result.tree)} nodes explored")
     print(run.scheduler.budget.line())
     if result.green and not args.no_ship:
-        req, decision = run.request_ship(result.winner)
+        def _announce(req):
+            print(f"\napproval {req.id} pending — nothing ships until you answer:")
+            print(f"  approve: echo '{{\"allow\": true}}' > {repo}/.ratchet/approvals/{req.id}.json")
+            print(f"  deny:    echo '{{\"allow\": false}}' > {repo}/.ratchet/approvals/{req.id}.json")
+            print(f"  waiting up to {args.gate_timeout:.0f}s (--gate-timeout, or --no-ship to skip the gate)")
+
+        req, decision = run.request_ship(result.winner, timeout_s=args.gate_timeout, on_request=_announce)
         print(f"approval {req.id}: {'approved' if decision.allow else 'denied'} {decision.reason}")
     return 0 if result.green else 2
 
@@ -481,6 +648,23 @@ def cmd_export(args) -> int:
     print(path)
     return 0
 
+def cmd_doctor(args) -> int:
+    """Everything that has to be true before a run can work, checked in one place.
+
+    Written after three separate configuration faults each spent a full budget
+    looking like an agent that could not fix anything.
+    """
+    from . import doctor
+
+    s = Settings.from_env()
+    if args.repo:
+        s.repo = args.repo
+    if args.task:
+        s.task_path = args.task
+    checks, ok = doctor.run(s, live=not args.offline)
+    print(doctor.render(checks, ok))
+    return 0 if ok else 1
+
 
 def cmd_demo(args) -> int:
     from .demo import seed
@@ -511,6 +695,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", action="version", version=f"ratchet {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=False)
 
+    p = sub.add_parser("go", help="clone a repository, work out the task, and start searching")
+    p.add_argument("url", help="a GitHub URL, `owner/repo`, or a local path")
+    p.add_argument("--goal", help="override the auto-written task statement")
+    p.add_argument("--dir", help="where to clone (default ./.ratchet-work)")
+    p.add_argument("--budget", type=int, help="max nodes")
+    p.add_argument("--scripted", help="canned model responses; runs with no harness")
+    p.add_argument("--probe-timeout", type=int, default=600,
+                   help="seconds to let the repository's own suite run (default 600)")
+    p.add_argument("--no-run", action="store_true", help="write the task and stop")
+    p.add_argument("--no-console", action="store_true", help="search without attaching the TUI")
+    p.set_defaults(fn=cmd_go)
+
     p = sub.add_parser("run", help="search until green or the budget runs out")
     p.add_argument("goal", nargs="?", help="override the task statement")
     p.add_argument("--task")
@@ -520,7 +716,43 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--budget", type=int, help="max nodes")
     p.add_argument("--scripted", help="a JSON list of canned model responses; runs with no harness")
     p.add_argument("--no-ship", action="store_true", help="stop before the approval gate")
+    p.add_argument("--gate-timeout", type=float, default=900,
+                   help="seconds to wait for a human at the approval gate (default 900)")
+    p.add_argument("--no-skills", action="store_true", help="ignore skills/ for this run")
     p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("research", help="read papers, distil skills, and trial them")
+    rsub = p.add_subparsers(dest="research_cmd", required=True)
+
+    q = rsub.add_parser("search", help="find papers on arXiv and Hugging Face")
+    q.add_argument("query")
+    q.add_argument("--limit", type=int, default=8)
+    q.add_argument("--category", action="append", help="arXiv category, e.g. cs.SE (repeatable)")
+    q.add_argument("--repo")
+
+    q = rsub.add_parser("distill", help="turn papers into proposed skills")
+    q.add_argument("query")
+    q.add_argument("--limit", type=int, default=6)
+    q.add_argument("--category", action="append")
+    q.add_argument("--scripted", help="canned responses, for testing the plumbing")
+    q.add_argument("--repo")
+
+    q = rsub.add_parser("trial", help="A/B a proposed skill and adopt it only if it wins")
+    q.add_argument("name")
+    q.add_argument("--task")
+    q.add_argument("--repo")
+    q.add_argument("--trials", type=int, default=3)
+    q.add_argument("--budget", type=int, default=12)
+    q.add_argument("--scripted")
+
+    q = rsub.add_parser("list", help="the skill library and each skill's verdict")
+    q.add_argument("--repo")
+
+    q = rsub.add_parser("show", help="print one skill, front matter and all")
+    q.add_argument("name")
+    q.add_argument("--repo")
+
+    p.set_defaults(fn=cmd_research)
 
     p = sub.add_parser("graph", help="run an objective graph: nodes fulfilled only by their tests")
     p.add_argument("--file", help="a graph yaml (see objectives/demo-graph.yaml)")
@@ -617,6 +849,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_export)
+
+    p = sub.add_parser("doctor", help="check everything a run needs, before the run")
+    p.add_argument("--repo")
+    p.add_argument("--task")
+    p.add_argument("--offline", action="store_true", help="skip the live model call")
+    p.set_defaults(fn=cmd_doctor)
 
     p = sub.add_parser("demo", help="seed the demo repository")
     p.add_argument("--dir")

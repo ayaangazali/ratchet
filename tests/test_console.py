@@ -1,7 +1,7 @@
 """The console's invariants.
 
 Generated art and injected templates are exactly the things that break quietly: a
-sprite row loses a character and the capybara shears, a colour is edited in the
+sprite row loses a character and the dolphin shears, a colour is edited in the
 stylesheet but not in the module and the browser slowly stops matching the terminal.
 None of this needs a model, a key, a network or a terminal.
 """

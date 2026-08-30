@@ -36,6 +36,8 @@ def harness_provider(client, repo: Path) -> HarnessProvider | None:
         caps = client.capabilities() or {}
     except Exception:
         return None
+    if isinstance(caps, dict) and "data" in caps and isinstance(caps["data"], dict):
+        caps = caps["data"]  # every response on this API is wrapped; this one too
     sandbox = (caps.get("sandbox") or {}) if isinstance(caps, dict) else {}
     if not sandbox.get("enabled") and not sandbox.get("providers"):
         return None
@@ -44,3 +46,31 @@ def harness_provider(client, repo: Path) -> HarnessProvider | None:
         # primitive. Say so plainly rather than pretending; the caller falls back.
         return None
     return HarnessProvider(client, repo_url=str(repo))
+
+
+def describe_provider(settings) -> tuple[str, str]:
+    """Which sandbox provider a run would actually use, and why. For `ratchet doctor`.
+
+    Worth reporting honestly, because the answer is currently always "worktree" and
+    the documentation reads as though it might not be: `HarnessProvider` needs an
+    exec/snapshot primitive that this harness's HTTP surface does not expose, so the
+    probe in `harness_provider` returns None every time and the fallback takes over.
+    The fallback is a designed path rather than an apology -- same search, same
+    verifier -- but a tool that claims a warm-cache fork it never performs is lying
+    on a slide, so say which one ran.
+    """
+    from pathlib import Path
+
+    want = getattr(settings, "provider", "auto")
+    if want == "worktree":
+        return "worktree", "git worktrees, one per node (RATCHET_PROVIDER=worktree)"
+    try:
+        from .client import TrueForgeClient
+
+        client = TrueForgeClient(settings.trueforge_base_url, timeout=10.0)
+        provider = harness_provider(client, Path(getattr(settings, "repo", ".")))
+    except Exception as e:
+        return "worktree", f"fallback — could not probe the harness ({type(e).__name__})"
+    if provider is not None:
+        return "harness", "harness-backed sandboxes with snapshot forking"
+    return "worktree", "fallback — this harness exposes no sandbox exec/snapshot primitive"

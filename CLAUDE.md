@@ -136,6 +136,64 @@ npx -p @brightdata/cli brightdata skill add scraper-studio
 
 ---
 
+## Research mode — papers become skills, and skills have to earn their place
+
+`ratchet research` reads the literature and turns it into instructions the coding
+agent actually uses. The rule that governs patches governs skills too: **a paper
+does not get to change how this agent works just because it was published.**
+
+```bash
+ratchet research search "reward hacking in coding agents"   # both sources, ranked
+ratchet research distill "test-time search for repair"      # papers -> proposed skills
+ratchet research trial <skill> --task <task.yaml>           # A/B it; adopt only if it wins
+ratchet research list                                       # the library and its verdicts
+```
+
+- **Skills live in `skills/*.md`, in git**, markdown with YAML front matter, exactly
+  like `scrapers.yaml` and for the same reason: a technique that exists only inside
+  a context window cannot be reviewed, diffed, blamed or reverted.
+- **`status` is load-bearing.** A freshly distilled skill is `proposed` and reaches
+  **no prompt**. It becomes `adopted` only by winning a paired A/B trial. `rejected`
+  skills stay in the repository on purpose — a technique that sounded good and did
+  not work is a more useful record than silence.
+- **Never edit a `trial:` block by hand.** It is measured output, and it is the
+  evidence the skill is carrying its weight in every prompt it appears in.
+- **Break-even is a rejection.** Every skill costs context in every prompt, so a tie
+  is a loss, not a draw.
+- **A scripted backend cannot be A/B'd** — it never reads the prompt, so both arms
+  are identical by construction. `trial` detects this and refuses to issue a verdict
+  rather than printing two matching numbers that look like evidence.
+
+### Paper sources — Bright Data, not the APIs
+
+There is deliberately **no arXiv or Hugging Face API client in this repository**.
+Both are read through Bright Data like every other outside-world fetch, configured
+under `papers:` in `ratchet/scrapers.yaml`. One way out means one thing to
+configure, one thing to authenticate, and one thing to fix when the web moves.
+
+- **Zones are per source, because Bright Data's access policy is per host.** The
+  unblocker zone serves `huggingface.co` and refuses `arxiv.org` outright (*"not
+  available for immediate residential (no KYC) access mode in accordance with
+  robots.txt"*); an ISP zone serves arXiv. Hard-code one zone and one source is
+  always broken, so `zones:` sits next to `url:` and is tried in order.
+- **Extract by the `arXiv:<id>` marker, never by a CSS class.** arXiv can restyle
+  its search page whenever it likes; the day it stops printing an id beside each
+  result is the day it stops being arXiv.
+- **Inline tags must not break a line.** arXiv wraps every matched query term in a
+  highlight span, so turning every tag into a newline shatters exactly the titles
+  you searched for. See `_INLINE` in `research/scrape.py`.
+- **A refusal is not an empty result.** Bright Data returns its own error as a 200
+  with a short body. `BLOCKED_MARKERS` catches it, because otherwise a broken
+  pipeline reports "no papers on this topic" and looks like a quiet field.
+- **Hugging Face `?q=` is applied client-side**, so that listing is the trending
+  feed rather than a search. It is ranked locally by relevance, and upvotes are
+  only ever a tiebreak — sort by popularity and you get this week's most-liked
+  papers whatever was asked for.
+- Set `BRIGHTDATA_API_KEY` in `.env` (gitignored; `Settings.from_env` loads it).
+
+
+---
+
 ## Qodo — every change goes through a reviewed pull request
 
 The submission requires the review trail, and the project's thesis is that unverified

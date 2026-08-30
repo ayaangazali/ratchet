@@ -24,6 +24,24 @@ except Exception:  # pragma: no cover
 DEFAULT_GENERATORS = ["anthropic/claude-sonnet-4-6", "openai/gpt-5.2", "google-gemini/gemini-3-pro"]
 
 
+def load_dotenv(path: str | Path = ".env") -> None:
+    """Read `.env` into the environment, without overriding what is already set.
+
+    A real key in a gitignored file is the difference between a demo that works and
+    one that needs three exports typed correctly under pressure. Existing variables
+    win, so an explicit export still beats the file.
+    """
+    p = Path(path)
+    if not p.exists():
+        return
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
 def _env(name: str, default: str | None = None) -> str | None:
     v = os.environ.get(name)
     return v if v not in (None, "") else default
@@ -50,6 +68,7 @@ class Settings:
     # models, by role
     model_cartographer: str = "openai/gpt-5-mini"
     model_reviewer: str = "openai/gpt-5-mini"
+    model_researcher: str = "openai/gpt-5-mini"
     model_generators: list[str] = field(default_factory=lambda: list(DEFAULT_GENERATORS))
 
     # harness
@@ -59,6 +78,10 @@ class Settings:
     brightdata_api_key: str | None = None
     brightdata_unlocker_zone: str = "mcp_unlocker"
     scrapers_path: str = "ratchet/scrapers.yaml"
+
+    # research mode: skills live in the repository, in git, like scrapers.yaml
+    skills_dir: str = "skills"
+    research_cache_dir: str = ".ratchet/research-cache"
     docs_cache_dir: str = ".ratchet/docs-cache"
 
     # git
@@ -67,16 +90,7 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
-        # .env.example tells people to `cp .env.example .env`; honour it. A set
-        # env var always wins over the file.
-        env_file = Path(".env")
-        if env_file.exists():
-            for line in env_file.read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    name, _, value = line.partition("=")
-                    if value and not os.environ.get(name.strip()):
-                        os.environ[name.strip()] = value.strip()
+        load_dotenv()
         gens = _env("RATCHET_GENERATORS")
         return cls(
             repo=_env("RATCHET_REPO", "demo-repo") or "demo-repo",
@@ -91,11 +105,14 @@ class Settings:
             parallel=(_env("RATCHET_PARALLEL", "1") or "1") not in ("0", "false", "no"),
             model_cartographer=_env("RATCHET_MODEL_CARTOGRAPHER", "openai/gpt-5-mini") or "",
             model_reviewer=_env("RATCHET_MODEL_REVIEWER", "openai/gpt-5-mini") or "",
+            model_researcher=_env("RATCHET_MODEL_RESEARCHER", "openai/gpt-5-mini") or "",
             model_generators=[m.strip() for m in gens.split(",")] if gens else list(DEFAULT_GENERATORS),
             trueforge_base_url=_env("TRUEFORGE_BASE_URL", "http://localhost:8790") or "",
             brightdata_api_key=_env("BRIGHTDATA_API_KEY") or _env("API_TOKEN"),
             brightdata_unlocker_zone=_env("BRIGHTDATA_UNLOCKER_ZONE", "mcp_unlocker") or "mcp_unlocker",
             scrapers_path=_env("RATCHET_SCRAPERS", "ratchet/scrapers.yaml") or "",
+            skills_dir=_env("RATCHET_SKILLS", "skills") or "skills",
+            research_cache_dir=_env("RATCHET_RESEARCH_CACHE", ".ratchet/research-cache") or "",
             docs_cache_dir=_env("RATCHET_DOCS_CACHE", ".ratchet/docs-cache") or "",
             base_branch=_env("RATCHET_BASE_BRANCH", "main") or "main",
             remote=_env("RATCHET_REMOTE", "origin") or "origin",
@@ -107,6 +124,7 @@ class Settings:
         return Roles(
             cartographer=self.model_cartographer,
             reviewer=self.model_reviewer,
+            researcher=self.model_researcher,
             generators=list(self.model_generators),
         )
 
